@@ -99,6 +99,11 @@ const navItemsByRole: Record<UserRole, PaletteItem[]> = {
     { label: 'Profil', page: 'profile', icon: User },
     { label: 'Aide', page: 'help', icon: Lightbulb },
   ],
+  CAISSIER: [
+    { label: 'Caisse', page: 'caisse', icon: DollarSign },
+    { label: 'Profil', page: 'profile', icon: User },
+    { label: 'Aide', page: 'help', icon: Lightbulb },
+  ],
 };
 
 function fuzzyMatch(query: string, text: string): boolean {

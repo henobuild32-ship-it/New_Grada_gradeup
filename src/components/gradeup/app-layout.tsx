@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import Image from 'next/image';
 import { useAppStore } from '@/lib/store';
 import { usePWAInstall } from '@/hooks/use-pwa-install';
 import PWAInstallDialog from './pwa-install-dialog';
