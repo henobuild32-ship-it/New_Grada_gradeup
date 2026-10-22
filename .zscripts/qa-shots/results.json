@@ -1,0 +1,450 @@
+[
+  {
+    "ok": true,
+    "label": "ADMIN 360x640 — pas de scroll horizontal",
+    "detail": "scrollWidth=360 innerWidth=360"
+  },
+  {
+    "ok": true,
+    "label": "ADMIN 360x640 — bottom nav présente"
+  },
+  {
+    "ok": true,
+    "label": "ADMIN 360x640 — 5 entrées bottom nav (4 + Plus)",
+    "detail": "count=5"
+  },
+  {
+    "ok": true,
+    "label": "ADMIN 360x640 — cibles bottom nav ≥ ~44px (min-dimension)",
+    "detail": "min=56.0"
+  },
+  {
+    "ok": true,
+    "label": "ADMIN 360x640 — tiroir « Plus » ouvre"
+  },
+  {
+    "ok": true,
+    "label": "ADMIN 360x640 — thème sombre appliqué",
+    "detail": "classDark=true bg=lab(3.02674 -0.179462 -2.15476) lum=3.03"
+  },
+  {
+    "ok": true,
+    "label": "ADMIN 360x640 — pas de scroll horizontal (sombre)",
+    "detail": "scrollWidth=360 innerWidth=360"
+  },
+  {
+    "ok": true,
+    "label": "ADMIN 390x844 — pas de scroll horizontal",
+    "detail": "scrollWidth=390 innerWidth=390"
+  },
+  {
+    "ok": true,
+    "label": "ADMIN 390x844 — bottom nav présente"
+  },
+  {
+    "ok": true,
+    "label": "ADMIN 390x844 — 5 entrées bottom nav (4 + Plus)",
+    "detail": "count=5"
+  },
+  {
+    "ok": true,
+    "label": "ADMIN 390x844 — cibles bottom nav ≥ ~44px (min-dimension)",
+    "detail": "min=56.0"
+  },
+  {
+    "ok": true,
+    "label": "ADMIN 390x844 — tiroir « Plus » ouvre"
+  },
+  {
+    "ok": true,
+    "label": "ADMIN 390x844 — thème sombre appliqué",
+    "detail": "classDark=true bg=lab(3.02674 -0.179462 -2.15476) lum=3.03"
+  },
+  {
+    "ok": true,
+    "label": "ADMIN 390x844 — pas de scroll horizontal (sombre)",
+    "detail": "scrollWidth=390 innerWidth=390"
+  },
+  {
+    "ok": true,
+    "label": "ADMIN 768x1024 — pas de scroll horizontal",
+    "detail": "scrollWidth=768 innerWidth=768"
+  },
+  {
+    "ok": true,
+    "label": "ADMIN 768x1024 — bottom nav absente sur tablette"
+  },
+  {
+    "ok": true,
+    "label": "ADMIN 768x1024 — sidebar présente (≥768px)"
+  },
+  {
+    "ok": true,
+    "label": "ADMIN 768x1024 — thème sombre appliqué",
+    "detail": "classDark=true bg=lab(3.02674 -0.179462 -2.15476) lum=3.03"
+  },
+  {
+    "ok": true,
+    "label": "ADMIN 768x1024 — pas de scroll horizontal (sombre)",
+    "detail": "scrollWidth=768 innerWidth=768"
+  },
+  {
+    "ok": true,
+    "label": "ADMIN 1280x800 — pas de scroll horizontal",
+    "detail": "scrollWidth=1280 innerWidth=1280"
+  },
+  {
+    "ok": true,
+    "label": "ADMIN 1280x800 — bottom nav absente sur desktop"
+  },
+  {
+    "ok": true,
+    "label": "ADMIN 1280x800 — sidebar présente (≥768px)"
+  },
+  {
+    "ok": true,
+    "label": "ADMIN 1280x800 — thème sombre appliqué",
+    "detail": "classDark=true bg=lab(3.02674 -0.179462 -2.15476) lum=3.03"
+  },
+  {
+    "ok": true,
+    "label": "ADMIN 1280x800 — pas de scroll horizontal (sombre)",
+    "detail": "scrollWidth=1280 innerWidth=1280"
+  },
+  {
+    "ok": true,
+    "label": "TEACHER 360x640 — pas de scroll horizontal",
+    "detail": "scrollWidth=360 innerWidth=360"
+  },
+  {
+    "ok": true,
+    "label": "TEACHER 360x640 — bottom nav présente"
+  },
+  {
+    "ok": true,
+    "label": "TEACHER 360x640 — 5 entrées bottom nav (4 + Plus)",
+    "detail": "count=5"
+  },
+  {
+    "ok": true,
+    "label": "TEACHER 360x640 — cibles bottom nav ≥ ~44px (min-dimension)",
+    "detail": "min=56.0"
+  },
+  {
+    "ok": true,
+    "label": "TEACHER 360x640 — tiroir « Plus » ouvre"
+  },
+  {
+    "ok": true,
+    "label": "TEACHER 360x640 — thème sombre appliqué",
+    "detail": "classDark=true bg=lab(3.02674 -0.179462 -2.15476) lum=3.03"
+  },
+  {
+    "ok": true,
+    "label": "TEACHER 360x640 — pas de scroll horizontal (sombre)",
+    "detail": "scrollWidth=360 innerWidth=360"
+  },
+  {
+    "ok": true,
+    "label": "TEACHER 390x844 — pas de scroll horizontal",
+    "detail": "scrollWidth=390 innerWidth=390"
+  },
+  {
+    "ok": true,
+    "label": "TEACHER 390x844 — bottom nav présente"
+  },
+  {
+    "ok": true,
+    "label": "TEACHER 390x844 — 5 entrées bottom nav (4 + Plus)",
+    "detail": "count=5"
+  },
+  {
+    "ok": true,
+    "label": "TEACHER 390x844 — cibles bottom nav ≥ ~44px (min-dimension)",
+    "detail": "min=56.0"
+  },
+  {
+    "ok": true,
+    "label": "TEACHER 390x844 — tiroir « Plus » ouvre"
+  },
+  {
+    "ok": true,
+    "label": "TEACHER 390x844 — thème sombre appliqué",
+    "detail": "classDark=true bg=lab(3.02674 -0.179462 -2.15476) lum=3.03"
+  },
+  {
+    "ok": true,
+    "label": "TEACHER 390x844 — pas de scroll horizontal (sombre)",
+    "detail": "scrollWidth=390 innerWidth=390"
+  },
+  {
+    "ok": true,
+    "label": "TEACHER 768x1024 — pas de scroll horizontal",
+    "detail": "scrollWidth=768 innerWidth=768"
+  },
+  {
+    "ok": true,
+    "label": "TEACHER 768x1024 — bottom nav absente sur tablette"
+  },
+  {
+    "ok": true,
+    "label": "TEACHER 768x1024 — sidebar présente (≥768px)"
+  },
+  {
+    "ok": true,
+    "label": "TEACHER 768x1024 — thème sombre appliqué",
+    "detail": "classDark=true bg=lab(3.02674 -0.179462 -2.15476) lum=3.03"
+  },
+  {
+    "ok": true,
+    "label": "TEACHER 768x1024 — pas de scroll horizontal (sombre)",
+    "detail": "scrollWidth=768 innerWidth=768"
+  },
+  {
+    "ok": true,
+    "label": "TEACHER 1280x800 — pas de scroll horizontal",
+    "detail": "scrollWidth=1280 innerWidth=1280"
+  },
+  {
+    "ok": true,
+    "label": "TEACHER 1280x800 — bottom nav absente sur desktop"
+  },
+  {
+    "ok": true,
+    "label": "TEACHER 1280x800 — sidebar présente (≥768px)"
+  },
+  {
+    "ok": true,
+    "label": "TEACHER 1280x800 — thème sombre appliqué",
+    "detail": "classDark=true bg=lab(3.02674 -0.179462 -2.15476) lum=3.03"
+  },
+  {
+    "ok": true,
+    "label": "TEACHER 1280x800 — pas de scroll horizontal (sombre)",
+    "detail": "scrollWidth=1280 innerWidth=1280"
+  },
+  {
+    "ok": true,
+    "label": "STUDENT 360x640 — pas de scroll horizontal",
+    "detail": "scrollWidth=360 innerWidth=360"
+  },
+  {
+    "ok": true,
+    "label": "STUDENT 360x640 — bottom nav présente"
+  },
+  {
+    "ok": true,
+    "label": "STUDENT 360x640 — 5 entrées bottom nav (4 + Plus)",
+    "detail": "count=5"
+  },
+  {
+    "ok": true,
+    "label": "STUDENT 360x640 — cibles bottom nav ≥ ~44px (min-dimension)",
+    "detail": "min=56.0"
+  },
+  {
+    "ok": true,
+    "label": "STUDENT 360x640 — tiroir « Plus » ouvre"
+  },
+  {
+    "ok": true,
+    "label": "STUDENT 360x640 — thème sombre appliqué",
+    "detail": "classDark=true bg=lab(3.02674 -0.179462 -2.15476) lum=3.03"
+  },
+  {
+    "ok": true,
+    "label": "STUDENT 360x640 — pas de scroll horizontal (sombre)",
+    "detail": "scrollWidth=360 innerWidth=360"
+  },
+  {
+    "ok": true,
+    "label": "STUDENT 390x844 — pas de scroll horizontal",
+    "detail": "scrollWidth=390 innerWidth=390"
+  },
+  {
+    "ok": true,
+    "label": "STUDENT 390x844 — bottom nav présente"
+  },
+  {
+    "ok": true,
+    "label": "STUDENT 390x844 — 5 entrées bottom nav (4 + Plus)",
+    "detail": "count=5"
+  },
+  {
+    "ok": true,
+    "label": "STUDENT 390x844 — cibles bottom nav ≥ ~44px (min-dimension)",
+    "detail": "min=56.0"
+  },
+  {
+    "ok": true,
+    "label": "STUDENT 390x844 — tiroir « Plus » ouvre"
+  },
+  {
+    "ok": true,
+    "label": "STUDENT 390x844 — thème sombre appliqué",
+    "detail": "classDark=true bg=lab(3.02674 -0.179462 -2.15476) lum=3.03"
+  },
+  {
+    "ok": true,
+    "label": "STUDENT 390x844 — pas de scroll horizontal (sombre)",
+    "detail": "scrollWidth=390 innerWidth=390"
+  },
+  {
+    "ok": true,
+    "label": "STUDENT 768x1024 — pas de scroll horizontal",
+    "detail": "scrollWidth=768 innerWidth=768"
+  },
+  {
+    "ok": true,
+    "label": "STUDENT 768x1024 — bottom nav absente sur tablette"
+  },
+  {
+    "ok": true,
+    "label": "STUDENT 768x1024 — sidebar présente (≥768px)"
+  },
+  {
+    "ok": true,
+    "label": "STUDENT 768x1024 — thème sombre appliqué",
+    "detail": "classDark=true bg=lab(3.02674 -0.179462 -2.15476) lum=3.03"
+  },
+  {
+    "ok": true,
+    "label": "STUDENT 768x1024 — pas de scroll horizontal (sombre)",
+    "detail": "scrollWidth=768 innerWidth=768"
+  },
+  {
+    "ok": true,
+    "label": "STUDENT 1280x800 — pas de scroll horizontal",
+    "detail": "scrollWidth=1280 innerWidth=1280"
+  },
+  {
+    "ok": true,
+    "label": "STUDENT 1280x800 — bottom nav absente sur desktop"
+  },
+  {
+    "ok": true,
+    "label": "STUDENT 1280x800 — sidebar présente (≥768px)"
+  },
+  {
+    "ok": true,
+    "label": "STUDENT 1280x800 — thème sombre appliqué",
+    "detail": "classDark=true bg=lab(3.02674 -0.179462 -2.15476) lum=3.03"
+  },
+  {
+    "ok": true,
+    "label": "STUDENT 1280x800 — pas de scroll horizontal (sombre)",
+    "detail": "scrollWidth=1280 innerWidth=1280"
+  },
+  {
+    "ok": true,
+    "label": "PARENT 360x640 — pas de scroll horizontal",
+    "detail": "scrollWidth=360 innerWidth=360"
+  },
+  {
+    "ok": true,
+    "label": "PARENT 360x640 — bottom nav présente"
+  },
+  {
+    "ok": true,
+    "label": "PARENT 360x640 — 5 entrées bottom nav (4 + Plus)",
+    "detail": "count=5"
+  },
+  {
+    "ok": true,
+    "label": "PARENT 360x640 — cibles bottom nav ≥ ~44px (min-dimension)",
+    "detail": "min=56.0"
+  },
+  {
+    "ok": true,
+    "label": "PARENT 360x640 — tiroir « Plus » ouvre"
+  },
+  {
+    "ok": true,
+    "label": "PARENT 360x640 — thème sombre appliqué",
+    "detail": "classDark=true bg=lab(3.02674 -0.179462 -2.15476) lum=3.03"
+  },
+  {
+    "ok": true,
+    "label": "PARENT 360x640 — pas de scroll horizontal (sombre)",
+    "detail": "scrollWidth=360 innerWidth=360"
+  },
+  {
+    "ok": true,
+    "label": "PARENT 390x844 — pas de scroll horizontal",
+    "detail": "scrollWidth=390 innerWidth=390"
+  },
+  {
+    "ok": true,
+    "label": "PARENT 390x844 — bottom nav présente"
+  },
+  {
+    "ok": true,
+    "label": "PARENT 390x844 — 5 entrées bottom nav (4 + Plus)",
+    "detail": "count=5"
+  },
+  {
+    "ok": true,
+    "label": "PARENT 390x844 — cibles bottom nav ≥ ~44px (min-dimension)",
+    "detail": "min=56.0"
+  },
+  {
+    "ok": true,
+    "label": "PARENT 390x844 — tiroir « Plus » ouvre"
+  },
+  {
+    "ok": true,
+    "label": "PARENT 390x844 — thème sombre appliqué",
+    "detail": "classDark=true bg=lab(3.02674 -0.179462 -2.15476) lum=3.03"
+  },
+  {
+    "ok": true,
+    "label": "PARENT 390x844 — pas de scroll horizontal (sombre)",
+    "detail": "scrollWidth=390 innerWidth=390"
+  },
+  {
+    "ok": true,
+    "label": "PARENT 768x1024 — pas de scroll horizontal",
+    "detail": "scrollWidth=768 innerWidth=768"
+  },
+  {
+    "ok": true,
+    "label": "PARENT 768x1024 — bottom nav absente sur tablette"
+  },
+  {
+    "ok": true,
+    "label": "PARENT 768x1024 — sidebar présente (≥768px)"
+  },
+  {
+    "ok": true,
+    "label": "PARENT 768x1024 — thème sombre appliqué",
+    "detail": "classDark=true bg=lab(3.02674 -0.179462 -2.15476) lum=3.03"
+  },
+  {
+    "ok": true,
+    "label": "PARENT 768x1024 — pas de scroll horizontal (sombre)",
+    "detail": "scrollWidth=768 innerWidth=768"
+  },
+  {
+    "ok": true,
+    "label": "PARENT 1280x800 — pas de scroll horizontal",
+    "detail": "scrollWidth=1280 innerWidth=1280"
+  },
+  {
+    "ok": true,
+    "label": "PARENT 1280x800 — bottom nav absente sur desktop"
+  },
+  {
+    "ok": true,
+    "label": "PARENT 1280x800 — sidebar présente (≥768px)"
+  },
+  {
+    "ok": true,
+    "label": "PARENT 1280x800 — thème sombre appliqué",
+    "detail": "classDark=true bg=lab(3.02674 -0.179462 -2.15476) lum=3.03"
+  },
+  {
+    "ok": true,
+    "label": "PARENT 1280x800 — pas de scroll horizontal (sombre)",
+    "detail": "scrollWidth=1280 innerWidth=1280"
+  }
+]

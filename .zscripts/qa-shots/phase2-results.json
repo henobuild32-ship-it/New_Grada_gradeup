@@ -1,0 +1,78 @@
+[
+  {
+    "ok": true,
+    "label": "Manifest : nom GradeUp",
+    "detail": "GradeUp – Plateforme Scolaire"
+  },
+  {
+    "ok": true,
+    "label": "Manifest : display standalone",
+    "detail": "standalone"
+  },
+  {
+    "ok": true,
+    "label": "Manifest : theme color",
+    "detail": "#3b82f6"
+  },
+  {
+    "ok": true,
+    "label": "Manifest : icône 192"
+  },
+  {
+    "ok": true,
+    "label": "Manifest : icône 512"
+  },
+  {
+    "ok": true,
+    "label": "Manifest : icône maskable",
+    "detail": "[\"any\",\"any\",\"maskable\"]"
+  },
+  {
+    "ok": true,
+    "label": "SW actif",
+    "detail": "http://localhost:3000/"
+  },
+  {
+    "ok": true,
+    "label": "Background Sync supporté (informatif)",
+    "detail": "oui"
+  },
+  {
+    "ok": true,
+    "label": "Base gradeup-local ouverte",
+    "detail": "[\"gradeup-local\",\"serwist-expiration\"]"
+  },
+  {
+    "ok": true,
+    "label": "Tables Dexie présentes",
+    "detail": "20 tables"
+  },
+  {
+    "ok": true,
+    "label": "Page /offline rend le secours",
+    "detail": "Vous êtes hors ligne\n\nGradeUp n'a pas pu charger cette page "
+  },
+  {
+    "ok": true,
+    "label": "Centre de sync accessible",
+    "detail": ""
+  },
+  {
+    "ok": true,
+    "label": "Action outbox persistée dans Dexie",
+    "detail": "count=1"
+  },
+  {
+    "ok": true,
+    "label": "Indicateur « hors ligne » affiché en mode avion"
+  },
+  {
+    "ok": true,
+    "label": "File conservée hors ligne (pas de flush)",
+    "detail": "pending=1"
+  },
+  {
+    "ok": true,
+    "label": "Retour en ligne détecté"
+  }
+]
