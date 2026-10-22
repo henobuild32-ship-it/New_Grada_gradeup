@@ -163,7 +163,7 @@ export default function AdminDashboard() {
         const localStudents = await db.users
           .where('schoolId')
           .equals(user?.schoolId || '')
-          .filter((u) => u.role === 'STUDENT' && !u.deletedAt && (u.fullName.toLowerCase().includes(q) || (u.email && u.email.toLowerCase().includes(q)) || (u.matricule && u.matricule.toLowerCase().includes(q))))
+          .filter((u) => Boolean(u.role === 'STUDENT' && !u.deletedAt && (u.fullName.toLowerCase().includes(q) || (u.email && u.email.toLowerCase().includes(q)) || (u.matricule && u.matricule.toLowerCase().includes(q)))))
           .limit(10)
           .toArray();
         setSearchResults(localStudents as any);
