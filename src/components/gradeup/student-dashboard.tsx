@@ -9,7 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { toast } from 'sonner';
-import { TrendingUp, BookOpen, CalendarX, CreditCard, User, Bell, FileText, Clock, Sparkles, Award, Key, Copy, Check, RefreshCw, Users, CalendarDays } from 'lucide-react';
+import { TrendingUp, BookOpen, CalendarX, CreditCard, User, Bell, FileText, Clock, Sparkles, Award, Key, Copy, Check, Users, CalendarDays } from 'lucide-react';
 import { AttendanceTrendChart } from './charts-widget';
 import PresenceWidget from './presence-widget';
 import WeeklyScheduleView from './weekly-schedule-view';
@@ -45,8 +45,7 @@ export default function StudentDashboard() {
   const [schedules, setSchedules] = useState<any[]>([]);
   const [homework, setHomework] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [parentCode, setParentCode] = useState(user?.parentCode || '');
-  const [generatingCode, setGeneratingCode] = useState(false);
+  const parentCode = user?.parentCode || '';
   const [codeCopied, setCodeCopied] = useState(false);
 
   const classId = user?.classEnrollments?.[0]?.classId;
@@ -309,7 +308,7 @@ export default function StudentDashboard() {
         <WeeklyScheduleView schoolId={user.schoolId} classId={classId} classNameLabel={className} />
       )}
 
-      {/* Parent Code Card */}
+      {/* Student Code Card */}
       <Card className="relative overflow-hidden transition-all duration-300 hover:shadow-lg hover:-translate-y-0.5">
         <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-amber-400 via-orange-400 to-amber-500" />
         <CardContent className="p-6">
@@ -319,8 +318,8 @@ export default function StudentDashboard() {
                 <Users className="h-6 w-6" />
               </div>
               <div>
-                <h3 className="text-base font-bold">Code Parent</h3>
-                <p className="text-xs text-muted-foreground mt-0.5">Partagez ce code avec vos parents</p>
+                <h3 className="text-base font-bold">Code élève</h3>
+                <p className="text-xs text-muted-foreground mt-0.5">À transmettre à votre parent pour relier votre compte.</p>
               </div>
             </div>
             <div className="flex items-center gap-3">
@@ -341,35 +340,6 @@ export default function StudentDashboard() {
                   {codeCopied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
                 </button>
               </div>
-              <Button
-                variant="outline"
-                size="sm"
-                className="border-amber-300 text-amber-700 hover:bg-amber-50 hover:text-amber-800 transition-all duration-200"
-                onClick={async () => {
-                  if (!user?.id) return;
-                  setGeneratingCode(true);
-                  try {
-                    const res = await fetch('/api/parent-code', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ userId: user.id }),
-                    });
-                    const data = await res.json();
-                    if (!res.ok) throw new Error(data.error || 'Échec de la régénération');
-                    if (data.parentCode) {
-                      setParentCode(data.parentCode);
-                      toast.success('Nouveau code parent généré.');
-                    }
-                  } catch (err: any) {
-                    toast.error(err?.message || 'Impossible de régénérer le code parent.');
-                  }
-                  setGeneratingCode(false);
-                }}
-                disabled={generatingCode}
-              >
-                <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${generatingCode ? 'animate-spin' : ''}`} />
-                Régénérer
-              </Button>
             </div>
           </div>
         </CardContent>

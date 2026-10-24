@@ -52,6 +52,8 @@ export interface SessionClaims {
   schoolId: string;
   role: string;
   name: string;
+  /** Incremented after password changes to revoke all previously issued cookies. */
+  authVersion?: number;
 }
 
 export function signAccessToken(claims: SessionClaims): string {

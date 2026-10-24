@@ -1,6 +1,7 @@
-import { randomInt, randomBytes, createHash, timingSafeEqual } from 'crypto';
+import { Prisma } from '@prisma/client';
 import { db } from '@/lib/db';
 import { sendEmail } from '@/lib/email';
+import { generateOtpCode, generateOtpSalt, hashOtpCode, OTP_LENGTH, verifyOtpHash } from '@/lib/auth/otp-code';
 
 /**
  * Password reset OTP (mot de passe oublié) — tous types d'utilisateurs.
@@ -11,17 +12,14 @@ import { sendEmail } from '@/lib/email';
  */
 
 export const OTP_TTL_MS = 10 * 60 * 1000; // 10 minutes
-export const OTP_LENGTH = 6;
+export { OTP_LENGTH };
 const MAX_ATTEMPTS = 5;
 
-function hashOtp(otp: string, salt: string): string {
-  return createHash('sha256').update(`${salt}:${otp}`).digest('hex');
-}
-
-function safeEqual(a: string, b: string): boolean {
-  const bufA = Buffer.from(a);
-  const bufB = Buffer.from(b);
-  return bufA.length === bufB.length && timingSafeEqual(bufA, bufB);
+export class OtpDeliveryError extends Error {
+  constructor(message = 'Le service email ne peut pas envoyer de message actuellement.') {
+    super(message);
+    this.name = 'OtpDeliveryError';
+  }
 }
 
 async function getActivePasswordReset(userId: string) {
@@ -40,32 +38,44 @@ export async function createAndSendOtp(
   email: string,
   schoolName = 'GradeUp'
 ): Promise<string> {
-  // Invalide les OTP précédents encore actifs
-  await db.passwordReset.updateMany({
-    where: { userId, used: false },
-    data: { used: true },
-  });
+  const otp = generateOtpCode();
+  const salt = generateOtpSalt();
+  const otpHash = hashOtpCode(otp, salt);
+  const otpExpiresAt = new Date(Date.now() + OTP_TTL_MS);
 
-  const otp = randomInt(0, 10 ** OTP_LENGTH)
-    .toString()
-    .padStart(OTP_LENGTH, '0');
-  const salt = randomBytes(16).toString('hex');
-  const otpHash = hashOtp(otp, salt);
+  // The partial unique index in the migration guarantees one outstanding OTP
+  // per account even when two requests arrive at the same time.
+  let recordId = '';
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const record = await db.$transaction(async (tx) => {
+        await tx.passwordReset.updateMany({
+          where: { userId, used: false },
+          data: { used: true },
+        });
 
-  await db.passwordReset.create({
-    data: {
-      userId,
-      email,
-      otpHash,
-      otpSalt: salt,
-      otpExpiresAt: new Date(Date.now() + OTP_TTL_MS),
-    },
-  });
+        return tx.passwordReset.create({
+          data: { userId, email, otpHash, otpSalt: salt, otpExpiresAt },
+        });
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+      recordId = record.id;
+      break;
+    } catch (error) {
+      const code = (error as { code?: string })?.code;
+      if ((code !== 'P2002' && code !== 'P2034') || attempt === 2) throw error;
+    }
+  }
+
+  if (!recordId) throw new Error('Impossible de créer le code de réinitialisation.');
+
+  const safeSchoolName = schoolName.replace(/[&<>"']/g, (char) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  })[char] ?? char);
 
   const html = `
     <div style="font-family:Arial,Helvetica,sans-serif;max-width:480px;margin:auto;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden">
       <div style="background:linear-gradient(90deg,#2563eb,#6d28d9);padding:16px 24px;color:#fff">
-        <h2 style="margin:0;font-size:18px">🔐 ${schoolName} — Réinitialisation du mot de passe</h2>
+        <h2 style="margin:0;font-size:18px">🔐 ${safeSchoolName} — Réinitialisation du mot de passe</h2>
       </div>
       <div style="padding:24px">
         <p style="color:#334155;font-size:14px;line-height:1.6">Bonjour,</p>
@@ -84,31 +94,82 @@ export async function createAndSendOtp(
     </div>
   `;
 
-  await sendEmail({
-    to: email,
-    subject: `Code de réinitialisation — ${schoolName}`,
-    text: `Votre code de réinitialisation est : ${otp}. Valable 10 minutes.`,
-    html,
-  });
+  try {
+    const sent = await sendEmail({
+      to: email,
+      subject: `Code de réinitialisation — ${schoolName}`,
+      text: `Votre code de réinitialisation est : ${otp}. Valable 10 minutes.`,
+      html,
+    });
+    if (!sent) throw new OtpDeliveryError();
+  } catch (error) {
+    // A code that was not delivered must never remain usable as an unknown
+    // background credential.
+    await db.passwordReset.updateMany({
+      where: { id: recordId, used: false },
+      data: { used: true },
+    });
+    throw error instanceof OtpDeliveryError ? error : new OtpDeliveryError();
+  }
 
   return otp;
 }
 
-/**
- * Vérifie un OTP pour un utilisateur. Invalide après MAX_ATTEMPTS échecs.
- */
-export async function verifyOtp(userId: string, code: string): Promise<boolean> {
-  const isValid = await checkOtpCode(userId, code);
-  if (!isValid) return false;
+/** Verify the code, consume it, change the password and revoke prior sessions atomically. */
+export async function resetPasswordWithOtp(userId: string, code: string, passwordHash: string) {
+  if (!/^\d{6}$/.test(code)) return null;
 
-  const record = await getActivePasswordReset(userId);
-  if (!record) return false;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      return await db.$transaction(async (tx) => {
+        const now = new Date();
+        const record = await tx.passwordReset.findFirst({
+          where: { userId, used: false, otpExpiresAt: { gt: now } },
+          orderBy: { createdAt: 'desc' },
+        });
+        if (!record || record.wrongAttempts >= MAX_ATTEMPTS) return null;
 
-  await db.passwordReset.update({
-    where: { id: record.id },
-    data: { used: true },
-  });
-  return true;
+        if (!verifyOtpHash(code, record.otpSalt, record.otpHash)) {
+          const nextAttempts = record.wrongAttempts + 1;
+          await tx.passwordReset.updateMany({
+            where: { id: record.id, used: false, wrongAttempts: record.wrongAttempts },
+            data: {
+              wrongAttempts: { increment: 1 },
+              ...(nextAttempts >= MAX_ATTEMPTS ? { used: true } : {}),
+            },
+          });
+          return null;
+        }
+
+        const consumed = await tx.passwordReset.updateMany({
+          where: {
+            id: record.id,
+            userId,
+            used: false,
+            wrongAttempts: record.wrongAttempts,
+            otpExpiresAt: { gt: now },
+          },
+          data: { used: true },
+        });
+        if (consumed.count !== 1) return null;
+
+        return tx.user.update({
+          where: { id: userId },
+          data: { password: passwordHash, authVersion: { increment: 1 } },
+          include: {
+            school: true,
+            classEnrollments: { include: { class: true } },
+            children: true,
+            titulaireClasses: true,
+          },
+        });
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    } catch (error) {
+      const code = (error as { code?: string })?.code;
+      if (code !== 'P2034' || attempt === 2) throw error;
+    }
+  }
+  return null;
 }
 
 /**
@@ -117,17 +178,23 @@ export async function verifyOtp(userId: string, code: string): Promise<boolean> 
  */
 export async function checkOtpCode(userId: string, code: string): Promise<boolean> {
   if (!/^\d{6}$/.test(code)) return false;
-  const record = await getActivePasswordReset(userId);
-  if (!record) return false;
-  if (record.wrongAttempts >= MAX_ATTEMPTS) return false;
+  // Compare-and-increment prevents simultaneous guesses from overwriting one
+  // another and bypassing the attempt counter.
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const record = await getActivePasswordReset(userId);
+    if (!record || record.wrongAttempts >= MAX_ATTEMPTS) return false;
 
-  const computed = hashOtp(code, record.otpSalt);
-  if (!safeEqual(computed, record.otpHash)) {
-    await db.passwordReset.update({
-      where: { id: record.id },
-      data: { wrongAttempts: record.wrongAttempts + 1 },
+    if (verifyOtpHash(code, record.otpSalt, record.otpHash)) return true;
+
+    const nextAttempts = record.wrongAttempts + 1;
+    const changed = await db.passwordReset.updateMany({
+      where: { id: record.id, used: false, wrongAttempts: record.wrongAttempts },
+      data: {
+        wrongAttempts: { increment: 1 },
+        ...(nextAttempts >= MAX_ATTEMPTS ? { used: true } : {}),
+      },
     });
-    return false;
+    if (changed.count === 1) return false;
   }
-  return true;
+  return false;
 }

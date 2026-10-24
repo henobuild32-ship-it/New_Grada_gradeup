@@ -1,12 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/lib/db';
-import { createAndSendOtp } from '@/lib/otp';
-import { rateLimit, clientIp, rateLimitResponse } from '@/lib/api/rate-limit';
+import { createAndSendOtp, OtpDeliveryError } from '@/lib/otp';
+import { persistentRateLimit } from '@/lib/api/persistent-rate-limit';
+import { clientIp, rateLimitResponse } from '@/lib/api/rate-limit';
+import { isEmailConfigured } from '@/lib/email';
+import { findPasswordRecoveryUser, getRecoveryIdentityKey } from '@/lib/auth/password-recovery';
 
 export const runtime = 'nodejs';
 
 const GENERIC_SUCCESS_MESSAGE =
-  'Si un compte correspond à ces informations, un code OTP à 6 chiffres a été envoyé. Vérifiez aussi le dossier spam en cas de non noctification';
+  'Si un compte correspond à ces informations, un code à 6 chiffres a été envoyé. Vérifiez aussi vos courriers indésirables.';
 
 /**
  * POST /api/auth/forgot
@@ -14,69 +16,60 @@ const GENERIC_SUCCESS_MESSAGE =
  */
 export async function POST(request: NextRequest) {
   try {
-    const rl = rateLimit(`forgot:${clientIp(request)}`, 5, 15 * 60 * 1000);
-    if (!rl.ok) {
-      return NextResponse.json(rateLimitResponse(rl.retryAfterSeconds), {
+    const ipLimit = await persistentRateLimit(`password-forgot:ip:${clientIp(request)}`, 5, 15 * 60 * 1000);
+    if (!ipLimit.ok) {
+      return NextResponse.json(rateLimitResponse(ipLimit.retryAfterSeconds), {
         status: 429,
-        headers: { 'Retry-After': String(rl.retryAfterSeconds) },
+        headers: { 'Retry-After': String(ipLimit.retryAfterSeconds) },
       });
     }
-    const body = await request.json();
-    const { email, fullName, inviteCode, isAdminLogin } = body;
-
-    const normalizedEmail = (email || '').trim().toLowerCase();
-    const normalizedName = (fullName || '').trim();
-
-    if (!normalizedEmail && !normalizedName) {
+    const body = await request.json().catch(() => null);
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json({ error: 'Requête invalide.' }, { status: 400 });
+    }
+    const identity = body as Record<string, unknown>;
+    const identityKey = getRecoveryIdentityKey(identity);
+    if (identityKey.endsWith(':')) {
       return NextResponse.json(
         { error: 'Veuillez fournir votre email ou votre nom complet.' },
         { status: 400 }
       );
     }
 
-    let user: any = null;
-
-    if (normalizedEmail) {
-      if (isAdminLogin) {
-        const school = await db.school.findFirst({
-          where: { email: { equals: normalizedEmail, mode: 'insensitive' } },
-        });
-        if (school) {
-          user = await db.user.findFirst({ where: { schoolId: school.id, role: 'ADMIN' } });
-        }
-      }
-      if (!user) {
-        user = await db.user.findFirst({
-          where: { email: { equals: normalizedEmail, mode: 'insensitive' } },
-        });
-      }
+    const identityLimit = await persistentRateLimit(`password-forgot:identity:${identityKey}`, 3, 15 * 60 * 1000);
+    if (!identityLimit.ok) {
+      return NextResponse.json(rateLimitResponse(identityLimit.retryAfterSeconds), {
+        status: 429,
+        headers: { 'Retry-After': String(identityLimit.retryAfterSeconds) },
+      });
     }
 
-    if (!user && normalizedName) {
-      const where: Record<string, unknown> = { fullName: normalizedName };
-      if (inviteCode) {
-        const school = await db.school.findUnique({
-          where: { inviteCode: String(inviteCode).trim().toUpperCase() },
-        });
-        if (school) where.schoolId = school.id;
-      }
-      user = await db.user.findFirst({ where });
+    // Return the same configuration error for every identity when SMTP is not
+    // set up, so the endpoint cannot be used to enumerate accounts.
+    if (!isEmailConfigured()) {
+      return NextResponse.json(
+        { error: 'La récupération par email est temporairement indisponible. Contactez votre administrateur.' },
+        { status: 503 }
+      );
     }
 
+    const user = await findPasswordRecoveryUser(identity);
     if (!user) {
       return NextResponse.json({ message: GENERIC_SUCCESS_MESSAGE }, { status: 200 });
     }
 
-    const recipient = normalizedEmail && user.email ? user.email : user.email || null;
-    if (!recipient) {
-      return NextResponse.json(
-        { message: 'Ce compte n’a pas d’adresse email associée. Contactez votre administrateur.' },
-        { status: 200 }
-      );
-    }
+    const recipient = user.email?.trim();
+    if (!recipient) return NextResponse.json({ message: GENERIC_SUCCESS_MESSAGE }, { status: 200 });
 
-    const school = await db.school.findUnique({ where: { id: user.schoolId } });
-    await createAndSendOtp(user.id, recipient, school?.name || 'GradeUp');
+    try {
+      await createAndSendOtp(user.id, recipient, user.school?.name || 'GradeUp');
+    } catch (error) {
+      if (error instanceof OtpDeliveryError) {
+        console.error('[ForgotPassword] Delivery failed; account details withheld.');
+        return NextResponse.json({ message: GENERIC_SUCCESS_MESSAGE }, { status: 200 });
+      }
+      throw error;
+    }
 
     return NextResponse.json({ message: GENERIC_SUCCESS_MESSAGE }, { status: 200 });
   } catch (error) {

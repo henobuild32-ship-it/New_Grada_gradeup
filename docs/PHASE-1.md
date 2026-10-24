@@ -77,6 +77,15 @@ Déjà responsives sans travail : `parent-payments`, `teacher-reports` (cards), 
 ## 8. Config build
 - `next.config.ts` : `typescript.ignoreBuildErrors` supprimé (Phase 0/1) — le build échoue sur toute erreur de type.
 
+## Récupération du mot de passe par OTP
+
+- Code à 6 chiffres généré cryptographiquement, stocké seulement sous forme de hash salé, durée de vie 10 minutes et cinq essais maximum.
+- Demandes, vérifications et réinitialisations limitées par IP et identité; les réponses de demande ne révèlent pas l'existence du compte.
+- Vérification dans l'école identifiée pour les récupérations par nom; les noms ambigus n'aboutissent pas à un compte arbitraire.
+- Consommation OTP, changement de mot de passe et incrément `authVersion` transactionnels. Les cookies précédents sont refusés par `/api/auth/me` et `/api/auth/refresh`.
+- Un index unique partiel garantit un seul OTP en attente par utilisateur; les migrations ont été appliquées sur Supabase Production le 24 octobre 2026.
+- SMTP est configuré sur le projet Vercel `gradeup.com`; test de livraison réel à faire depuis une boîte de recette.
+
 ## Vérifications effectuées pendant la reprise — 2026-10-23
 - [x] npx tsc --noEmit → exit 0.
 - [x] npm run lint → exit 0.

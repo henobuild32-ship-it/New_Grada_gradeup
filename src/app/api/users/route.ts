@@ -5,6 +5,7 @@ import { authenticateRequest, authenticateRequestActive, AuthError } from '@/lib
 import { notifyUser } from '@/services/notifications/notificationEngine';
 import { hashPassword } from '@/lib/password';
 import { auditFromRequest } from '@/lib/api/audit';
+import { generateReadableCode } from '@/lib/code-generation';
 
 const adminUserCreateSchema = z.object({
   schoolId: z.string().trim().min(1),
@@ -32,15 +33,6 @@ const adminUserCreateSchema = z.object({
     ctx.addIssue({ code: 'custom', path: ['phone'], message: 'Le téléphone est obligatoire pour un professeur.' });
   }
 });
-
-function generateParentCode(): string {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  let code = 'P-';
-  for (let i = 0; i < 6; i++) {
-    code += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return code;
-}
 
 /** Re-enrôle un élève dans une classe existante; les noms ne créent jamais une classe implicite. */
 async function syncStudentClassEnrollment(userId: string, schoolId: string, classId?: string, className?: string) {
@@ -351,9 +343,9 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    let parentCodeVal = await generateParentCode();
+    let parentCodeVal = generateReadableCode('P');
     while (await db.user.findUnique({ where: { parentCode: parentCodeVal } })) {
-      parentCodeVal = generateParentCode();
+      parentCodeVal = generateReadableCode('P');
     }
 
     const issued = new Date().toISOString().slice(0, 10);

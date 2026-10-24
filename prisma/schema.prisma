@@ -120,6 +120,7 @@ model User {
   photoUrl            String    @default("")
   parentCode          String    @unique
   active              Boolean   @default(true)
+  authVersion         Int       @default(0)
   parentId            String?
   phone               String    @default("")
   parentPhone         String    @default("")
@@ -1416,6 +1417,17 @@ model AuditLog {
   @@index([schoolId, entity, entityId])
   @@index([schoolId, userId, createdAt])
   @@index([schoolId, action])
+}
+
+// Atomic, cross-instance attempt windows for public school/student code checks.
+model RateLimitBucket {
+  key       String   @id
+  count     Int      @default(0)
+  resetAt   DateTime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([resetAt])
 }
 
 model GradeSnapshot {

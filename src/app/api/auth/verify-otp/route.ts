@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/lib/db';
 import { checkOtpCode, OTP_LENGTH } from '@/lib/otp';
+import { persistentRateLimit } from '@/lib/api/persistent-rate-limit';
+import { clientIp, rateLimitResponse } from '@/lib/api/rate-limit';
+import { findPasswordRecoveryUser, getRecoveryIdentityKey } from '@/lib/auth/password-recovery';
 
 export const runtime = 'nodejs';
 
@@ -11,12 +13,23 @@ export const runtime = 'nodejs';
  */
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
-    const { email, fullName, inviteCode, isAdminLogin, code } = body;
+    const body = await request.json().catch(() => null);
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json({ error: 'Requête invalide.' }, { status: 400 });
+    }
+    const identity = body as Record<string, unknown>;
+    const ipLimit = await persistentRateLimit(`password-verify:ip:${clientIp(request)}`, 10, 15 * 60 * 1000);
+    const identityKey = getRecoveryIdentityKey(identity);
+    const identityLimit = await persistentRateLimit(`password-verify:identity:${identityKey}`, 10, 15 * 60 * 1000);
+    const limit = !ipLimit.ok ? ipLimit : identityLimit;
+    if (!limit.ok) {
+      return NextResponse.json(rateLimitResponse(limit.retryAfterSeconds), {
+        status: 429,
+        headers: { 'Retry-After': String(limit.retryAfterSeconds) },
+      });
+    }
 
-    const normalizedEmail = (email || '').trim().toLowerCase();
-    const normalizedName = (fullName || '').trim();
-    const normalizedCode = String(code || '').trim();
+    const normalizedCode = typeof identity.code === 'string' ? identity.code.trim() : '';
 
     if (!new RegExp(`^\\d{${OTP_LENGTH}}$`).test(normalizedCode)) {
       return NextResponse.json(
@@ -24,39 +37,17 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
-    if (!normalizedEmail && !normalizedName) {
+    if (identityKey.endsWith(':')) {
       return NextResponse.json({ error: 'Informations de compte manquantes.' }, { status: 400 });
     }
 
-    let user: any = null;
-
-    if (normalizedEmail) {
-      if (isAdminLogin) {
-        const school = await db.school.findFirst({
-          where: { email: { equals: normalizedEmail, mode: 'insensitive' } },
-        });
-        if (school) user = await db.user.findFirst({ where: { schoolId: school.id, role: 'ADMIN' } });
-      }
-      if (!user) {
-        user = await db.user.findFirst({
-          where: { email: { equals: normalizedEmail, mode: 'insensitive' } },
-        });
-      }
-    }
-
-    if (!user && normalizedName) {
-      const where: Record<string, unknown> = { fullName: normalizedName };
-      if (inviteCode) {
-        const school = await db.school.findUnique({
-          where: { inviteCode: String(inviteCode).trim().toUpperCase() },
-        });
-        if (school) where.schoolId = school.id;
-      }
-      user = await db.user.findFirst({ where });
-    }
+    const user = await findPasswordRecoveryUser(identity);
 
     if (!user) {
-      return NextResponse.json({ error: 'Compte introuvable.' }, { status: 404 });
+      return NextResponse.json(
+        { error: 'Code invalide ou expiré. Vérifiez vos informations ou demandez un nouveau code.' },
+        { status: 400 }
+      );
     }
 
     const ok = await checkOtpCode(user.id, normalizedCode);
@@ -67,7 +58,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    return NextResponse.json({ ok: true, userId: user.id });
+    return NextResponse.json({ ok: true });
   } catch (error) {
     console.error('[VerifyOtp] Erreur:', error);
     return NextResponse.json({ error: 'Erreur interne.' }, { status: 500 });

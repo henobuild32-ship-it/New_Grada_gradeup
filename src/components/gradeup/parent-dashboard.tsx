@@ -47,6 +47,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
+import { isStudentCodeWellFormed, normalizeStudentCode } from '@/lib/code-format';
 
 export default function ParentDashboard() {
   const { user, setCurrentPage } = useAppStore();
@@ -64,8 +65,10 @@ export default function ParentDashboard() {
   const [linking, setLinking] = useState(false);
 
   // Live code validation states
-  const [validationState, setValidationState] = useState<'idle' | 'validating' | 'valid' | 'invalid'>('idle');
+  const [validationState, setValidationState] = useState<'idle' | 'validating' | 'valid' | 'invalid' | 'network-error' | 'rate-limited'>('idle');
   const [validatedStudentName, setValidatedStudentName] = useState('');
+  const [validatedClassName, setValidatedClassName] = useState('');
+  const [validationRetry, setValidationRetry] = useState(0);
 
   const [childTouchStart, setChildTouchStart] = useState<number | null>(null);
 
@@ -90,6 +93,48 @@ export default function ParentDashboard() {
       fetchNotifications();
     }
   }, [schoolId]);
+
+  useEffect(() => {
+    const code = normalizeStudentCode(parentCodeInput);
+    if (!linkDialogOpen || !schoolId || !isStudentCodeWellFormed(code)) {
+      setValidationState('idle');
+      setValidatedStudentName('');
+      setValidatedClassName('');
+      return;
+    }
+
+    const controller = new AbortController();
+    setValidationState('validating');
+    const timer = setTimeout(async () => {
+      try {
+        const params = new URLSearchParams({ parentCode: code });
+        const response = await fetch(`/api/parent-link/validate?${params.toString()}`, { signal: controller.signal });
+        const data = await response.json().catch(() => ({}));
+        if (controller.signal.aborted) return;
+        if (response.status === 429) {
+          setValidationState('rate-limited');
+        } else if (!response.ok) {
+          setValidationState('network-error');
+        } else if (data.valid) {
+          setValidationState('valid');
+          setValidatedStudentName(data.studentName || '');
+          setValidatedClassName(data.className || 'Classe non renseignée');
+        } else {
+          setValidationState('invalid');
+          setValidatedStudentName('');
+          setValidatedClassName('');
+        }
+      } catch (error) {
+        if (controller.signal.aborted || (error instanceof Error && error.name === 'AbortError')) return;
+        setValidationState('network-error');
+      }
+    }, 350);
+
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [parentCodeInput, schoolId, linkDialogOpen, validationRetry]);
 
   const fetchChildren = async () => {
     if (!user?.id || !schoolId) return;
@@ -173,9 +218,9 @@ export default function ParentDashboard() {
   };
 
   const handleLinkChild = async () => {
-    const code = parentCodeInput.trim().toUpperCase();
+    const code = normalizeStudentCode(parentCodeInput);
     if (!code) {
-      toast.error('Veuillez entrer un code parent');
+      toast.error('Veuillez entrer le code de l’élève.');
       return;
     }
     setLinking(true);
@@ -187,59 +232,28 @@ export default function ParentDashboard() {
       });
       const data = await res.json();
       if (res.ok && data.success) {
-        toast.success(`${data.student.fullName} a été ajouté à votre suivi`);
+      toast.success(data.alreadyLinked ? 'Cet enfant figure déjà dans votre suivi.' : `${data.student.fullName} a été ajouté à votre suivi.`);
         setParentCodeInput('');
         setValidationState('idle');
+      setValidatedStudentName('');
+      setValidatedClassName('');
         setLinkDialogOpen(false);
         await fetchChildren();
       } else {
         toast.error(data.error || 'Erreur lors de l\'ajout');
       }
     } catch {
-      toast.error('Erreur lors de la liaison');
+      toast.error('Erreur de Connexion. Veuillez vérifier votre connexion internet.');
     } finally {
       setLinking(false);
     }
   };
 
-  // Real-time parent code formatter & validation hook
-  const handleCodeChange = async (val: string) => {
-    let formatted = val.toUpperCase();
-    
-    // Auto convert user input: if user types a letter, try to format P-XXXXXX
-    if (formatted.length > 0 && !formatted.startsWith('P-')) {
-      if (formatted.startsWith('P')) {
-        formatted = 'P-' + formatted.substring(1);
-      } else {
-        formatted = 'P-' + formatted;
-      }
-    }
-
-    if (formatted.length > 8) {
-      formatted = formatted.substring(0, 8);
-    }
-
-    setParentCodeInput(formatted);
-
-    // If fully formed P-XXXXXX (8 chars), validate live
-    if (formatted.match(/^P-[A-Z0-9]{6}$/)) {
-      setValidationState('validating');
-      try {
-        const res = await fetch(`/api/parent-link/validate?parentCode=${formatted}`);
-        const data = await res.json();
-        if (data.valid) {
-          setValidationState('valid');
-          setValidatedStudentName(data.studentName);
-        } else {
-          setValidationState('invalid');
-        }
-      } catch {
-        setValidationState('invalid');
-      }
-    } else {
-      setValidationState('idle');
-      setValidatedStudentName('');
-    }
+  const handleCodeChange = (value: string) => {
+    setParentCodeInput(value.toUpperCase());
+    setValidationState('idle');
+    setValidatedStudentName('');
+    setValidatedClassName('');
   };
 
   // Swipe gesture handlers for Stories switcher
@@ -359,12 +373,12 @@ export default function ParentDashboard() {
                     Lier un enfant
                   </DialogTitle>
                   <DialogDescription>
-                    Entrez le code de parrainage unique de votre enfant (ex: P-ABCDEF) pour le lier.
+                    Vérifiez le code de l’élève dans votre école, puis confirmez son nom et sa classe.
                   </DialogDescription>
                 </DialogHeader>
                 <div className="space-y-4 pt-2">
                   <div>
-                    <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Code Parent</Label>
+                    <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Code de l’élève</Label>
                     <Input
                       placeholder="P-XXXXXX"
                       value={parentCodeInput}
@@ -384,13 +398,19 @@ export default function ParentDashboard() {
                   {validationState === 'valid' && (
                     <div className="flex items-center gap-2 text-xs text-emerald-600 font-semibold bg-emerald-50 p-2.5 rounded-xl border border-emerald-100">
                       <Check className="w-4 h-4" />
-                      Élève trouvé : {validatedStudentName}
+                      Élève confirmé : {validatedStudentName} · Classe : {validatedClassName}
                     </div>
                   )}
                   {validationState === 'invalid' && (
                     <div className="flex items-center gap-2 text-xs text-red-500 font-semibold bg-red-50 p-2.5 rounded-xl border border-red-100">
                       <XCircle className="w-4 h-4" />
-                      Code incorrect ou élève introuvable.
+                      Le code n’est pas valide dans votre école.
+                    </div>
+                  )}
+                  {(validationState === 'network-error' || validationState === 'rate-limited') && (
+                    <div role="alert" className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-red-100 bg-red-50 p-2.5 text-xs font-semibold text-red-600">
+                      <span>{validationState === 'network-error' ? 'Erreur de Connexion. Veuillez vérifier votre connexion internet.' : 'Trop de tentatives. Réessayez plus tard.'}</span>
+                      <Button type="button" variant="outline" size="sm" onClick={() => setValidationRetry((value) => value + 1)}>Réessayer</Button>
                     </div>
                   )}
 
@@ -474,13 +494,13 @@ export default function ParentDashboard() {
                   <Link2 className="h-5 w-5 text-blue-600" />
                   Lier un enfant
                 </DialogTitle>
-                <DialogDescription>
-                  Entrez le code de parrainage unique de votre enfant (ex: P-ABCDEF) pour le lier.
+                  <DialogDescription>
+                  Vérifiez le code de l’élève dans votre école, puis confirmez son nom et sa classe.
                 </DialogDescription>
               </DialogHeader>
               <div className="space-y-4 pt-2">
                 <div>
-                  <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Code Parent</Label>
+                  <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Code de l’élève</Label>
                   <Input
                     placeholder="P-XXXXXX"
                     value={parentCodeInput}
@@ -500,13 +520,19 @@ export default function ParentDashboard() {
                 {validationState === 'valid' && (
                   <div className="flex items-center gap-2 text-xs text-emerald-600 font-semibold bg-emerald-50 p-2.5 rounded-xl border border-emerald-100">
                     <Check className="w-4 h-4" />
-                    Élève trouvé : {validatedStudentName}
+                    Élève confirmé : {validatedStudentName} · Classe : {validatedClassName}
                   </div>
                 )}
                 {validationState === 'invalid' && (
                   <div className="flex items-center gap-2 text-xs text-red-500 font-semibold bg-red-50 p-2.5 rounded-xl border border-red-100">
                     <XCircle className="w-4 h-4" />
-                    Code incorrect ou élève introuvable.
+                    Le code n’est pas valide dans votre école.
+                  </div>
+                )}
+                {(validationState === 'network-error' || validationState === 'rate-limited') && (
+                  <div role="alert" className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-red-100 bg-red-50 p-2.5 text-xs font-semibold text-red-600">
+                    <span>{validationState === 'network-error' ? 'Erreur de Connexion. Veuillez vérifier votre connexion internet.' : 'Trop de tentatives. Réessayez plus tard.'}</span>
+                    <Button type="button" variant="outline" size="sm" onClick={() => setValidationRetry((value) => value + 1)}>Réessayer</Button>
                   </div>
                 )}
 

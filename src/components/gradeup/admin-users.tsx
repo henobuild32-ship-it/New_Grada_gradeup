@@ -535,7 +535,7 @@ export default function AdminUsers() {
       toast.error('Aucun utilisateur à exporter');
       return;
     }
-    const headers = ['Nom Complet', 'Email', 'Rôle', 'Sexe', 'Matricule', 'Code Parent', 'Date Naissance', 'Téléphone', 'Classe', 'Statut'];
+    const headers = ['Nom Complet', 'Email', 'Rôle', 'Sexe', 'Matricule', 'Code élève', 'Date Naissance', 'Téléphone', 'Classe', 'Statut'];
     const rows = filteredUsers.map((u) => [
       u.fullName,
       u.email || '',
@@ -740,7 +740,7 @@ export default function AdminUsers() {
     navigator.clipboard.writeText(code);
     setCopiedCodeId(id);
     setTimeout(() => setCopiedCodeId(null), 2000);
-    toast.success(`Code parent copié : ${code}`);
+    toast.success(`Code élève copié : ${code}`);
   };
 
   return (
@@ -825,7 +825,7 @@ export default function AdminUsers() {
             <div className="sm:col-span-6 relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
-                placeholder="Rechercher par nom, email, matricule, code parent..."
+                placeholder="Rechercher par nom, email, matricule, code élève..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="pl-9 h-11 rounded-xl bg-background"
@@ -1009,7 +1009,7 @@ export default function AdminUsers() {
                               )}
                               {u.role === 'STUDENT' && u.parentCode && (
                                 <div className="flex items-center gap-1 mt-0.5">
-                                  <span className="text-[10px] text-muted-foreground font-mono">Parent: {u.parentCode}</span>
+                                  <span className="text-[10px] text-muted-foreground font-mono">Code élève : {u.parentCode}</span>
                                   <button onClick={() => copyParentCode(u.parentCode!, u.id)} className="text-blue-600 hover:text-blue-800">
                                     {copiedCodeId === u.id ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
                                   </button>
@@ -1129,7 +1129,7 @@ export default function AdminUsers() {
                           ) : null}
                           {u.parentCode && (
                             <div className="flex items-center gap-1.5 text-muted-foreground">
-                              <span>Code parent : <strong className="font-mono text-foreground">{u.parentCode}</strong></span>
+                              <span>Code élève : <strong className="font-mono text-foreground">{u.parentCode}</strong></span>
                               <button onClick={() => copyParentCode(u.parentCode!, u.id)} className="p-1 text-blue-600">
                                 {copiedCodeId === u.id ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
                               </button>

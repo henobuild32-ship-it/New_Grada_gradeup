@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { isInviteCodeWellFormed, isStudentCodeWellFormed, normalizeInviteCode, normalizeStudentCode } from '@/lib/code-format';
 import Image from 'next/image';
 import { LandingPage, type LandingAction } from '@/components/landing/landing-page';
 import { SiteFooter } from '@/components/landing/site-footer';
@@ -217,7 +218,6 @@ export default function AuthPage({ initialView }: { initialView?: LandingAction 
   const [forgotStep, setForgotStep] = useState<'identify' | 'otp' | 'reset'>('identify');
   const [forgotEmail, setForgotEmail] = useState('');
   const [forgotIdentity, setForgotIdentity] = useState('');
-  const [forgotOtp, setForgotOtp] = useState('');
   const [forgotNewPassword, setForgotNewPassword] = useState('');
   const [forgotConfirm, setForgotConfirm] = useState('');
   const [forgotLoading, setForgotLoading] = useState(false);
@@ -254,11 +254,16 @@ export default function AuthPage({ initialView }: { initialView?: LandingAction 
   const [joinSpecialty, setJoinSpecialty] = useState('');
   const [joinPhone, setJoinPhone] = useState('');
   const [joinLoading, setJoinLoading] = useState(false);
+  const [schoolVerification, setSchoolVerification] = useState<'idle' | 'checking' | 'valid' | 'invalid' | 'network-error' | 'rate-limited'>('idle');
+  const [schoolRetry, setSchoolRetry] = useState(0);
+  const [studentVerification, setStudentVerification] = useState<'idle' | 'checking' | 'valid' | 'invalid' | 'network-error' | 'rate-limited'>('idle');
+  const [studentRetry, setStudentRetry] = useState(0);
+  const [verifiedStudent, setVerifiedStudent] = useState<{ code: string; name: string; className: string } | null>(null);
   const [showJoinPassword, setShowJoinPassword] = useState(false);
   const [showJoinConfirmPassword, setShowJoinConfirmPassword] = useState(false);
 
   // Verification state for invite code
-  const [availableClasses, setAvailableClasses] = useState<{ id: string; name: string; level: string }[]>([]);
+  const [availableClasses, setAvailableClasses] = useState<{ id: string; name: string; level: string; cycle?: string; section?: string; option?: string }[]>([]);
   const [codeVerified, setCodeVerified] = useState(false);
   const [verifiedSchoolName, setVerifiedSchoolName] = useState('');
   const [verifyingCode, setVerifyingCode] = useState(false);
@@ -267,46 +272,125 @@ export default function AuthPage({ initialView }: { initialView?: LandingAction 
   const [createdInviteCode, setCreatedInviteCode] = useState('');
   const [codeCopied, setCodeCopied] = useState(false);
 
-  // Verify school code handler
-  const verifyInviteCode = async (code: string) => {
-    const cleanCode = (code || '').trim().toUpperCase();
-    if (!cleanCode || cleanCode.length < 5) {
-      setAvailableClasses([]);
+  const handleJoinInviteCodeChange = (value: string) => {
+    const code = value.toUpperCase();
+    setJoinInviteCode(code);
+    setCodeVerified(false);
+    setVerifiedSchoolName('');
+    setAvailableClasses([]);
+    setSchoolVerification('idle');
+    setJoinRole('STUDENT');
+    setJoinClassIds([]);
+    setJoinParentCode('');
+    setStudentVerification('idle');
+    setVerifiedStudent(null);
+    setJoinGender('');
+    setJoinBirthDate('');
+    setJoinSpecialty('');
+    setJoinPhone('');
+    setJoinFullName('');
+    setJoinEmail('');
+    setJoinPassword('');
+    setJoinConfirmPassword('');
+  };
+
+  // Verify the school code after typing pauses. Abort + effect cleanup prevent
+  // a late response for an older code from unlocking the form.
+  useEffect(() => {
+    const normalizedCode = normalizeInviteCode(joinInviteCode);
+    if (view !== 'register-user' || !isInviteCodeWellFormed(normalizedCode)) {
+      setVerifyingCode(false);
       setCodeVerified(false);
-      setVerifiedSchoolName('');
+      setSchoolVerification('idle');
       return;
     }
+
+    const controller = new AbortController();
     setVerifyingCode(true);
-    try {
-      const checkRes = await fetch(`/api/config?inviteCode=${cleanCode}`);
-      if (checkRes.ok) {
-        const data = await checkRes.json();
-        if (data.school) {
+    setSchoolVerification('checking');
+    const timer = setTimeout(async () => {
+      try {
+        const response = await fetch(`/api/join/verify-school-code?code=${encodeURIComponent(normalizedCode)}`, { signal: controller.signal });
+        const data = await response.json().catch(() => ({}));
+        if (controller.signal.aborted) return;
+        if (response.status === 429) {
+          setCodeVerified(false);
+          setSchoolVerification('rate-limited');
+          return;
+        }
+        if (!response.ok) {
+          setCodeVerified(false);
+          setSchoolVerification('network-error');
+          return;
+        }
+        if (data.valid && data.school) {
           setCodeVerified(true);
+          setSchoolVerification('valid');
           setVerifiedSchoolName(data.school.name || 'École trouvée');
-          const classRes = await fetch(`/api/classes?schoolId=${data.school.id}`);
-          if (classRes.ok) {
-            const classData = await classRes.json();
-            setAvailableClasses(Array.isArray(classData.classes) ? classData.classes : []);
-          }
+          setAvailableClasses(Array.isArray(data.classes) ? data.classes : []);
         } else {
           setCodeVerified(false);
+          setSchoolVerification('invalid');
           setVerifiedSchoolName('');
           setAvailableClasses([]);
         }
-      } else {
+      } catch (error) {
+        if (controller.signal.aborted || (error instanceof Error && error.name === 'AbortError')) return;
         setCodeVerified(false);
+        setSchoolVerification('network-error');
         setVerifiedSchoolName('');
         setAvailableClasses([]);
+      } finally {
+        if (!controller.signal.aborted) setVerifyingCode(false);
       }
-    } catch {
-      setCodeVerified(false);
-      setVerifiedSchoolName('');
-      setAvailableClasses([]);
-    } finally {
-      setVerifyingCode(false);
+    }, 350);
+
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [joinInviteCode, view, schoolRetry]);
+
+  // A parent confirms the school first, then verifies the child's code inside
+  // that school. The server returns only the child's name and class.
+  useEffect(() => {
+    const normalizedCode = normalizeStudentCode(joinParentCode);
+    if (view !== 'register-user' || joinRole !== 'PARENT' || !codeVerified || !isStudentCodeWellFormed(normalizedCode)) {
+      setStudentVerification('idle');
+      setVerifiedStudent(null);
+      return;
     }
-  };
+
+    const controller = new AbortController();
+    setStudentVerification('checking');
+    setVerifiedStudent(null);
+    const timer = setTimeout(async () => {
+      try {
+        const params = new URLSearchParams({ parentCode: normalizedCode, inviteCode: normalizeInviteCode(joinInviteCode) });
+        const response = await fetch(`/api/parent-link/validate?${params.toString()}`, { signal: controller.signal });
+        const data = await response.json().catch(() => ({}));
+        if (controller.signal.aborted) return;
+        if (response.status === 429) {
+          setStudentVerification('rate-limited');
+        } else if (!response.ok) {
+          setStudentVerification('network-error');
+        } else if (data.valid) {
+          setStudentVerification('valid');
+          setVerifiedStudent({ code: normalizedCode, name: data.studentName, className: data.className || 'Classe non renseignée' });
+        } else {
+          setStudentVerification('invalid');
+        }
+      } catch (error) {
+        if (controller.signal.aborted || (error instanceof Error && error.name === 'AbortError')) return;
+        setStudentVerification('network-error');
+      }
+    }, 350);
+
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [joinParentCode, joinRole, codeVerified, joinInviteCode, view, studentRetry]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -558,7 +642,7 @@ export default function AuthPage({ initialView }: { initialView?: LandingAction 
       return;
     }
     if (!codeVerified) {
-      toast({ title: 'Code école invalide', description: "Veuillez entrer un code d'invitation école valide.", variant: 'destructive' });
+      toast({ title: 'Code école invalide', description: 'Validez le code de votre école avant de poursuivre.', variant: 'destructive' });
       return;
     }
     if (joinPassword !== joinConfirmPassword) {
@@ -591,8 +675,8 @@ export default function AuthPage({ initialView }: { initialView?: LandingAction 
         return;
       }
     }
-    if (joinRole === 'PARENT' && !joinParentCode.trim()) {
-      toast({ title: 'Code Parent requis', description: 'Le code parent de votre enfant est requis.', variant: 'destructive' });
+    if (joinRole === 'PARENT' && (studentVerification !== 'valid' || !verifiedStudent || verifiedStudent.code !== normalizeStudentCode(joinParentCode))) {
+      toast({ title: 'Code élève à vérifier', description: 'Vérifiez le code de votre enfant et confirmez son nom et sa classe.', variant: 'destructive' });
       return;
     }
     setJoinLoading(true);
@@ -605,14 +689,14 @@ export default function AuthPage({ initialView }: { initialView?: LandingAction 
           fullName: joinFullName.trim(),
           email: joinEmail.trim() || undefined,
           password: joinPassword,
-          inviteCode: joinInviteCode.trim().toUpperCase(),
+          inviteCode: normalizeInviteCode(joinInviteCode),
           role: joinRole,
           gender: joinGender,
           dateOfBirth: joinBirthDate || undefined,
           specialty: joinRole === 'TEACHER' ? joinSpecialty.trim() : undefined,
           phone: joinRole === 'TEACHER' ? joinPhone.trim() : undefined,
           classIds: (joinRole === 'STUDENT' || joinRole === 'TEACHER') ? joinClassIds : undefined,
-          parentCode: joinRole === 'PARENT' ? joinParentCode.trim().toUpperCase() : undefined,
+          parentCode: joinRole === 'PARENT' ? normalizeStudentCode(joinParentCode) : undefined,
         }),
       });
       const data = await res.json();
@@ -625,8 +709,8 @@ export default function AuthPage({ initialView }: { initialView?: LandingAction 
       toast({ title: `Bienvenue, ${data.user.fullName} !`, description: 'Votre inscription est validée.' });
     } catch {
       toast({
-        title: 'Erreur réseau',
-        description: 'Vérifiez votre connexion et réessayez.',
+        title: 'Erreur de Connexion',
+        description: 'Erreur de Connexion. Veuillez vérifier votre connexion internet.',
         variant: 'destructive',
       });
     } finally {
@@ -1368,12 +1452,9 @@ export default function AuthPage({ initialView }: { initialView?: LandingAction 
                     id="join-code"
                     placeholder="Ex: ECOLE-XXXXXX"
                     value={joinInviteCode}
-                    onChange={(e) => {
-                      const code = e.target.value.toUpperCase();
-                      setJoinInviteCode(code);
-                      verifyInviteCode(code);
-                    }}
+                    onChange={(e) => handleJoinInviteCodeChange(e.target.value)}
                     className="h-11 font-mono uppercase tracking-wider rounded-xl pr-10"
+                    autoComplete="off"
                     required
                   />
                   {codeVerified && (
@@ -1386,8 +1467,24 @@ export default function AuthPage({ initialView }: { initialView?: LandingAction 
                     <Check className="w-3.5 h-3.5" /> Établissement vérifié : {verifiedSchoolName}
                   </p>
                 )}
+                {schoolVerification === 'invalid' && (
+                  <p role="status" className="text-xs font-medium text-destructive">Le code n’est pas valide.</p>
+                )}
+                {schoolVerification === 'network-error' && (
+                  <div role="alert" className="flex flex-wrap items-center justify-between gap-2 text-xs text-destructive">
+                    <span>Erreur de Connexion. Veuillez vérifier votre connexion internet.</span>
+                    <Button type="button" variant="outline" size="sm" onClick={() => setSchoolRetry((value) => value + 1)}>Réessayer</Button>
+                  </div>
+                )}
+                {schoolVerification === 'rate-limited' && (
+                  <div role="alert" className="flex flex-wrap items-center justify-between gap-2 text-xs text-destructive">
+                    <span>Trop de tentatives. Réessayez plus tard.</span>
+                    <Button type="button" variant="outline" size="sm" onClick={() => setSchoolRetry((value) => value + 1)}>Réessayer</Button>
+                  </div>
+                )}
               </div>
 
+              <fieldset disabled={!codeVerified} className="contents">
               {/* Role Selection */}
               <div className="space-y-1.5">
                 <Label className="text-xs font-bold">Votre Rôle dans l'École</Label>
@@ -1399,13 +1496,16 @@ export default function AuthPage({ initialView }: { initialView?: LandingAction 
                       <button
                         key={r}
                         type="button"
-                        onClick={() => setJoinRole(r)}
+                        disabled={!codeVerified}
+                        onClick={() => {
+                          setJoinRole(r);
+                          setJoinClassIds([]);
+                          setJoinParentCode('');
+                          setStudentVerification('idle');
+                          setVerifiedStudent(null);
+                        }}
                         aria-pressed={isSel}
-                        className={`p-3 rounded-xl border flex flex-col items-center gap-1 transition-all ${
-                          isSel
-                            ? 'border-primary bg-primary/10 text-primary font-bold shadow-sm'
-                            : 'border-border/60 hover:bg-muted text-muted-foreground'
-                        }`}
+                        className={`p-3 rounded-xl border flex flex-col items-center gap-1 transition-all ${isSel ? 'border-primary bg-primary/10 text-primary font-bold shadow-sm' : 'border-border/60 hover:bg-muted text-muted-foreground'} ${!codeVerified ? 'cursor-not-allowed opacity-50' : ''}`}
                       >
                         <RIcon className="w-5 h-5" />
                         <span className="text-xs">{roleLabels[r]}</span>
@@ -1424,6 +1524,7 @@ export default function AuthPage({ initialView }: { initialView?: LandingAction 
                   {availableClasses.length > 0 ? (
                     <select
                       id="join-class"
+                      value={joinClassIds[0] || ''}
                       onChange={(e) => setJoinClassIds([e.target.value])}
                       className="w-full h-11 px-3 rounded-xl border border-input bg-background text-sm font-medium"
                       required
@@ -1431,35 +1532,50 @@ export default function AuthPage({ initialView }: { initialView?: LandingAction 
                       <option value="">-- Sélectionner une classe --</option>
                       {availableClasses.map((c) => (
                         <option key={c.id} value={c.id}>
-                          {c.name} ({c.level})
+                          {[c.name, c.level, c.section, c.option].filter(Boolean).join(' · ')}
                         </option>
                       ))}
                     </select>
                   ) : (
-                    <Input
-                      placeholder="Identifiant de classe"
-                      onChange={(e) => setJoinClassIds([e.target.value])}
-                      className="h-11 rounded-xl text-xs"
-                      required
-                    />
+                    <p className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">Cette école n’a pas encore configuré ses classes.</p>
                   )}
                 </div>
               )}
 
               {/* Parent linkage code */}
-              {joinRole === 'PARENT' && (
+              {joinRole === 'PARENT' && codeVerified && (
                 <div className="space-y-1.5">
                   <Label htmlFor="join-parent-code" className="text-xs font-bold">
-                    Code Éleve / Parent (Code de votre enfant)
+                    Code de l’élève
                   </Label>
                   <Input
                     id="join-parent-code"
-                    placeholder="Code fourni par l'élève"
+                    placeholder="Ex. P-ABCDEF"
                     value={joinParentCode}
                     onChange={(e) => setJoinParentCode(e.target.value.toUpperCase())}
                     className="h-11 rounded-xl uppercase font-mono"
                     required
                   />
+                  {studentVerification === 'checking' && <p className="text-xs text-muted-foreground">Vérification dans {verifiedSchoolName}…</p>}
+                  {studentVerification === 'valid' && verifiedStudent && (
+                    <p className="flex items-start gap-2 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs font-medium text-emerald-800">
+                      <Check className="mt-0.5 size-4 shrink-0" />
+                      <span>Élève confirmé : <strong>{verifiedStudent.name}</strong><br />Classe : {verifiedStudent.className}</span>
+                    </p>
+                  )}
+                  {studentVerification === 'invalid' && <p role="status" className="text-xs text-destructive">Le code n’est pas valide dans cette école.</p>}
+                  {studentVerification === 'network-error' && (
+                    <div role="alert" className="flex flex-wrap items-center justify-between gap-2 text-xs text-destructive">
+                      <span>Erreur de Connexion. Veuillez vérifier votre connexion internet.</span>
+                      <Button type="button" variant="outline" size="sm" onClick={() => setStudentRetry((value) => value + 1)}>Réessayer</Button>
+                    </div>
+                  )}
+                  {studentVerification === 'rate-limited' && (
+                    <div role="alert" className="flex flex-wrap items-center justify-between gap-2 text-xs text-destructive">
+                      <span>Trop de tentatives. Réessayez plus tard.</span>
+                      <Button type="button" variant="outline" size="sm" onClick={() => setStudentRetry((value) => value + 1)}>Réessayer</Button>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -1471,6 +1587,7 @@ export default function AuthPage({ initialView }: { initialView?: LandingAction 
                 <RadioGroup
                   value={joinGender}
                   onValueChange={(v) => setJoinGender(v as 'M' | 'F')}
+                  disabled={!codeVerified}
                   className="grid grid-cols-2 gap-2"
                 >
                   <Label
@@ -1623,10 +1740,11 @@ export default function AuthPage({ initialView }: { initialView?: LandingAction 
                   </div>
                 </div>
               </div>
+              </fieldset>
 
               <Button
                 type="submit"
-                disabled={joinLoading}
+                disabled={joinLoading || !codeVerified || (joinRole === 'PARENT' && studentVerification !== 'valid')}
                 className="h-12 w-full rounded-xl bg-brand text-base font-bold text-brand-foreground shadow-md shadow-blue-900/10 hover:bg-brand-hover"
               >
                 {joinLoading ? (

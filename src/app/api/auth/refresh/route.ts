@@ -40,12 +40,16 @@ export async function POST(req: NextRequest) {
     if (!user || !user.active) {
       return NextResponse.json({ error: 'Compte introuvable.' }, { status: 401 });
     }
+    if ((claims.authVersion ?? 0) !== (user.authVersion ?? 0)) {
+      return NextResponse.json({ error: 'Session révoquée. Veuillez vous reconnecter.' }, { status: 401 });
+    }
 
     const newAccessToken = signAccessToken({
       sub: user.id,
       schoolId: user.schoolId,
       role: user.role,
       name: user.fullName,
+      authVersion: user.authVersion ?? 0,
     });
 
     const response = NextResponse.json({ user: serializeUser(user, user.school), ok: true });

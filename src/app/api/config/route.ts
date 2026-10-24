@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { authenticateRequestActive, AuthError } from '@/lib/auth/authenticate';
+import { normalizeInviteCode, isInviteCodeWellFormed } from '@/lib/code-format';
+import { clientIp } from '@/lib/api/rate-limit';
+import { persistentRateLimit } from '@/lib/api/persistent-rate-limit';
 
 export async function GET(request: NextRequest) {
   try {
@@ -8,29 +11,22 @@ export async function GET(request: NextRequest) {
     const schoolId = searchParams.get('schoolId');
     const inviteCode = searchParams.get('inviteCode');
 
-    // Lookup by invite code
+    // Backwards-compatible school lookup. Invite codes only reveal the public
+    // school name and ID; registration uses the dedicated, rate-limited route.
     if (inviteCode) {
+      const ip = clientIp(request);
+      const ipLimit = await persistentRateLimit(`config-school-code:ip:${ip}`, 20, 60_000);
+      if (!ipLimit.ok) {
+        return NextResponse.json({ error: 'Trop de tentatives. Réessayez plus tard.' }, {
+          status: 429,
+          headers: { 'Retry-After': String(ipLimit.retryAfterSeconds) },
+        });
+      }
+      const normalizedCode = normalizeInviteCode(inviteCode);
+      if (!isInviteCodeWellFormed(normalizedCode)) return NextResponse.json({ school: null });
       const school = await db.school.findUnique({
-        where: { inviteCode },
-        select: {
-          id: true,
-          name: true,
-          email: true,
-          currency: true,
-          inviteCode: true,
-          logoUrl: true,
-          color: true,
-          academicYear: true,
-          heureArriveeScolaire: true,
-          province: true,
-          city: true,
-          commune: true,
-          latitude: true,
-          longitude: true,
-          createdAt: true,
-          subscriptionStatus: true,
-          subscriptionExpiry: true,
-        },
+        where: { inviteCode: normalizedCode },
+        select: { id: true, name: true },
       });
       if (!school) {
         return NextResponse.json({ school: null });

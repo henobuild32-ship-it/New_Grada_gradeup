@@ -15,6 +15,9 @@
     "db:seed": "node prisma/seed.js",
     "test:rbac": "node scripts/rbac-check.mjs",
     "test:business": "node --experimental-strip-types --test scripts/tests/gradeup-business.test.cjs",
+    "test:codes": "node --experimental-strip-types --test scripts/tests/code-format.test.mjs",
+    "test:otp": "node --experimental-strip-types --test scripts/tests/otp-code.test.mjs",
+    "test:public-routes": "node --experimental-strip-types --test scripts/tests/public-routes.test.mjs",
     "verify:grade-flow": "node scripts/verify-grade-promotion-flow.js"
   },
   "prisma": {

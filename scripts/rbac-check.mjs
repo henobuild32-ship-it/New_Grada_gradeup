@@ -144,6 +144,8 @@ async function main() {
   await expectStatus('A2 GET /api/audit-logs anonyme', ['GET', '/api/audit-logs', null], 401);
   await expectStatus('A3 GET /api/sync/pull anonyme', ['GET', '/api/sync/pull', null], 401);
   await expectStatus('A4 POST /api/sync/push anonyme', ['POST', '/api/sync/push', null, { mutations: [] }], 401);
+  await expectStatus('A5 vérification code école invalide reste publique', ['GET', '/api/join/verify-school-code?code=INVALID', null], 200);
+  await expectStatus('A6 vérification code élève invalide reste publique', ['GET', '/api/parent-link/validate?inviteCode=INVALID&parentCode=INVALID', null], 200);
 
   // ── B. Rôles ────────────────────────────────────────────────────────────
   console.log('\nB. Contrôle des rôles');

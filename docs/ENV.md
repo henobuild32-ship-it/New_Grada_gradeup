@@ -79,6 +79,12 @@ L'exemple complet se trouve dans [`.env.example`](../.env.example) — copier ce
 | `SMTP_FROM` | Non (défaut `SMTP_USER`) | Adresse d'expéditeur | `no-reply@***` |
 | `SMTP_REJECT_UNAUTHORIZED` | Non | Désactiver la vérif TLS (dev uniquement) | `false` |
 
+Pour que « Mot de passe oublié » puisse envoyer un code en production, configure
+ces variables dans l'environnement Vercel **Production** et utilise un expéditeur
+autorisé par ton fournisseur SMTP. Un code dure 10 minutes, expire après cinq
+essais erronés et ne peut être utilisé qu'une seule fois. Voir le parcours et les
+limites dans [`OTP-RECOVERY.md`](OTP-RECOVERY.md).
+
 ## IA (Gradie)
 
 | Variable | Obligatoire | Rôle | Exemple |

@@ -1,23 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { randomInt } from 'node:crypto';
 import { db } from '@/lib/db';
 import { authenticateRequest, AuthError } from '@/lib/auth/authenticate';
-
-function generateParentCode(): string {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  let code = 'P-';
-  for (let i = 0; i < 6; i++) {
-    code += chars.charAt(randomInt(chars.length));
-  }
-  return code;
-}
+import { generateReadableCode, isUniqueConstraintError } from '@/lib/code-generation';
 
 // POST: Generate or regenerate parent code for a student
 export async function POST(request: NextRequest) {
   try {
     const auth = authenticateRequest(request);
     if (auth.role !== 'ADMIN') {
-      return NextResponse.json({ error: 'Seul un administrateur peut générer un code parent' }, { status: 403 });
+      return NextResponse.json({ error: 'Seul un administrateur peut générer le code de l’élève.' }, { status: 403 });
     }
 
     const body = await request.json();
@@ -36,7 +27,7 @@ export async function POST(request: NextRequest) {
 
     let updated: { parentCode: string | null } | null = null;
     for (let attempt = 0; attempt < 5 && !updated; attempt++) {
-      const code = generateParentCode();
+      const code = generateReadableCode('P');
       try {
         updated = await db.user.update({
           where: { id: user.id },
@@ -45,14 +36,13 @@ export async function POST(request: NextRequest) {
         });
       } catch (error) {
         if (
-          typeof error === 'object' && error !== null && 'code' in error &&
-          (error as { code?: unknown }).code === 'P2002'
+          isUniqueConstraintError(error)
         ) continue;
         throw error;
       }
     }
     if (!updated?.parentCode) {
-      return NextResponse.json({ error: 'Impossible de générer un code parent pour le moment.' }, { status: 503 });
+      return NextResponse.json({ error: 'Impossible de générer le code de l’élève pour le moment.' }, { status: 503 });
     }
 
     return NextResponse.json({ parentCode: updated.parentCode });

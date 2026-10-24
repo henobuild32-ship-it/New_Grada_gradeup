@@ -16,7 +16,7 @@ const pass = process.env.SMTP_PASS || '';
 const fromName = 'GradeUp';
 const fromAddress = process.env.SMTP_FROM || user;
 
-function isConfigured(): boolean {
+export function isEmailConfigured(): boolean {
   return !!host && (!!user || !pass); // SMTP peut être open-relay (sans user)
 }
 
@@ -53,7 +53,7 @@ export interface MailPayload {
  * Lance une erreur si l'envoi échoue (pour logging côté appelant).
  */
 export async function sendEmail(payload: MailPayload): Promise<boolean> {
-  if (!isConfigured()) {
+  if (!isEmailConfigured()) {
     console.warn('[Email] SMTP non configuré — envoi ignoré:', payload.subject);
     return false;
   }

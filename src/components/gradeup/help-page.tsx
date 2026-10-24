@@ -126,8 +126,8 @@ const teacherTips = [
 const studentTips = [
   {
     icon: GraduationCap,
-    title: 'Code parent',
-    description: 'Générez votre code parent depuis le tableau de bord pour permettre à vos parents de vous suivre.',
+    title: 'Code élève',
+    description: 'Transmettez le code affiché sur votre tableau de bord à votre parent. Seul l’administrateur peut le renouveler.',
   },
   {
     icon: BarChart3,

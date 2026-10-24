@@ -71,6 +71,7 @@ export function setAuthCookies(response: NextResponse, user: any, school: any): 
     schoolId: user.schoolId,
     role: user.role,
     name: user.fullName,
+    authVersion: user.authVersion ?? 0,
   };
   response.cookies.set(ACCESS_COOKIE, signAccessToken(claims), cookieOptions(15 * 60));
   response.cookies.set(REFRESH_COOKIE, signRefreshToken(claims), cookieOptions(7 * 24 * 60 * 60));
@@ -97,6 +98,7 @@ export async function getSessionUser(req: NextRequest): Promise<UserInfo | null>
     },
   });
   if (!user || !user.active) return null;
+  if ((claims.authVersion ?? 0) !== (user.authVersion ?? 0)) return null;
 
   return serializeUser(user, user.school);
 }

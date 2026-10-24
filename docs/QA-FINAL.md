@@ -4,6 +4,8 @@ Légende : **Code** = présence/raccordement observé statiquement; **Mobile** =
 
 | Module | Rôle(s) | Connecté / code | Mobile réel | Offline réel | Testé automatiquement |
 | --- | --- | --- | --- | --- | --- |
+| Codes école et élève | Admin, élève, parent | Génération cryptographique, normalisation, vérification limitée et portée école; migrations uniques déployées sur Supabase | À tester | Brouillons/envoi différé du parcours en attente de recette device | `test:codes` 3/3; scénario authentifié production non exécuté |
+| Mot de passe oublié / OTP | Tous rôles | SMTP configuré en Production; OTP salé, TTL 10 min, 5 essais, usage unique transactionnel, sessions révoquées | Formulaire à vérifier | Online-only | `test:otp` 2/2; envoi réel et réception à valider avec une boîte de recette |
 | Admin dashboard/users/classes/courses/schedules | Admin | Code présent, API/CRUD | À tester | Snapshot/lectures partielles | TypeScript/lint/build; RBAC non relancé |
 | Admin paiements/frais/cartes | Admin, caissier, parent | Code présent, multi-devise/reçus | À tester | PDF cache partiel | Tests métier sans finance DB |
 | Règles notes/bulletins | Admin, titulaire, élève, parent | Workflow canonique raccordé | À tester | PDF lecture cache prévu | 6 tests moyens/sync; API non testée |
@@ -18,10 +20,20 @@ Légende : **Code** = présence/raccordement observé statiquement; **Mobile** =
 | Calendrier/profil/aide | Tous rôles | API/UI présentes; accès classe multi-enfants corrigé | À tester | Cache agenda/aide à vérifier | Non testé E2E |
 | Sync/outbox/PWA | Tous rôles | Dexie, pull/push, backoff présents | Installation réelle à tester | Non testé par appareil | 2 tests de règle sync |
 
+## État des migrations production
+
+- Le 24 octobre 2026, les migrations `20261024120000_add_schoolclass_option`,
+  `20261024180000_add_rate_limit_buckets` et
+  `20261024190000_secure_password_recovery` ont été appliquées sur la base
+  Supabase du projet Vercel `gradeup.com`.
+- `prisma migrate status` confirme que la base est à jour. Les secrets SMTP sont
+  configurés, mais aucun email de récupération n'a été envoyé pendant la QA.
+
 ## Commandes vérifiées
 
 - `npx tsc --noEmit` — réussi sur l'arbre final.
 - `npm run test:business` — 6/6 réussis.
+- `npm run test:codes` — 3/3 réussis; `npm run test:otp` — 2/2; `npm run test:public-routes` — 1/1.
 - `npm run lint -- --quiet` — ESLint sur le dépôt réussi.
 - `npm run build` — réussi sur l'arbre final; avertissements de dépréciation non bloquants sur `package.json#prisma` et middleware Next.
 - `git diff --check` — réussi; seuls les avertissements de conversion LF→CRLF restent.

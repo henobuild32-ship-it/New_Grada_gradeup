@@ -2,15 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { requireAuth } from '@/lib/api/rbac';
 import { handleApiError, ApiError } from '@/lib/api/errors';
-
-function generateCode(prefix: string, length: number = 6): string {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  let code = prefix + '-';
-  for (let i = 0; i < length; i++) {
-    code += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return code;
-}
+import { generateReadableCode, isUniqueConstraintError } from '@/lib/code-generation';
 
 // POST: Generate or regenerate invite code for the admin's own school
 export async function POST(request: NextRequest) {
@@ -24,17 +16,21 @@ export async function POST(request: NextRequest) {
       throw new ApiError('École non trouvée.', 404);
     }
 
-    let code = generateCode('ECOLE', 6);
-    while (await db.school.findUnique({ where: { inviteCode: code } })) {
-      code = generateCode('ECOLE', 6);
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      const code = generateReadableCode('ECOLE');
+      try {
+        const updated = await db.school.update({
+          where: { id: schoolId },
+          data: { inviteCode: code },
+          select: { inviteCode: true },
+        });
+        return NextResponse.json({ inviteCode: updated.inviteCode });
+      } catch (error) {
+        if (isUniqueConstraintError(error)) continue;
+        throw error;
+      }
     }
-
-    const updated = await db.school.update({
-      where: { id: schoolId },
-      data: { inviteCode: code },
-    });
-
-    return NextResponse.json({ inviteCode: updated.inviteCode });
+    throw new ApiError('Impossible de générer un code unique pour le moment.', 503);
   } catch (error) {
     return handleApiError(error);
   }

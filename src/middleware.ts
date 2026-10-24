@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server';
+import { isPublicApi } from '@/lib/api/public-routes';
 
 /**
  * Middleware RBAC de bord (Phase 3) — couche DE FORTIFICATION :
@@ -10,32 +11,6 @@ import { NextResponse, type NextRequest } from 'next/server';
  * middleware est un filet, pas l'unique barrière. Son but : toute route
  * qui « oublie » requireAuth est quand même refusée sans session.
  */
-
-// Routes publiques par conception (auth-by-design).
-const PUBLIC_API_EXACT = new Set([
-  '/api',                    // hello world
-  '/api/health',
-  '/api/reviews',
-  '/api/auth/login',
-  '/api/auth/logout',
-  '/api/auth/register',
-  '/api/auth/refresh',
-  '/api/auth/forgot',
-  '/api/auth/verify-otp',
-  '/api/auth/reset',
-  '/api/auth/me',
-]);
-
-const PUBLIC_API_PREFIXES = [
-  '/api/auth/',              // toute la famille auth
-  '/api/payments/pawapay',   // callbacks passerelle (signature vérifiée dans la route)
-  '/api/payments/geniuspay',
-];
-
-function isPublicApi(pathname: string): boolean {
-  if (PUBLIC_API_EXACT.has(pathname)) return true;
-  return PUBLIC_API_PREFIXES.some((p) => pathname === p || pathname.startsWith(p));
-}
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;

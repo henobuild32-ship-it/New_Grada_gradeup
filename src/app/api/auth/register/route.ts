@@ -3,7 +3,10 @@ import { z } from 'zod';
 import { db } from '@/lib/db';
 import { hashPassword } from '@/lib/password';
 import { setAuthCookies } from '@/lib/auth/session';
-import { rateLimit, clientIp, rateLimitResponse } from '@/lib/api/rate-limit';
+import { clientIp, rateLimitResponse } from '@/lib/api/rate-limit';
+import { persistentRateLimit } from '@/lib/api/persistent-rate-limit';
+import { normalizeInviteCode, normalizeStudentCode } from '@/lib/code-format';
+import { generateReadableCode } from '@/lib/code-generation';
 
 const registerSchema = z.object({
   gender: z.enum(['M', 'F'], { error: 'Le sexe est obligatoire (M ou F).' }),
@@ -14,34 +17,25 @@ const registerSchema = z.object({
   qualification: z.string().optional(),
 });
 
-function generateCode(prefix: string, length: number = 6): string {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  let code = prefix + '-';
-  for (let i = 0; i < length; i++) {
-    code += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return code;
-}
-
 async function generateUniqueInviteCode(): Promise<string> {
-  let code = generateCode('ECOLE', 6);
+  let code = generateReadableCode('ECOLE');
   while (await db.school.findUnique({ where: { inviteCode: code } })) {
-    code = generateCode('ECOLE', 6);
+    code = generateReadableCode('ECOLE');
   }
   return code;
 }
 
 async function generateUniqueParentCode(): Promise<string> {
-  let code = generateCode('P', 6);
+  let code = generateReadableCode('P');
   while (await db.user.findUnique({ where: { parentCode: code } })) {
-    code = generateCode('P', 6);
+    code = generateReadableCode('P');
   }
   return code;
 }
 
 export async function POST(request: NextRequest) {
   try {
-    const rl = rateLimit(`register:${clientIp(request)}`, 10, 60 * 60 * 1000);
+    const rl = await persistentRateLimit(`register:${clientIp(request)}`, 10, 60 * 60 * 1000);
     if (!rl.ok) {
       return NextResponse.json(rateLimitResponse(rl.retryAfterSeconds), {
         status: 429,
@@ -115,7 +109,8 @@ export async function POST(request: NextRequest) {
     if (mode === 'join-school') {
       const cleanFullName = (fullName || '').trim();
       const cleanEmail = (email || '').trim().toLowerCase();
-      const cleanInviteCode = (inviteCode || '').trim().toUpperCase();
+      const cleanInviteCode = normalizeInviteCode(inviteCode);
+      const cleanParentCode = role === 'PARENT' ? normalizeStudentCode(parentCode) : '';
 
       if ((!cleanFullName && !cleanEmail) || !password || !cleanInviteCode || !role) {
         return NextResponse.json(
@@ -250,19 +245,25 @@ export async function POST(request: NextRequest) {
       // Role-specific logic
       let linkedStudent: { id: string; fullName: string } | null = null;
       if (role === 'PARENT') {
-        if (!parentCode) {
+        if (!cleanParentCode) {
           return NextResponse.json(
-            { error: 'Le code parent est obligatoire pour créer un compte parent.' },
+            { error: 'Le code de l’élève est obligatoire pour créer un compte parent.' },
             { status: 400 }
           );
         }
         // Find the student by parent code
-        const student = await db.user.findUnique({ where: { parentCode } });
-        if (!student || student.schoolId !== school.id || student.role !== 'STUDENT') {
+        const student = await db.user.findFirst({
+          where: { parentCode: cleanParentCode, schoolId: school.id, role: 'STUDENT', active: true, deletedAt: null },
+          select: { id: true, fullName: true, parentId: true },
+        });
+        if (!student) {
           return NextResponse.json(
-            { error: 'Code parent invalide. Veuillez vérifier avec votre enfant.' },
+            { error: 'Le code n’est pas valide dans cette école.' },
             { status: 404 }
           );
+        }
+        if (student.parentId) {
+          return NextResponse.json({ error: 'Cet enfant est déjà rattaché à un compte parent.' }, { status: 409 });
         }
         linkedStudent = { id: student.id, fullName: student.fullName };
       }
@@ -305,10 +306,14 @@ export async function POST(request: NextRequest) {
 
       // If parent, link student to this parent
       if (linkedStudent) {
-        await db.user.update({
-          where: { id: linkedStudent.id },
+        const linked = await db.user.updateMany({
+          where: { id: linkedStudent.id, schoolId: school.id, parentCode: cleanParentCode, role: 'STUDENT', parentId: null },
           data: { parentId: user.id },
         });
+        if (linked.count !== 1) {
+          await db.user.delete({ where: { id: user.id } });
+          return NextResponse.json({ error: 'Cet enfant est déjà rattaché à un compte parent.' }, { status: 409 });
+        }
       }
 
       // Refresh user with enrollments
