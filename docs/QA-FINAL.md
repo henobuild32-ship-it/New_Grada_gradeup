@@ -4,8 +4,8 @@ Légende : **Code** = présence/raccordement observé statiquement; **Mobile** =
 
 | Module | Rôle(s) | Connecté / code | Mobile réel | Offline réel | Testé automatiquement |
 | --- | --- | --- | --- | --- | --- |
-| Codes école et élève | Admin, élève, parent | Génération cryptographique, normalisation, vérification limitée et portée école; migrations uniques déployées sur Supabase | À tester | Brouillons/envoi différé du parcours en attente de recette device | `test:codes` 3/3; scénario authentifié production non exécuté |
-| Mot de passe oublié / OTP | Tous rôles | SMTP configuré en Production; OTP salé, TTL 10 min, 5 essais, usage unique transactionnel, sessions révoquées | Formulaire à vérifier | Online-only | `test:otp` 2/2; envoi réel et réception à valider avec une boîte de recette |
+| Codes école et élève | Admin, élève, parent | Génération cryptographique, normalisation, vérification limitée et portée école; migrations uniques déployées sur Supabase | À tester | Brouillons/envoi différé du parcours en attente de recette device | `test:codes` 3/3; en production, code école valide et route code élève invalide vérifiés; code enfant valide non testé |
+| Mot de passe oublié / OTP | Tous rôles | SMTP configuré en Production; OTP salé, TTL 10 min, 5 essais, usage unique transactionnel, sessions révoquées | Formulaire à vérifier | Online-only | `test:otp` 2/2; routes production testées avec identité fictive; vraie livraison email à valider avec une boîte de recette |
 | Admin dashboard/users/classes/courses/schedules | Admin | Code présent, API/CRUD | À tester | Snapshot/lectures partielles | TypeScript/lint/build; RBAC non relancé |
 | Admin paiements/frais/cartes | Admin, caissier, parent | Code présent, multi-devise/reçus | À tester | PDF cache partiel | Tests métier sans finance DB |
 | Règles notes/bulletins | Admin, titulaire, élève, parent | Workflow canonique raccordé | À tester | PDF lecture cache prévu | 6 tests moyens/sync; API non testée |
@@ -28,6 +28,12 @@ Légende : **Code** = présence/raccordement observé statiquement; **Mobile** =
   Supabase du projet Vercel `gradeup.com`.
 - `prisma migrate status` confirme que la base est à jour. Les secrets SMTP sont
   configurés, mais aucun email de récupération n'a été envoyé pendant la QA.
+- Commit `9f22651` publié sur `main`; le déploiement Vercel Production est prêt
+  et `gradeupcom.vercel.app` pointe vers ce déploiement.
+- Smoke tests de production sans écriture métier : `/api/health` 200, code école
+  valide 200, code élève invalide 200/`valid:false`, route privée anonyme 401;
+  demande OTP fictive 200, vérification et reset fictifs 400. Aucun mail réel
+  n'a été envoyé.
 
 ## Commandes vérifiées
 
@@ -41,7 +47,8 @@ Légende : **Code** = présence/raccordement observé statiquement; **Mobile** =
 ## Bloqueurs de recette
 
 - Le navigateur local est désactivé dans Work; aucune QA authentifiée, visuelle, Lighthouse ou installation PWA ne peut être affirmée.
-- `npm run test:rbac` requiert un serveur et une base locale seedée. Aucun test n'a été dirigé vers la base distante.
+- `npm run test:rbac` requiert un serveur et une base de test seedée; il n'a pas
+  été exécuté contre Production pour éviter les écritures métier sur les données réelles.
 - E2E Playwright absent; aucune instance Android réelle n'est connectée.
 - Fournisseurs SMS/email et paiements sandbox doivent être configurés pour leurs scénarios respectifs.
 
