@@ -220,6 +220,7 @@ model SchoolClass {
   level     String    @default("Primaire")
   cycle     String    @default("Primaire")
   section   String    @default("")
+  option    String    @default("")
   fees      Float     @default(0)
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt

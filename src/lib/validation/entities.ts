@@ -88,6 +88,7 @@ export const schoolClassSchema = z.object({
   level: z.string().max(80).optional(),
   cycle: z.string().max(80).optional(),
   section: z.string().max(80).optional(),
+  option: z.string().max(80).optional(),
   fees: z.coerce.number().min(0, 'Frais négatifs.').max(1_000_000),
   titulaireId: idSchema.optional().nullable(),
 });

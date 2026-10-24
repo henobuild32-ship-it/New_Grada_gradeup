@@ -66,6 +66,9 @@ interface ClassItem {
   id: string;
   name: string;
   level: string;
+  cycle?: string;
+  section?: string;
+  option?: string;
   fees: number;
   titulaireId?: string | null;
   titulaire?: {
@@ -126,6 +129,28 @@ const levelIconBg: Record<string, string> = {
   Secondaire: 'bg-emerald-100 text-emerald-600',
 };
 
+const HUMANITES_SECTIONS = [
+  'Scientifique',
+  'Pédagogique',
+  'Commerciale & Gestion',
+  'Littéraire',
+  'Technique',
+  'Agricole',
+  'Sociale',
+  'Arts',
+];
+
+const HUMANITES_OPTIONS: Record<string, string[]> = {
+  Scientifique: ['Math-Physique', 'Bio-Chimie'],
+  Pédagogique: ['Pédagogie générale', 'Éducation physique'],
+  'Commerciale & Gestion': ['Comptabilité', 'Gestion', 'Secrétariat'],
+  Littéraire: ['Latin-Philo', 'Latin-Grec', 'Littéraire'],
+  Technique: ['Électricité', 'Mécanique', 'Construction', 'Électronique', 'Informatique', 'Coupe et couture'],
+  Agricole: ['Agriculture', 'Vétérinaire'],
+  Sociale: ['Sciences sociales'],
+  Arts: ['Arts plastiques', 'Musique'],
+};
+
 export default function AdminClasses() {
   const { user } = useAppStore();
   const [classes, setClasses] = useState<ClassItem[]>([]);
@@ -138,6 +163,9 @@ export default function AdminClasses() {
   const [editingClass, setEditingClass] = useState<ClassItem | null>(null);
   const [formName, setFormName] = useState('');
   const [formLevel, setFormLevel] = useState('Primaire');
+  const [formCycle, setFormCycle] = useState('EB');
+  const [formSection, setFormSection] = useState('');
+  const [formOption, setFormOption] = useState('');
   const [formFees, setFormFees] = useState('0');
   const [formTitulaireId, setFormTitulaireId] = useState<string>('none');
   const [submitting, setSubmitting] = useState(false);
@@ -223,6 +251,9 @@ export default function AdminClasses() {
   const resetForm = () => {
     setFormName('');
     setFormLevel('Primaire');
+    setFormCycle('EB');
+    setFormSection('');
+    setFormOption('');
     setFormFees('0');
     setFormTitulaireId('none');
     setEditingClass(null);
@@ -237,6 +268,9 @@ export default function AdminClasses() {
     setEditingClass(c);
     setFormName(c.name);
     setFormLevel(c.level || 'Primaire');
+    setFormCycle(c.cycle === 'Humanites' ? 'Humanites' : 'EB');
+    setFormSection(c.section || '');
+    setFormOption(c.option || '');
     setFormFees(String(c.fees || 0));
     setFormTitulaireId(c.titulaireId || c.titulaire?.id || 'none');
     setDialogOpen(true);
@@ -255,6 +289,9 @@ export default function AdminClasses() {
         schoolId: user?.schoolId,
         name: formName.trim(),
         level: formLevel,
+        cycle: formLevel === 'Secondaire' ? formCycle : formLevel,
+        section: formLevel === 'Secondaire' && formCycle === 'Humanites' ? formSection.trim() : '',
+        option: formLevel === 'Secondaire' && formCycle === 'Humanites' ? formOption.trim() : '',
         fees: parseFloat(formFees) || 0,
         titulaireId: formTitulaireId === 'none' ? null : formTitulaireId,
       };
@@ -460,6 +497,15 @@ export default function AdminClasses() {
                         <Badge variant="outline" className={`mt-1 text-[11px] ${levelColors[c.level] || ''}`}>
                           {c.level}
                         </Badge>
+                        {c.level === 'Secondaire' && (
+                          <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                            <Badge variant="secondary" className="text-[10px]">
+                              {c.cycle === 'Humanites' ? 'Humanités' : 'Éducation de base (EB)'}
+                            </Badge>
+                            {c.cycle === 'Humanites' && c.section && <Badge variant="outline" className="text-[10px]">{c.section}</Badge>}
+                            {c.cycle === 'Humanites' && c.option && <Badge variant="outline" className="text-[10px]">{c.option}</Badge>}
+                          </div>
+                        )}
                       </div>
                     </div>
 
@@ -568,7 +614,16 @@ export default function AdminClasses() {
 
             <div className="space-y-1.5">
               <Label>Niveau d&apos;enseignement *</Label>
-              <Select value={formLevel} onValueChange={setFormLevel}>
+              <Select value={formLevel} onValueChange={(value) => {
+                setFormLevel(value);
+                if (value !== 'Secondaire') {
+                  setFormCycle(value);
+                  setFormSection('');
+                  setFormOption('');
+                } else if (!['EB', 'Humanites'].includes(formCycle)) {
+                  setFormCycle('EB');
+                }
+              }}>
                 <SelectTrigger className="h-11">
                   <SelectValue />
                 </SelectTrigger>
@@ -579,6 +634,63 @@ export default function AdminClasses() {
                 </SelectContent>
               </Select>
             </div>
+
+            {formLevel === 'Secondaire' && (
+              <div className="space-y-1.5">
+                <Label>Cycle secondaire *</Label>
+                <Select value={formCycle} onValueChange={(value) => {
+                  setFormCycle(value);
+                  if (value !== 'Humanites') {
+                    setFormSection('');
+                    setFormOption('');
+                  }
+                }}>
+                  <SelectTrigger className="h-11"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="EB">Éducation de base (EB — 7e et 8e)</SelectItem>
+                    <SelectItem value="Humanites">Humanités (1re à 4e)</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-[11px] text-muted-foreground">L&apos;Éducation de base et les Humanités sont enregistrées dans des cycles distincts.</p>
+              </div>
+            )}
+
+            {formLevel === 'Secondaire' && formCycle === 'Humanites' && (
+              <div className="grid gap-4 rounded-xl border border-blue-100 bg-blue-50/60 p-3 sm:grid-cols-2 dark:border-blue-900/50 dark:bg-blue-950/20">
+                <div className="space-y-1.5">
+                  <Label htmlFor="class-section">Section des Humanités</Label>
+                  <Input
+                    id="class-section"
+                    list="humanites-section-options"
+                    placeholder="Ex. Scientifique"
+                    value={formSection}
+                    onChange={(event) => {
+                      setFormSection(event.target.value);
+                      setFormOption('');
+                    }}
+                    className="h-11 bg-background"
+                  />
+                  <datalist id="humanites-section-options">
+                    {HUMANITES_SECTIONS.map((section) => <option key={section} value={section} />)}
+                  </datalist>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="class-option">Option des Humanités</Label>
+                  <Input
+                    id="class-option"
+                    list="humanites-option-options"
+                    placeholder={formSection ? `Ex. ${HUMANITES_OPTIONS[formSection]?.[0] || 'option'}` : 'Choisir la section d’abord'}
+                    value={formOption}
+                    onChange={(event) => setFormOption(event.target.value)}
+                    className="h-11 bg-background"
+                  />
+                  <datalist id="humanites-option-options">
+                    {(HUMANITES_OPTIONS[formSection] || []).map((option) => <option key={option} value={option} />)}
+                  </datalist>
+                </div>
+                <p className="-mt-2 text-[11px] text-muted-foreground sm:col-span-2">Ces champs concernent uniquement les classes d&apos;Humanités. Vous pouvez sélectionner une suggestion ou saisir une appellation personnalisée.</p>
+              </div>
+            )}
 
             <div className="space-y-1.5">
               <Label htmlFor="class-fees">Frais scolaires annuels d&apos;écolage ($ ou FC)</Label>

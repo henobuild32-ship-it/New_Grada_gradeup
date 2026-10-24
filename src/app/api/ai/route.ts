@@ -216,7 +216,7 @@ CONTEXTE DE L'UTILISATEUR :
 `;
 
   if (isFirstMessage) {
-    systemPrompt += `\nC'est la première interaction. Commence par accueillir chaleureusement ${userName || 'l\'utilisateur'}.\n`;
+    systemPrompt += `\nC'est la première interaction. Accueille brièvement ${userName || 'l\'utilisateur'}, sans longue présentation, puis réponds directement à sa demande.\n`;
   }
 
   if (preferencesStr) {
@@ -228,16 +228,18 @@ ${preferencesStr}
   systemPrompt += `
 DIRECTIVES ABSOLUES :
 1. Réponds TOUJOURS en français correct, châtié et professionnel. Zéro faute d'orthographe, de grammaire ou de conjugaison.
-2. Si l'utilisateur exprime de nouvelles préférences (ex: "Appelle-moi Prof. Diop", "Tutoie-moi"), confirme poliment et ajoute en fin de réponse la balise : \`[PREF: clef=valeur]\`
-3. Utilise le contexte scolaire ci-dessous pour fournir des analyses précises. Si une information est manquante, dis-le sans inventer de données.
-4. Reste professionnel, proactif et bienveillant.
-5. FORMATAGE MATHÉMATIQUE : Pour toutes les formules et expressions mathématiques, utilise UNIQUEMENT des caractères Unicode et du texte courant. N'utilise JAMAIS de syntaxe LaTeX (\\frac, \\sqrt, $...$, etc.) ni de blocs de code. Exemples :
+2. Commence par une réponse courte et directe (généralement 1 à 3 phrases). Ajoute des étapes, exemples, listes ou détails uniquement si la question le demande ou si cela aide vraiment à comprendre.
+3. Utilise l'historique fourni pour suivre le sujet, les préférences et les références comme « ça » ou « le document précédent ». Ne prétends pas te souvenir d'informations qui ne figurent ni dans l'historique disponible ni dans la mémoire.
+4. Si l'utilisateur exprime de nouvelles préférences (ex: "Appelle-moi Prof. Diop", "Tutoie-moi"), confirme poliment et ajoute en fin de réponse la balise : \`[PREF: clef=valeur]\`
+5. Utilise le contexte scolaire et les documents ci-dessous pour fournir des analyses précises. Si une information est manquante ou un document illisible, dis-le sans inventer de données.
+6. Reste professionnel, proactif et bienveillant.
+7. FORMATAGE MATHÉMATIQUE : Pour toutes les formules et expressions mathématiques, utilise UNIQUEMENT des caractères Unicode et du texte courant. N'utilise JAMAIS de syntaxe LaTeX (\\frac, \\sqrt, $...$, etc.) ni de blocs de code. Exemples :
    - Fraction : « a/b » ou « (numérateur)/(dénominateur) »
    - Puissance : x² , x³ , xⁿ
    - Racine : √x, ³√x
    - Opérateurs : × , ÷ , ± , ≠ , ≤ , ≥ , ∑ , π , θ , ∞
    - Équation : « 2x + 3 = 7 » (en texte simple)
-6. N'inclus jamais de blocs de code (\`\`\`) pour des explications non-techniques.
+8. N'inclus jamais de blocs de code (\`\`\`) pour des explications non-techniques.
 
 TA MISSION POUR LE RÔLE ${userRole} :
 ${guidance}
@@ -540,7 +542,10 @@ export async function POST(request: NextRequest) {
   if (conversationId) {
     conversation = await db.aiConversation.findFirst({
       where: { id: conversationId, userId },
-      include: { messages: { orderBy: { createdAt: 'asc' }, take: 20 }, documents: true },
+      include: {
+        messages: { where: { deletedAt: null }, orderBy: { createdAt: 'desc' }, take: 24 },
+        documents: { where: { deletedAt: null } },
+      },
     });
   }
   if (!conversation) {
@@ -582,9 +587,9 @@ export async function POST(request: NextRequest) {
     });
   }
 
-  const historyMessages = conversation.messages.slice(-6).map((m) => ({
+  const historyMessages = [...conversation.messages].reverse().slice(-16).map((m) => ({
     role: m.role as 'user' | 'assistant',
-    content: m.content.slice(0, 3000),
+    content: m.content.slice(0, 2200),
   }));
 
   const isFirstMessage = !conversation.salutationDone;

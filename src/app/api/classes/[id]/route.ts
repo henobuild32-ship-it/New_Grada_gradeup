@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import type { Prisma } from '@prisma/client';
 import { db } from '@/lib/db';
 import { authenticateRequest, AuthError } from '@/lib/auth/authenticate';
 
@@ -67,7 +68,7 @@ export async function PUT(
     }
     const { id } = await params;
     const body = await request.json();
-    const { name, level, fees, titulaireId } = body;
+    const { name, level, cycle, section, option, fees, titulaireId } = body;
 
     const existing = await db.schoolClass.findUnique({ where: { id } });
     if (!existing) {
@@ -77,14 +78,26 @@ export async function PUT(
       return NextResponse.json({ error: 'Accès non autorisé' }, { status: 403 });
     }
 
+    const classData: Prisma.SchoolClassUncheckedUpdateInput = {
+      ...(name !== undefined && { name }),
+      ...(level !== undefined && { level }),
+      ...(fees !== undefined && { fees: typeof fees === 'number' ? fees : parseFloat(fees) || 0 }),
+      ...(titulaireId !== undefined && { titulaireId: titulaireId || null }),
+    };
+    if (level !== undefined || cycle !== undefined || section !== undefined || option !== undefined) {
+      const nextLevel = level ?? existing.level;
+      const nextCycle = nextLevel !== 'Secondaire'
+        ? nextLevel
+        : cycle ?? (existing.cycle === 'Humanites' ? 'Humanites' : 'EB');
+      const isHumanites = nextLevel === 'Secondaire' && nextCycle === 'Humanites';
+      classData.cycle = nextCycle;
+      classData.section = isHumanites ? String(section ?? existing.section ?? '').trim() : '';
+      classData.option = isHumanites ? String(option ?? existing.option ?? '').trim() : '';
+    }
+
     const schoolClass = await db.schoolClass.update({
       where: { id },
-      data: {
-        ...(name !== undefined && { name }),
-        ...(level !== undefined && { level }),
-        ...(fees !== undefined && { fees: typeof fees === 'number' ? fees : parseFloat(fees) || 0 }),
-        ...(titulaireId !== undefined && { titulaireId: titulaireId || null }),
-      },
+      data: classData,
       include: {
         titulaire: {
           select: {

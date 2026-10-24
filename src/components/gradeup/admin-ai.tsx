@@ -40,11 +40,10 @@ export default function AdminAi() {
   if (!user) return null;
 
   return (
-    <div className="flex flex-col h-full gap-3">
-      <div className="flex flex-col gap-3 rounded-xl bg-gradient-to-r from-blue-600 to-blue-500 px-5 py-3 text-white shadow-lg shadow-blue-500/20 shrink-0 sm:flex-row sm:items-center sm:justify-between">
-        <h1 className="text-lg font-bold flex items-center gap-2"><span className="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-white/20 backdrop-blur-sm">🤖</span>IA Gradie — Assistant Administrateur</h1>
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="flex shrink-0 justify-end border-b border-border/60 bg-background/80 px-3 py-1.5">
         <Dialog open={insightsOpen} onOpenChange={setInsightsOpen}>
-          <DialogTrigger asChild><Button variant="secondary" className="min-h-11 self-start sm:self-auto"><ClipboardCheck className="mr-2 size-4" />Signaux de suivi</Button></DialogTrigger>
+          <DialogTrigger asChild><Button variant="ghost" className="min-h-9 text-xs"><ClipboardCheck className="mr-2 size-4" />Signaux de suivi</Button></DialogTrigger>
           <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-3xl">
             <DialogHeader><DialogTitle>Signaux décisionnels de l’établissement</DialogTitle><DialogDescription>{insights?.period ? `${insights.period.name} · ` : ''}Calculés à partir des notes, présences et tranches échues. À vérifier avec l’équipe pédagogique.</DialogDescription></DialogHeader>
             {insightsLoading ? <div className="flex items-center justify-center gap-2 py-12 text-sm text-muted-foreground"><Loader2 className="size-4 animate-spin" />Calcul des signaux…</div>

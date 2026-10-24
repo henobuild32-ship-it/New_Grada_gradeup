@@ -85,11 +85,17 @@ export const useAppStore = create<AppState>()(
                 set({ currentPage: (dashMap[data.user.role] || 'admin-dashboard') as any });
               }
             }
+          } else if (refreshed.status === 401) {
+            // Expired login: return to sign-in without purging local drafts/outbox.
+            set({ user: null, currentPage: 'auth' });
+          } else if (storedUser) {
+            // A temporary server failure must not be mistaken for a logged-out user.
+            set({ user: storedUser });
           }
         } catch {
-          // En mode hors ligne, conserver la dernière session locale et la
-          // dernière page autorisée. La session sera revérifiée au retour réseau.
-          if (typeof navigator !== 'undefined' && !navigator.onLine && storedUser) {
+          // Network/server failure is not proof that the login expired. Keep
+          // the cached identity so the app remains usable while connectivity returns.
+          if (storedUser) {
             set({ user: storedUser });
           }
         }

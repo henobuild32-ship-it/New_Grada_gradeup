@@ -412,6 +412,8 @@ export default function AppLayout({ children }: AppLayoutProps) {
 
   if (!user) return null;
 
+  const isAiPage = ['admin-ai', 'teacher-ai', 'student-ai', 'parent-ai'].includes(currentPage);
+
   const handleLogout = () => {
     setShowLogoutDialog(true);
   };
@@ -692,14 +694,14 @@ export default function AppLayout({ children }: AppLayoutProps) {
 
         {/* ✅ Main content: overflow-y-auto pour le scroll, min-h-0 pour flexibilité */}
         <main 
-          className={`flex-1 overflow-x-hidden overflow-y-auto min-h-0 overscroll-contain ${isMobile ? 'pb-[calc(4.5rem+env(safe-area-inset-bottom))]' : ''}`}
+          className={`flex-1 overflow-x-hidden min-h-0 overscroll-contain ${isAiPage ? 'flex flex-col overflow-y-hidden' : 'overflow-y-auto'} ${isMobile ? 'pb-[calc(4.5rem+env(safe-area-inset-bottom))]' : ''}`}
           onTouchStart={onTouchStart}
           onTouchMove={onTouchMove}
           onTouchEnd={onTouchEnd}
           style={{ WebkitOverflowScrolling: 'touch' } as React.CSSProperties}
         >
           {/* ✅ Conteneur de page: flex-1 min-h-0 pour que les enfants puissent scroller */}
-          <div className="p-3 sm:p-4 lg:p-6 animate-fade-in" key={currentPage}>
+          <div className={`${isAiPage ? 'flex flex-1 min-h-0 flex-col overflow-hidden' : 'p-3 sm:p-4 lg:p-6'} animate-fade-in`} key={currentPage}>
             <NotificationPermissionBanner />
             {children}
           </div>

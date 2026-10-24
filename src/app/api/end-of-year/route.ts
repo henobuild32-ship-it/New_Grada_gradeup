@@ -196,7 +196,7 @@ async function buildSchoolWideRecap(schoolId: string) {
       if (norm === 'promoted') {
         promoted++;
         byClass[cls.id].promoted++;
-        const next = getNextLevel(cls.level, cls.name);
+        const next = getNextLevel(cls.level, cls.name, cls.cycle);
         plannedTransitions.push({
           studentId: sid,
           fullName: enroll.user.fullName,
@@ -439,7 +439,7 @@ async function executeSchoolWideTransition(schoolId: string, adminId: string, ne
       const norm = normalizeDecision(decision);
 
       if (norm === 'promoted') {
-        const next = getNextLevel(cls.level, cls.name);
+        const next = getNextLevel(cls.level, cls.name, cls.cycle);
         if (!next) {
           // Fin de cursus -> sortie
           tx.push(db.user.update({ where: { id: sid }, data: { academicYear: newYear, active: false } }));
@@ -447,9 +447,19 @@ async function executeSchoolWideTransition(schoolId: string, adminId: string, ne
           notified.push({ userId: sid, parentId: enroll.user.parentId, fullName: enroll.user.fullName, label: 'Fin de cursus (diplômé)' });
           continue;
         }
-        let nextClass = await db.schoolClass.findFirst({ where: { schoolId, name: next.name, level: next.level } });
+        let nextClass = await db.schoolClass.findFirst({ where: { schoolId, name: next.name, level: next.level, cycle: next.cycle } });
         if (!nextClass) {
-          nextClass = await db.schoolClass.create({ data: { schoolId, name: next.name, level: next.level, fees: cls.fees } });
+          nextClass = await db.schoolClass.create({
+            data: {
+              schoolId,
+              name: next.name,
+              level: next.level,
+              cycle: next.cycle,
+              section: next.cycle === 'Humanites' ? cls.section : '',
+              option: next.cycle === 'Humanites' ? cls.option : '',
+              fees: cls.fees,
+            },
+          });
         }
         tx.push(db.enrolledClass.deleteMany({ where: { userId: sid, classId: cls.id } }));
         tx.push(db.enrolledClass.upsert({
@@ -521,17 +531,27 @@ async function applyTransition(
   adminId: string,
   studentId: string,
   classId: string,
-  currentClass: { level: string; name: string; fees: number },
+  currentClass: { level: string; name: string; cycle: string; section: string; option: string; fees: number },
   status: string,
   newAcademicYear: string,
   comment: string
 ) {
   const norm = normalizeDecision(status);
   if (norm === 'promoted') {
-    const next = getNextLevel(currentClass.level, currentClass.name);
+    const next = getNextLevel(currentClass.level, currentClass.name, currentClass.cycle);
     if (next) {
-      let nextClass = await db.schoolClass.findFirst({ where: { schoolId, name: next.name, level: next.level } });
-      if (!nextClass) nextClass = await db.schoolClass.create({ data: { schoolId, name: next.name, level: next.level, fees: currentClass.fees } });
+      let nextClass = await db.schoolClass.findFirst({ where: { schoolId, name: next.name, level: next.level, cycle: next.cycle } });
+      if (!nextClass) nextClass = await db.schoolClass.create({
+        data: {
+          schoolId,
+          name: next.name,
+          level: next.level,
+          cycle: next.cycle,
+          section: next.cycle === 'Humanites' ? currentClass.section : '',
+          option: next.cycle === 'Humanites' ? currentClass.option : '',
+          fees: currentClass.fees,
+        },
+      });
       await db.enrolledClass.deleteMany({ where: { userId: studentId, classId } });
       await db.enrolledClass.upsert({
         where: { userId_classId: { userId: studentId, classId: nextClass.id } },
@@ -587,24 +607,31 @@ async function applyTransition(
   }
 }
 
-function getNextLevel(level: string, name: string): { name: string; level: string } | null {
+function getNextLevel(level: string, name: string, cycle = ''): { name: string; level: string; cycle: string } | null {
   const levels = ['Maternelle', 'Primaire', 'Secondaire'];
   const currentIdx = levels.indexOf(level);
-  if (currentIdx === -1 || currentIdx >= levels.length - 1) return null;
+  if (currentIdx === -1) return null;
   if (level === 'Primaire') {
     const currentNum = parseInt(name.replace(/[^0-9]/g, '')) || 1;
     const nextNum = currentNum + 1;
-    if (nextNum > 6) return { name: '1ère', level: 'Secondaire' };
-    return { name: `${nextNum}ème`, level: 'Primaire' };
+    if (nextNum > 6) return { name: '7ème', level: 'Secondaire', cycle: 'EB' };
+    return { name: `${nextNum}ème`, level: 'Primaire', cycle: 'Primaire' };
   }
   if (level === 'Secondaire') {
     const currentNum = parseInt(name.replace(/[^0-9]/g, '')) || 1;
-    const nextNum = currentNum + 1;
-    if (nextNum > 6) return null;
-    const names: Record<number, string> = { 1: '7ème', 2: '8ème', 3: '1ère', 4: '2ème', 5: '3ème', 6: '4ème' };
-    return { name: names[nextNum] || `${nextNum}ème`, level: 'Secondaire' };
+    const normalizedCycle = cycle.toLowerCase();
+    const isHumanites = normalizedCycle === 'humanites'
+      || (!['eb', 'education de base'].includes(normalizedCycle) && !/\b(?:7|8)(?:e|ème|eme)?\b/i.test(name));
+    if (isHumanites) {
+      if (currentNum >= 4) return null;
+      const names: Record<number, string> = { 2: '2ème', 3: '3ème', 4: '4ème' };
+      return { name: names[currentNum + 1] || `${currentNum + 1}ème`, level: 'Secondaire', cycle: 'Humanites' };
+    }
+    if (currentNum >= 8) return { name: '1ère', level: 'Secondaire', cycle: 'Humanites' };
+    const nextNum = Math.max(7, currentNum + 1);
+    return { name: `${nextNum}ème`, level: 'Secondaire', cycle: 'EB' };
   }
-  return { name: '1ère', level: 'Primaire' };
+  return { name: '1ère', level: 'Primaire', cycle: 'Primaire' };
 }
 
 function getNextAcademicYear(): string {

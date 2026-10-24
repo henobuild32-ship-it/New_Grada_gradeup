@@ -8,6 +8,7 @@ import Image from 'next/image';
 
 import AuthPage from '@/components/gradeup/auth-page';
 import AppLayout from '@/components/gradeup/app-layout';
+import { installAuthenticatedFetchRecovery } from '@/lib/auth/authenticated-fetch';
 
 // Squelette affiché pendant le chargement différé (code-splitting) d'une page.
 function PageSkeleton() {
@@ -199,13 +200,23 @@ function hasStoredSession() {
 }
 
 export default function HomePage() {
-  const { currentPage, user, hydrateSession } = useAppStore();
+  const { currentPage, user, hydrateSession, setUser, setCurrentPage } = useAppStore();
   const [hydrating, setHydrating] = useState(true);
   const [maybeLoggedIn] = useState(hasStoredSession);
 
   useEffect(() => {
+    const uninstallFetchRecovery = installAuthenticatedFetchRecovery();
+    const handleExpiredSession = () => {
+      setUser(null);
+      setCurrentPage('auth');
+    };
+    window.addEventListener('gradeup-session-expired', handleExpiredSession);
     hydrateSession().finally(() => setHydrating(false));
-  }, [hydrateSession]);
+    return () => {
+      window.removeEventListener('gradeup-session-expired', handleExpiredSession);
+      uninstallFetchRecovery();
+    };
+  }, [hydrateSession, setCurrentPage, setUser]);
 
   if (hydrating && maybeLoggedIn) {
     return <SessionSplash />;

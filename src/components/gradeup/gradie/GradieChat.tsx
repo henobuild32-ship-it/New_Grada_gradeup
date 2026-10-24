@@ -34,7 +34,6 @@ import {
   Check,
   StopCircle,
   Share2,
-  Archive,
   Edit2,
   Bot,
   Sparkles,
@@ -58,6 +57,7 @@ import {
   Loader2,
 } from 'lucide-react';
 import { useVirtualizer } from '@tanstack/react-virtual';
+import ReactMarkdown from 'react-markdown';
 import { toast } from 'sonner';
 import GradieWelcome from './GradieWelcome';
 
@@ -75,6 +75,37 @@ interface AiMessage {
     size?: number;
     pageCount?: number;
   };
+  deliveryStatus?: 'draft' | 'sending' | 'sent';
+}
+
+interface GradieDraft {
+  id: string;
+  message: string;
+  conversationId: string | null;
+  createdAt: string;
+  attempts?: number;
+}
+
+function readGradieDrafts(userId: string): GradieDraft[] {
+  try {
+    const raw = localStorage.getItem(`gradeup-gradie-drafts-${userId}`);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.filter((item): item is GradieDraft =>
+      Boolean(item && typeof item.id === 'string' && typeof item.message === 'string'),
+    ) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeGradieDrafts(userId: string, drafts: GradieDraft[]) {
+  try {
+    const key = `gradeup-gradie-drafts-${userId}`;
+    if (drafts.length) localStorage.setItem(key, JSON.stringify(drafts));
+    else localStorage.removeItem(key);
+  } catch {
+    toast.error('Le brouillon n’a pas pu être enregistré sur cet appareil.');
+  }
 }
 
 interface AiDocument {
@@ -99,8 +130,6 @@ interface ConversationSummary {
   tags: string;
   favorite: boolean;
   pinned: boolean;
-  archived?: boolean;
-  read?: boolean;
   updatedAt: string;
   messageCount?: number;
   hasImage?: boolean;
@@ -162,7 +191,6 @@ function groupConversationsByDate(convs: ConversationSummary[]) {
   };
 
   for (const c of convs) {
-    if (c.archived) continue;
     const d = new Date(c.updatedAt);
     if (d.toDateString() === today) { groups['Aujourd\'hui'].push(c); continue; }
     if (d.toDateString() === yesterday) { groups['Hier'].push(c); continue; }
@@ -223,19 +251,9 @@ function SectionedMessageBlock({ text }: { text: string }) {
 
   if (sections.length <= 1) {
     return (
-      <div
-        className="gradi-msg-text font-sans leading-relaxed"
-        dangerouslySetInnerHTML={{
-          __html: text
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-            .replace(/\*(.*?)\*/g, '<em>$1</em>')
-            .replace(/`(.*?)`/g, '<code class="inline-code">$1</code>')
-            .replace(/\n/g, '<br/>'),
-        }}
-      />
+      <div className="gradi-msg-text font-sans leading-relaxed break-words [&_p]:mb-3 [&_p:last-child]:mb-0 [&_ul]:my-3 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:my-3 [&_ol]:list-decimal [&_ol]:pl-5 [&_li]:my-1 [&_h1]:mb-3 [&_h1]:text-xl [&_h1]:font-bold [&_h2]:mb-2 [&_h2]:mt-4 [&_h2]:text-lg [&_h2]:font-bold [&_h3]:mb-2 [&_h3]:mt-3 [&_h3]:font-semibold [&_blockquote]:my-3 [&_blockquote]:border-l-2 [&_blockquote]:border-indigo-400 [&_blockquote]:pl-3 [&_blockquote]:text-white/70 [&_pre]:my-3 [&_pre]:overflow-x-auto [&_pre]:rounded-xl [&_pre]:bg-black/30 [&_pre]:p-3 [&_code]:rounded [&_code]:bg-black/20 [&_code]:px-1 [&_code]:py-0.5 [&_a]:text-indigo-300 [&_a]:underline">
+        <ReactMarkdown>{text}</ReactMarkdown>
+      </div>
     );
   }
 
@@ -267,8 +285,8 @@ function SectionedMessageBlock({ text }: { text: string }) {
               </div>
             </div>
             {!isCollapsed && (
-              <div className="p-3 text-sm leading-relaxed text-white/90 whitespace-pre-wrap font-sans">
-                {sec.content}
+              <div className="p-3 text-sm leading-relaxed text-white/90 font-sans break-words [&_p]:mb-3 [&_p:last-child]:mb-0 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:bg-black/30 [&_pre]:p-3 [&_code]:rounded [&_code]:bg-black/20 [&_code]:px-1 [&_code]:py-0.5">
+                <ReactMarkdown>{sec.content}</ReactMarkdown>
               </div>
             )}
           </div>
@@ -393,7 +411,7 @@ function MediaAttachment({ media }: { media: NonNullable<AiMessage['media']> }) 
 interface MenuSheetProps {
   onClose: () => void;
   onNewChat: () => void;
-  onOpenHistory: () => void;
+  onOpenHistory: (filter?: 'all' | 'favorite' | 'pinned') => void;
   onOpenSearch: () => void;
   onOpenSearchHistory: () => void;
   onClearAll: () => void;
@@ -430,12 +448,11 @@ function ThreeDotsMenuSheet({
 
   const menuItems = [
     { label: 'Nouveau chat', icon: Plus, action: onNewChat, color: 'text-indigo-400' },
-    { label: 'Historique', icon: MessageSquare, action: onOpenHistory, color: 'text-blue-400' },
-    { label: 'Conversations épinglées', icon: Pin, action: onOpenHistory, color: 'text-amber-400' },
-    { label: 'Conversations archivées', icon: Archive, action: onOpenHistory, color: 'text-purple-400' },
+    { label: 'Toutes les conversations', icon: MessageSquare, action: () => onOpenHistory('all'), color: 'text-blue-400' },
+    { label: 'Conversations épinglées', icon: Pin, action: () => onOpenHistory('pinned'), color: 'text-amber-400' },
     { label: 'Rechercher dans les conversations', icon: Search, action: onOpenSearch, color: 'text-emerald-400' },
     { label: 'Historique de recherche', icon: History, action: onOpenSearchHistory, color: 'text-teal-400' },
-    { label: 'Favoris', icon: Star, action: onOpenHistory, color: 'text-yellow-400' },
+    { label: 'Favoris', icon: Star, action: () => onOpenHistory('favorite'), color: 'text-yellow-400' },
     { label: `Modèle IA : ${models.find(m => m.id === selectedModel)?.name || 'GLM'}`, icon: Bot, action: () => setShowModels(true), color: 'text-cyan-400' },
     { label: 'Mémoire de Gradie', icon: Sparkles, action: () => { onOpenMemory?.(); onClose(); }, color: 'text-pink-400' },
     { label: 'Exporter la conversation', icon: Download, action: onExport, color: 'text-emerald-300' },
@@ -565,33 +582,6 @@ function AttachmentSheet({ onClose, onSelect }: { onClose: () => void; onSelect:
   );
 }
 
-// ─── Component: Search Conversations Bar ──────────────────────────────────────
-
-function SearchBarOverlay({ search, setSearch, onClose }: { search: string; setSearch: (v: string) => void; onClose: () => void }) {
-  return (
-    <div className="px-4 py-3 bg-[#16161D] border-b border-white/10 flex items-center gap-3 animate-gradi-fadein">
-      <div className="flex-1 h-[52px] rounded-[18px] bg-white/8 border border-white/10 px-[16px] flex items-center gap-2">
-        <Search className="w-5 h-5 text-white/40 shrink-0" />
-        <input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Rechercher une conversation (titre, code, PDF, mot)..."
-          autoFocus
-          className="w-full bg-transparent text-white text-sm outline-none placeholder:text-white/30"
-        />
-        {search && (
-          <button onClick={() => setSearch('')} className="text-white/40 hover:text-white p-1">
-            <X className="w-4 h-4" />
-          </button>
-        )}
-      </div>
-      <button onClick={onClose} className="text-white/60 hover:text-white text-xs font-semibold px-2">
-        Fermer
-      </button>
-    </div>
-  );
-}
-
 // ─── Component: Action Bar under AI Messages (9 actions 40x40px) ──────────────
 
 function AiMessageActions({
@@ -701,7 +691,11 @@ export default function GradieChat({ userId, schoolId, userRole, userName }: Gra
   const [streamingContent, setStreamingContent] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [search, setSearch] = useState('');
-  const [showSearch, setShowSearch] = useState(false);
+  const [showHistorySheet, setShowHistorySheet] = useState(false);
+  const [historyFilter, setHistoryFilter] = useState<'all' | 'favorite' | 'pinned'>('all');
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [draftsHydrated, setDraftsHydrated] = useState(false);
+  const [queuedDraftCount, setQueuedDraftCount] = useState(0);
   const [showMenuSheet, setShowMenuSheet] = useState(false);
   const [showAttachmentSheet, setShowAttachmentSheet] = useState(false);
   const [uploadingDoc, setUploadingDoc] = useState(false);
@@ -711,7 +705,6 @@ export default function GradieChat({ userId, schoolId, userRole, userName }: Gra
   const [stopRequested, setStopRequested] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedModel, setSelectedModel] = useState('glm');
-  const [showModelSelector, setShowModelSelector] = useState(false);
   const [showMemoryPanel, setShowMemoryPanel] = useState(false);
   const [memories, setMemories] = useState<Array<{ id: string; content: string; category: string; tags: string; importance: number; createdAt: string }>>([]);
   const [memorySearch, setMemorySearch] = useState('');
@@ -722,10 +715,18 @@ export default function GradieChat({ userId, schoolId, userRole, userName }: Gra
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const activeConversationRef = useRef<Conversation | null>(activeConversation);
+  activeConversationRef.current = activeConversation;
+  const isStreamingRef = useRef(isStreaming);
+  isStreamingRef.current = isStreaming;
   const recognitionRef = useRef<any>(null);
   const readerRef = useRef<ReadableStreamDefaultReader | null>(null);
   const attachInputRef = useRef<HTMLInputElement>(null);
   const stopRequestedRef = useRef(false);
+  const shouldAutoScrollRef = useRef(true);
+  const flushingDraftsRef = useRef(false);
+  const sendMessageRef = useRef<(message?: string, queuedDraftId?: string) => Promise<void>>(async () => {});
+  const draftRetryTimerRef = useRef<number | undefined>(undefined);
   const activeConversationIdKey = `gradeup-gradie-active-${userId}`;
 
   useEffect(() => {
@@ -780,31 +781,44 @@ export default function GradieChat({ userId, schoolId, userRole, userName }: Gra
   };
 
   // ── Auto scroll ─────────────────────────────────────────────────────────────
-  const scrollToBottom = useCallback((smooth = true) => {
-    messagesEndRef.current?.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto' });
+  const scrollToBottom = useCallback((smooth = false) => {
+    if (!shouldAutoScrollRef.current) return;
+    const container = messagesContainerRef.current;
+    if (!container) return;
+    const behavior: ScrollBehavior = smooth ? 'smooth' : 'auto';
+    container.scrollTo({ top: container.scrollHeight, behavior });
+    requestAnimationFrame(() => {
+      if (shouldAutoScrollRef.current) {
+        container.scrollTo({ top: container.scrollHeight, behavior: 'auto' });
+      }
+    });
   }, []);
 
   useEffect(() => {
-    scrollToBottom(!isStreaming);
+    scrollToBottom(false);
   }, [activeConversation?.messages, streamingContent, isStreaming, scrollToBottom]);
 
   // ── Load conversations ──────────────────────────────────────────────────────
-  const loadConversations = useCallback(async (q?: string) => {
+  const loadConversations = useCallback(async (q?: string, filter: 'all' | 'favorite' | 'pinned' = 'all') => {
+    setHistoryLoading(true);
     try {
       const params = new URLSearchParams({ userId });
       if (q?.trim()) params.set('search', q.trim());
+      if (filter === 'favorite') params.set('favorite', '1');
+      if (filter === 'pinned') params.set('pinned', '1');
       const res = await fetch(`/api/ai/conversations?${params}`);
       if (res.ok) {
         const data = await res.json();
         setConversations(data.conversations || []);
       }
-    } catch { /* silent */ }
+    } catch { /* keep the previously loaded history visible */ }
+    finally { setHistoryLoading(false); }
   }, [userId]);
 
   useEffect(() => {
-    const timer = setTimeout(() => loadConversations(search), 250);
+    const timer = setTimeout(() => loadConversations(search, historyFilter), 250);
     return () => clearTimeout(timer);
-  }, [loadConversations, search]);
+  }, [loadConversations, search, historyFilter]);
 
   // ── Load memories ──────────────────────────────────────────────────────────
   const loadMemories = useCallback(async (q?: string) => {
@@ -872,24 +886,76 @@ export default function GradieChat({ userId, schoolId, userRole, userName }: Gra
   };
 
   // ── Load single conversation ────────────────────────────────────────────────
-  const loadConversation = useCallback(async (id: string) => {
+  const loadConversation = useCallback(async (id: string): Promise<boolean> => {
     setIsLoading(true);
     try {
       const res = await fetch(`/api/ai/conversations/${id}?userId=${userId}`);
       if (res.ok) {
         const data = await res.json();
+        shouldAutoScrollRef.current = true;
         setActiveConversation(data.conversation);
         localStorage.setItem(activeConversationIdKey, id);
+        return true;
+      } else {
+        setError('Cette conversation est introuvable ou inaccessible.');
+        return false;
       }
-    } catch { setError('Impossible de charger la conversation.'); }
-    finally { setIsLoading(false); }
+    } catch { setError('Impossible de charger la conversation.'); return false; }
+    finally { setIsLoading(false); setShowHistorySheet(false); }
   }, [userId, activeConversationIdKey]);
 
-  // Restore the open conversation after a refresh instead of showing an empty chat.
+  // Restore pending drafts first so an interrupted connection never loses a prompt.
   useEffect(() => {
-    const savedId = localStorage.getItem(activeConversationIdKey);
-    if (savedId) loadConversation(savedId);
-  }, [activeConversationIdKey, loadConversation]);
+    let cancelled = false;
+    const restore = async () => {
+      const drafts = readGradieDrafts(userId);
+      setQueuedDraftCount(drafts.length);
+      const savedId = localStorage.getItem(activeConversationIdKey);
+      const conversationId = [...drafts].reverse().find((draft) =>
+        draft.conversationId && !draft.conversationId.startsWith('draft-'),
+      )?.conversationId || savedId;
+
+      const loadedConversation = conversationId ? await loadConversation(conversationId) : false;
+      if (cancelled) return;
+
+      if (drafts.length) {
+        const draftConversationId = drafts.find((draft) => draft.conversationId)?.conversationId;
+        if (!loadedConversation || draftConversationId?.startsWith('draft-')) {
+          const firstDraft = drafts[0];
+          setActiveConversation({
+            id: draftConversationId?.startsWith('draft-') ? draftConversationId : `draft-${userId}`,
+            title: firstDraft.message.length > 48 ? `${firstDraft.message.slice(0, 48)}…` : firstDraft.message,
+            updatedAt: firstDraft.createdAt,
+            documents: [],
+            messages: drafts.map((draft) => ({
+              id: draft.id,
+              role: 'user' as const,
+              content: draft.message,
+              createdAt: draft.createdAt,
+              deliveryStatus: 'draft' as const,
+            })),
+          });
+        } else {
+          setActiveConversation((current) => current ? {
+            ...current,
+            messages: [
+              ...current.messages,
+              ...drafts.filter((draft) => !current.messages.some((message) => message.id === draft.id)).map((draft) => ({
+                id: draft.id,
+                role: 'user' as const,
+                content: draft.message,
+                createdAt: draft.createdAt,
+                deliveryStatus: 'draft' as const,
+              })),
+            ],
+          } : current);
+        }
+      }
+      setDraftsHydrated(true);
+    };
+    void restore();
+    return () => { cancelled = true; };
+  }, [activeConversationIdKey, loadConversation, userId]);
 
   // ── Create conversation ─────────────────────────────────────────────────────
   const createNewConversation = async () => {
@@ -901,47 +967,188 @@ export default function GradieChat({ userId, schoolId, userRole, userName }: Gra
       });
       if (res.ok) {
         const data = await res.json();
-        await loadConversations();
-        await loadConversation(data.conversation.id);
+        const conversation = data.conversation as Conversation;
+        shouldAutoScrollRef.current = true;
+        setActiveConversation({ ...conversation, messages: [], documents: [] });
+        localStorage.setItem(activeConversationIdKey, conversation.id);
+        setShowHistorySheet(false);
+        void loadConversations();
+      } else {
+        setError('Impossible de créer la conversation. Réessayez.');
       }
     } catch { setError('Impossible de créer la conversation.'); }
   };
 
+  const saveDraftToQueue = (draft: GradieDraft) => {
+    const drafts = readGradieDrafts(userId);
+    const existingIndex = drafts.findIndex((item) => item.id === draft.id);
+    if (existingIndex >= 0) drafts[existingIndex] = draft;
+    else drafts.push(draft);
+    writeGradieDrafts(userId, drafts);
+    setQueuedDraftCount(drafts.length);
+    setActiveConversation((current) => {
+      const localConversation = current || {
+        id: draft.conversationId || `draft-${userId}`,
+        title: draft.message.length > 48 ? `${draft.message.slice(0, 48)}…` : draft.message,
+        updatedAt: draft.createdAt,
+        messages: [],
+        documents: [],
+      };
+      const queuedMessage: AiMessage = {
+        id: draft.id,
+        role: 'user',
+        content: draft.message,
+        createdAt: draft.createdAt,
+        deliveryStatus: 'draft',
+      };
+      return {
+        ...localConversation,
+        title: localConversation.messages.length ? localConversation.title : queuedMessage.content.slice(0, 48),
+        updatedAt: draft.createdAt,
+        messages: localConversation.messages.some((message) => message.id === draft.id)
+          ? localConversation.messages.map((message) => message.id === draft.id ? queuedMessage : message)
+          : [...localConversation.messages, queuedMessage],
+      };
+    });
+  };
+
+  const completeQueuedDraft = (draftId: string) => {
+    const drafts = readGradieDrafts(userId).filter((draft) => draft.id !== draftId);
+    writeGradieDrafts(userId, drafts);
+    setQueuedDraftCount(drafts.length);
+    setActiveConversation((current) => current ? {
+      ...current,
+      messages: current.messages.map((message) => message.id === draftId
+        ? { ...message, deliveryStatus: 'sent' as const }
+        : message),
+    } : current);
+  };
+
+  const discardQueuedDraft = (draftId: string) => {
+    const drafts = readGradieDrafts(userId).filter((draft) => draft.id !== draftId);
+    writeGradieDrafts(userId, drafts);
+    setQueuedDraftCount(drafts.length);
+    setActiveConversation((current) => current ? {
+      ...current,
+      messages: current.messages.filter((message) => message.id !== draftId),
+    } : current);
+  };
+
+  const scheduleDraftRetry = (draft: GradieDraft) => {
+    const queue = readGradieDrafts(userId);
+    const current = queue.find((item) => item.id === draft.id) || draft;
+    const updated = { ...current, attempts: (current.attempts || 0) + 1 };
+    writeGradieDrafts(userId, queue.some((item) => item.id === draft.id)
+      ? queue.map((item) => item.id === draft.id ? updated : item)
+      : [...queue, updated]);
+    setQueuedDraftCount(readGradieDrafts(userId).length);
+    if (!navigator.onLine) return;
+    if (draftRetryTimerRef.current) window.clearTimeout(draftRetryTimerRef.current);
+    const delay = Math.min(60_000, 2_000 * (2 ** Math.min(updated.attempts - 1, 5)));
+    draftRetryTimerRef.current = window.setTimeout(() => {
+      if (navigator.onLine && readGradieDrafts(userId).some((item) => item.id === updated.id)) {
+        window.dispatchEvent(new Event('gradeup-gradie-flush-drafts'));
+      }
+    }, delay);
+  };
+
   // ── Send message ────────────────────────────────────────────────────────────
-  const sendMessage = async (override?: string) => {
+  const sendMessage = async (override?: string, queuedDraftId?: string) => {
     const msg = (override ?? input).trim();
     if (!msg || isStreaming) return;
     if (!navigator.onLine) {
-      setError('Fonction IA disponible en ligne. Votre message reste dans le champ et ne sera pas envoyé hors connexion.');
+      const oldDraft = queuedDraftId ? readGradieDrafts(userId).find((draft) => draft.id === queuedDraftId) : undefined;
+      saveDraftToQueue({
+        id: queuedDraftId || `draft-${crypto.randomUUID()}`,
+        message: msg,
+        conversationId: activeConversation?.id || oldDraft?.conversationId || `draft-${userId}`,
+        createdAt: oldDraft?.createdAt || new Date().toISOString(),
+      });
+      setInput('');
+      setError(null);
+      toast.info('Message enregistré en brouillon. Il sera envoyé automatiquement au retour de la connexion.');
       return;
     }
     setInput('');
+    if (textareaRef.current) textareaRef.current.style.height = 'auto';
     setError(null);
     setStopRequested(false);
     stopRequestedRef.current = false;
     recordSearch(msg);
-
-    let convId = activeConversation?.id;
-    if (!convId) {
-      const res = await fetch('/api/ai/conversations', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        convId = data.conversation.id;
-        await loadConversation(convId!);
-      }
-    }
-
+    shouldAutoScrollRef.current = true;
+    const queuedDraft = queuedDraftId ? readGradieDrafts(userId).find((draft) => draft.id === queuedDraftId) : undefined;
+    const localConversationId = activeConversation?.id || queuedDraft?.conversationId || `local-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    let canonicalConversationId = localConversationId;
+    let conversationIdForRequest = activeConversation?.id && !activeConversation.id.startsWith('draft-')
+      ? activeConversation.id
+      : undefined;
     const userMsg: AiMessage = {
-      id: Date.now().toString(),
+      id: queuedDraftId || `user-${Date.now()}-${Math.random().toString(36).slice(2)}`,
       role: 'user',
       content: msg,
-      createdAt: new Date().toISOString(),
+      createdAt: queuedDraft?.createdAt || new Date().toISOString(),
+      ...(queuedDraftId ? { deliveryStatus: 'sending' as const } : {}),
     };
-    setActiveConversation((p) => p ? { ...p, messages: [...p.messages, userMsg] } : null);
+    const optimisticConversation: Conversation = activeConversation || {
+      id: localConversationId,
+      title: msg.length > 48 ? `${msg.slice(0, 48)}…` : msg,
+      updatedAt: userMsg.createdAt,
+      messages: [],
+      documents: [],
+    };
+    setActiveConversation((current) => {
+      if (!current) return { ...optimisticConversation, messages: [userMsg] };
+      if (current.id !== localConversationId) return current;
+      const messageAlreadyVisible = current.messages.some((message) => message.id === userMsg.id);
+      return {
+        ...current,
+        title: current.messages.length ? current.title : optimisticConversation.title,
+        updatedAt: userMsg.createdAt,
+        messages: messageAlreadyVisible
+          ? current.messages.map((message) => message.id === userMsg.id ? userMsg : message)
+          : [...current.messages, userMsg],
+      };
+    });
+    const updateCurrentConversation = (update: (conversation: Conversation) => Conversation) => {
+      setActiveConversation((current) => current && current.id === canonicalConversationId ? update(current) : current);
+    };
+    const removeOptimisticMessage = () => {
+      if (queuedDraftId) {
+        const draft = queuedDraft || { id: queuedDraftId, message: msg, conversationId: conversationIdForRequest || localConversationId, createdAt: userMsg.createdAt };
+        saveDraftToQueue({ ...draft, conversationId: conversationIdForRequest || draft.conversationId });
+      } else {
+        updateCurrentConversation((current) => ({ ...current, messages: current.messages.filter((message) => message.id !== userMsg.id) }));
+      }
+    };
+    const assistantMessageId = `assistant-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    let assistantCommitted = false;
+    let accumulatedReply = '';
+    const commitAssistant = (rawReply: string) => {
+      if (assistantCommitted) return;
+      assistantCommitted = true;
+      const content = rawReply
+        .replace(/\[PREF:\s*[^\]]+\]/gi, '')
+        .replace(/\[MEM:\s*[^\]]+\]/gi, '')
+        .replace(/\[ACTION:\s*\w+\]\s*\[PARAMS:\s*\{[^}]*\}\s*\[\/ACTION\]/gi, '')
+        .trim();
+      if (content) {
+        updateCurrentConversation((current) => ({
+          ...current,
+          updatedAt: new Date().toISOString(),
+          messages: [...current.messages.map((message) => message.id === queuedDraftId
+            ? { ...message, deliveryStatus: 'sent' as const }
+            : message), {
+            id: assistantMessageId,
+            role: 'assistant',
+            content,
+            createdAt: new Date().toISOString(),
+          }],
+        }));
+      }
+      if (queuedDraftId) completeQueuedDraft(queuedDraftId);
+      setStreamingContent('');
+    };
+
     setIsStreaming(true);
     setStreamingContent('');
 
@@ -953,15 +1160,38 @@ export default function GradieChat({ userId, schoolId, userRole, userName }: Gra
           message: msg,
           schoolId,
           userId,
-          conversationId: convId,
+          conversationId: conversationIdForRequest,
           model: selectedModel,
         }),
       });
 
+      const responseConversationId = res.headers.get('X-Conversation-Id');
+      if (responseConversationId) {
+        canonicalConversationId = responseConversationId;
+        conversationIdForRequest = responseConversationId;
+        setActiveConversation((current) => current?.id === localConversationId
+          ? { ...current, id: responseConversationId }
+          : current);
+        localStorage.setItem(activeConversationIdKey, responseConversationId);
+        const drafts = readGradieDrafts(userId).map((draft) => draft.conversationId === localConversationId
+          ? { ...draft, conversationId: responseConversationId }
+          : draft);
+        writeGradieDrafts(userId, drafts);
+        setQueuedDraftCount(drafts.length);
+      }
+
       if (!res.ok) {
         const d = await res.json().catch(() => ({}));
         setError(d.error || 'Erreur lors de la génération.');
-        setIsStreaming(false);
+        if (res.status === 401 || res.status === 429 || res.status >= 500 || !navigator.onLine) {
+          const draft = queuedDraft || { id: queuedDraftId || userMsg.id, message: msg, conversationId: conversationIdForRequest || localConversationId, createdAt: userMsg.createdAt };
+          saveDraftToQueue({ ...draft, id: queuedDraftId || draft.id, conversationId: conversationIdForRequest || draft.conversationId });
+          if (navigator.onLine) scheduleDraftRetry({ ...draft, id: queuedDraftId || draft.id, conversationId: conversationIdForRequest || draft.conversationId });
+        } else {
+          if (queuedDraftId) discardQueuedDraft(queuedDraftId);
+          else removeOptimisticMessage();
+          setInput(msg);
+        }
         return;
       }
 
@@ -969,22 +1199,14 @@ export default function GradieChat({ userId, schoolId, userRole, userName }: Gra
         const text = await res.text();
         const parsed = text ? JSON.parse(text) : null;
         const reply = parsed?.reply || parsed?.message || text;
-        const am: AiMessage = {
-          id: (Date.now() + 1).toString(),
-          role: 'assistant',
-          content: reply || 'Réponse générée.',
-          createdAt: new Date().toISOString(),
-        };
-        setActiveConversation((p) => p ? { ...p, messages: [...p.messages, am] } : null);
-        setStreamingContent('');
-        await loadConversations();
+        commitAssistant(reply || 'Réponse générée.');
+        await loadConversations(search, historyFilter);
         return;
       }
 
       const reader = res.body.getReader();
       readerRef.current = reader;
       const decoder = new TextDecoder();
-      let acc = '';
       let pendingSse = '';
       let lastRenderAt = 0;
       let renderTimer: ReturnType<typeof setTimeout> | undefined;
@@ -1016,7 +1238,7 @@ export default function GradieChat({ userId, schoolId, userRole, userName }: Gra
           const json = line.replace(/^data:\s*/, '').trim();
           try {
             const p = JSON.parse(json);
-            if (p.token) { acc += p.token; publishStreaming(acc); }
+            if (p.token) { accumulatedReply += p.token; publishStreaming(accumulatedReply); }
             // Handle action results — append summary to response
             if (p.actions && Array.isArray(p.actions)) {
               for (const act of p.actions) {
@@ -1046,37 +1268,80 @@ export default function GradieChat({ userId, schoolId, userRole, userName }: Gra
                   summary = `\n\n---\n✏️ Créneau modifié`;
                 }
                 if (summary) {
-                  acc += summary;
-                  publishStreaming(acc);
+                  accumulatedReply += summary;
+                  publishStreaming(accumulatedReply);
                 }
               }
             }
             if (p.done) {
-              const am: AiMessage = {
-                id: (Date.now() + 1).toString(),
-                role: 'assistant',
-                content: acc,
-                createdAt: new Date().toISOString(),
-              };
-              setActiveConversation((p) => p ? { ...p, messages: [...p.messages, am] } : null);
-              setStreamingContent('');
+              commitAssistant(accumulatedReply);
             }
           } catch { continue; }
         }
       }
 
       if (renderTimer) clearTimeout(renderTimer);
-      publishStreaming(acc, true);
-
-      await loadConversations();
-    } catch { setError('Erreur de réseau lors de la communication avec Gradie.'); }
-    finally { setIsStreaming(false); setStopRequested(false); readerRef.current = null; }
+      if (!assistantCommitted && accumulatedReply.trim()) commitAssistant(accumulatedReply);
+      await loadConversations(search, historyFilter);
+    } catch {
+      if (accumulatedReply.trim()) commitAssistant(accumulatedReply);
+      else {
+        const draft = queuedDraft || { id: queuedDraftId || userMsg.id, message: msg, conversationId: conversationIdForRequest || localConversationId, createdAt: userMsg.createdAt };
+        saveDraftToQueue({ ...draft, id: queuedDraftId || draft.id, conversationId: conversationIdForRequest || draft.conversationId });
+        if (navigator.onLine) scheduleDraftRetry({ ...draft, id: queuedDraftId || draft.id, conversationId: conversationIdForRequest || draft.conversationId });
+      }
+      setError('Connexion interrompue : le message est conservé et sera renvoyé automatiquement dès que le réseau revient.');
+    }
+    finally {
+      setStreamingContent('');
+      setIsStreaming(false);
+      setStopRequested(false);
+      readerRef.current = null;
+    }
   };
 
+  sendMessageRef.current = sendMessage;
+
   useEffect(() => {
-    const timer = setTimeout(() => loadConversations(search), 250);
-    return () => clearTimeout(timer);
-  }, [loadConversations, search]);
+    if (!draftsHydrated) return;
+    const flushDrafts = async () => {
+      if (flushingDraftsRef.current || !navigator.onLine) return;
+      flushingDraftsRef.current = true;
+      try {
+        for (const draft of readGradieDrafts(userId)) {
+          if (!navigator.onLine) break;
+          while (navigator.onLine && isStreamingRef.current) {
+            await new Promise<void>((resolve) => window.setTimeout(resolve, 300));
+          }
+          const activeId = activeConversationRef.current?.id;
+          if (draft.conversationId && !draft.conversationId.startsWith('draft-') && draft.conversationId !== activeId) {
+            const restored = await loadConversation(draft.conversationId);
+            if (!restored) break;
+            await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+          }
+
+          await sendMessageRef.current(draft.message, draft.id);
+          const remainsQueued = readGradieDrafts(userId).some((item) => item.id === draft.id);
+          if (remainsQueued) break;
+        }
+      } finally {
+        flushingDraftsRef.current = false;
+      }
+    };
+    const handleOnline = () => void flushDrafts();
+    const handleFlushRequest = () => void flushDrafts();
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('gradeup-gradie-flush-drafts', handleFlushRequest);
+    if (navigator.onLine) void flushDrafts();
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('gradeup-gradie-flush-drafts', handleFlushRequest);
+    };
+  }, [draftsHydrated, loadConversation, userId]);
+
+  useEffect(() => () => {
+    if (draftRetryTimerRef.current) window.clearTimeout(draftRetryTimerRef.current);
+  }, []);
 
   const stopGeneration = () => {
     setStopRequested(true);
@@ -1109,6 +1374,26 @@ export default function GradieChat({ userId, schoolId, userRole, userName }: Gra
     setIsSpeaking(true);
   };
 
+  const toggleConversationFlag = async (conversation: ConversationSummary, flag: 'favorite' | 'pinned') => {
+    const nextValue = !conversation[flag];
+    setConversations((current) => current.map((item) => item.id === conversation.id ? { ...item, [flag]: nextValue } : item));
+    try {
+      const res = await fetch(`/api/ai/conversations/${conversation.id}?userId=${userId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId, [flag]: nextValue }),
+      });
+      if (!res.ok) throw new Error();
+      if ((flag === 'favorite' && historyFilter === 'favorite' && !nextValue)
+        || (flag === 'pinned' && historyFilter === 'pinned' && !nextValue)) {
+        setConversations((current) => current.filter((item) => item.id !== conversation.id));
+      }
+    } catch {
+      setConversations((current) => current.map((item) => item.id === conversation.id ? { ...item, [flag]: conversation[flag] } : item));
+      toast.error('Impossible de mettre à jour cette conversation.');
+    }
+  };
+
   const virtualizer = useVirtualizer({
     count: activeConversation?.messages?.length ?? 0,
     getScrollElement: () => messagesContainerRef.current,
@@ -1117,26 +1402,21 @@ export default function GradieChat({ userId, schoolId, userRole, userName }: Gra
   });
 
   return (
-    <div className="flex flex-col h-dvh bg-[#0B0B0F] text-white overflow-hidden relative font-sans">
+    <div className="flex flex-col h-full min-h-0 bg-[#0B0B0F] text-white overflow-hidden relative font-sans">
       {/* ── 1. HEADER (Android: 64px, iOS: 88px + Safe Area) ───────────────── */}
-      <header
-        className="flex items-center justify-between px-[20px] bg-[#12121A]/90 backdrop-blur-md border-b border-white/5 shrink-0 z-20"
-        style={{
-          height: 'max(64px, env(safe-area-inset-top, 0px) + 64px)',
-          paddingTop: 'env(safe-area-inset-top, 0px)',
-        }}
-      >
+      <header className="h-16 flex items-center justify-between px-3 sm:px-5 bg-[#12121A]/90 backdrop-blur-md border-b border-white/5 shrink-0 z-20">
         {/* Left: Avatar (40px) + Name (20px SemiBold) + Subtitle (13px) */}
-        <div className="flex items-center gap-[8px] flex-1 min-w-0">
-          <div className="w-[40px] h-[40px] rounded-full bg-gradient-to-tr from-indigo-500 to-purple-600 flex items-center justify-center shrink-0 shadow-lg shadow-indigo-500/20">
-            <Bot className="w-5 h-5 text-white" />
+        <div className="flex items-center gap-2.5 flex-1 min-w-0">
+          <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-indigo-500 to-purple-600 flex items-center justify-center shrink-0 shadow-lg shadow-indigo-500/20">
+            <Sparkles className="w-5 h-5 text-white" />
           </div>
           <div className="min-w-0">
-            <h1 className="text-[20px] font-semibold tracking-tight truncate leading-none text-white">
+            <h1 className="text-base sm:text-lg font-semibold tracking-tight truncate leading-none text-white">
               Gradie IA
             </h1>
-            <p className="text-[13px] text-emerald-400 font-medium leading-tight mt-0.5 flex items-center gap-1.5">
-              {isStreaming ? 'En train d\'écrire...' : isOnline ? 'En ligne' : 'Hors ligne — fonction IA indisponible'}
+            <p className={`text-xs font-medium leading-tight mt-1 flex items-center gap-1.5 ${isOnline ? 'text-emerald-400' : 'text-amber-300'}`}>
+              <span className={`w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-emerald-400' : 'bg-amber-300'}`} />
+              {isStreaming ? 'Gradie rédige…' : isOnline ? 'Prête à aider' : 'Hors ligne'}
               <span className="text-[10px] bg-white/10 text-white/50 px-1.5 py-0.5 rounded-full font-normal">
                 {selectedModel === 'glm' ? 'GLM' : selectedModel === 'deepseek' ? 'DeepSeek' : selectedModel === 'gemma' ? 'Gemma' : 'Llama'}
               </span>
@@ -1145,47 +1425,52 @@ export default function GradieChat({ userId, schoolId, userRole, userName }: Gra
         </div>
 
         {/* Right: 3 Icons (24x24px, 16px gap) */}
-        <div className="flex items-center gap-[16px] shrink-0">
+        <div className="flex items-center gap-1 shrink-0">
           <button
-            onClick={() => setShowSearch(!showSearch)}
-            className="w-[24px] h-[24px] text-white/70 hover:text-white transition-colors"
-            title="Recherche"
+            onClick={() => { setHistoryFilter('all'); setShowHistorySheet(true); }}
+            disabled={isStreaming}
+            className="w-11 h-11 rounded-xl text-white/70 hover:text-white hover:bg-white/8 disabled:opacity-40 transition-colors flex items-center justify-center"
+            title="Historique et recherche"
+            aria-label="Ouvrir l'historique"
           >
-            <Search className="w-[24px] h-[24px]" />
+            <History className="w-5 h-5" />
           </button>
           <button
             onClick={createNewConversation}
-            className="w-[24px] h-[24px] text-white/70 hover:text-white transition-colors"
+            disabled={isStreaming}
+            className="w-11 h-11 rounded-xl text-white/70 hover:text-white hover:bg-white/8 disabled:opacity-40 transition-colors flex items-center justify-center"
             title="Nouveau chat"
+            aria-label="Nouvelle conversation"
           >
-            <Plus className="w-[24px] h-[24px]" />
+            <Plus className="w-5 h-5" />
           </button>
           <button
             onClick={() => setShowMenuSheet(true)}
-            className="w-[24px] h-[24px] text-white/70 hover:text-white transition-colors"
+            disabled={isStreaming}
+            className="w-11 h-11 rounded-xl text-white/70 hover:text-white hover:bg-white/8 disabled:opacity-40 transition-colors flex items-center justify-center"
             title="Menu"
+            aria-label="Options de Gradie"
           >
-            <MoreVertical className="w-[24px] h-[24px]" />
+            <MoreVertical className="w-5 h-5" />
           </button>
         </div>
       </header>
-
-      {/* ── 3. SEARCH OVERLAY ─────────────────────────────────────────────── */}
-      {showSearch && (
-        <SearchBarOverlay
-          search={search}
-          setSearch={setSearch}
-          onClose={() => setShowSearch(false)}
-        />
-      )}
 
       {/* ── 2. THREE DOTS MENU BOTTOM SHEET ──────────────────────────────── */}
       {showMenuSheet && (
         <ThreeDotsMenuSheet
           onClose={() => setShowMenuSheet(false)}
           onNewChat={createNewConversation}
-          onOpenHistory={() => setShowSearch(true)}
-          onOpenSearch={() => setShowSearch(true)}
+          onOpenHistory={(filter = 'all') => {
+            setHistoryFilter(filter);
+            setSearch('');
+            setShowHistorySheet(true);
+            void loadConversations('', filter);
+          }}
+          onOpenSearch={() => {
+            setHistoryFilter('all');
+            setShowHistorySheet(true);
+          }}
           onOpenSearchHistory={() => setShowSearchHistory(true)}
           onClearAll={() => {
             if (!confirm('Vider tout l\'historique ?')) return;
@@ -1243,6 +1528,104 @@ export default function GradieChat({ userId, schoolId, userRole, userName }: Gra
         />
       )}
 
+      {showHistorySheet && (
+        <div className="fixed inset-0 z-[60] flex justify-end bg-black/65 backdrop-blur-sm" onMouseDown={(event) => {
+          if (event.target === event.currentTarget) setShowHistorySheet(false);
+        }}>
+          <section role="dialog" aria-modal="true" aria-label="Historique des conversations" className="flex h-full w-full max-w-[480px] flex-col border-l border-white/10 bg-[#0B0B0F] shadow-2xl animate-gradi-sheet-up sm:rounded-l-3xl">
+            <header className="flex shrink-0 items-center gap-3 border-b border-white/10 px-4 pb-3 pt-[max(12px,env(safe-area-inset-top))]">
+              <button onClick={() => setShowHistorySheet(false)} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-white/70 hover:bg-white/10 hover:text-white" aria-label="Fermer l'historique">
+                <ChevronLeft className="h-5 w-5" />
+              </button>
+              <div className="min-w-0 flex-1">
+                <h2 className="text-base font-semibold text-white">Vos conversations</h2>
+                <p className="mt-0.5 text-xs text-white/40">Retrouvez vos échanges et documents</p>
+              </div>
+              <button onClick={createNewConversation} disabled={isStreaming} className="flex h-10 items-center gap-1.5 rounded-xl bg-indigo-500/15 px-3 text-sm font-medium text-indigo-200 hover:bg-indigo-500/25 disabled:opacity-40">
+                <Plus className="h-4 w-4" /><span>Nouveau</span>
+              </button>
+            </header>
+
+            <div className="shrink-0 space-y-3 border-b border-white/5 p-4">
+              <label className="flex h-11 items-center gap-2.5 rounded-xl border border-white/10 bg-white/[0.04] px-3 focus-within:border-indigo-400/50">
+                <Search className="h-4 w-4 shrink-0 text-white/35" />
+                <input
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  placeholder="Rechercher un message ou document"
+                  className="min-w-0 flex-1 bg-transparent text-sm text-white outline-none placeholder:text-white/35"
+                  autoFocus
+                />
+                {search && <button onClick={() => setSearch('')} className="rounded p-1 text-white/40 hover:text-white" aria-label="Effacer la recherche"><X className="h-4 w-4" /></button>}
+              </label>
+              <div className="flex gap-2 overflow-x-auto pb-0.5">
+                {([
+                  { id: 'all', label: 'Tout', icon: MessageSquare },
+                  { id: 'favorite', label: 'Favoris', icon: Star },
+                  { id: 'pinned', label: 'Épinglés', icon: Pin },
+                ] as const).map((tab) => {
+                  const Icon = tab.icon;
+                  return (
+                    <button
+                      key={tab.id}
+                      onClick={() => setHistoryFilter(tab.id)}
+                      className={`inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition-colors ${historyFilter === tab.id ? 'border-indigo-400/35 bg-indigo-500/15 text-indigo-200' : 'border-white/10 bg-white/[0.03] text-white/55 hover:text-white'}`}
+                    >
+                      <Icon className="h-3.5 w-3.5" />{tab.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 pb-6 pt-3">
+              {historyLoading && conversations.length === 0 ? (
+                <div className="flex items-center justify-center gap-2 py-12 text-sm text-white/45"><Loader2 className="h-4 w-4 animate-spin" />Chargement de l'historique…</div>
+              ) : conversations.length === 0 ? (
+                <div className="px-5 py-16 text-center">
+                  <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-white/[0.05]"><MessageSquare className="h-6 w-6 text-white/25" /></div>
+                  <p className="text-sm font-medium text-white/75">{search ? 'Aucun résultat' : historyFilter === 'favorite' ? 'Aucun favori pour le moment' : historyFilter === 'pinned' ? 'Aucune conversation épinglée' : 'Aucune conversation pour le moment'}</p>
+                  <p className="mx-auto mt-1.5 max-w-[260px] text-xs leading-relaxed text-white/40">{search ? 'Essayez un autre mot ou le nom d’un document.' : 'Vos prochains échanges avec Gradie apparaîtront ici.'}</p>
+                </div>
+              ) : (
+                <div className="space-y-5">
+                  {groupConversationsByDate(conversations).map(([group, items]) => (
+                    <section key={group}>
+                      <h3 className="px-2 pb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-white/35">{group}</h3>
+                      <div className="space-y-1">
+                        {items.map((conversation) => {
+                          const preview = conversation.messages?.[0];
+                          const isActive = activeConversation?.id === conversation.id;
+                          return (
+                            <article key={conversation.id} className={`group flex items-center gap-2 rounded-2xl border px-2.5 py-2 transition-colors ${isActive ? 'border-indigo-400/25 bg-indigo-500/[0.08]' : 'border-transparent hover:border-white/5 hover:bg-white/[0.04]'}`}>
+                              <button onClick={() => void loadConversation(conversation.id)} disabled={isStreaming} className="min-w-0 flex-1 py-1 text-left disabled:opacity-50">
+                                <span className="flex items-center gap-1.5">
+                                  <span className="truncate text-sm font-medium text-white/85">{conversation.title || 'Nouvelle conversation'}</span>
+                                  <span className="shrink-0 text-[10px] text-white/35">{formatDate(conversation.updatedAt)}</span>
+                                </span>
+                                <span className="mt-1 block truncate text-xs text-white/40">{preview?.content || 'Conversation sans message'}</span>
+                              </button>
+                              <div className="flex shrink-0 items-center">
+                                <button onClick={() => void toggleConversationFlag(conversation, 'pinned')} aria-label={conversation.pinned ? 'Désépingler' : 'Épingler'} title={conversation.pinned ? 'Désépingler' : 'Épingler'} className={`flex h-9 w-9 items-center justify-center rounded-lg transition-colors ${conversation.pinned ? 'text-amber-300' : 'text-white/25 hover:bg-white/10 hover:text-white/70'}`}>
+                                  <Pin className="h-4 w-4" />
+                                </button>
+                                <button onClick={() => void toggleConversationFlag(conversation, 'favorite')} aria-label={conversation.favorite ? 'Retirer des favoris' : 'Ajouter aux favoris'} title={conversation.favorite ? 'Retirer des favoris' : 'Ajouter aux favoris'} className={`flex h-9 w-9 items-center justify-center rounded-lg transition-colors ${conversation.favorite ? 'text-yellow-300' : 'text-white/25 hover:bg-white/10 hover:text-white/70'}`}>
+                                  <Star className="h-4 w-4" fill={conversation.favorite ? 'currentColor' : 'none'} />
+                                </button>
+                              </div>
+                            </article>
+                          );
+                        })}
+                      </div>
+                    </section>
+                  ))}
+                </div>
+              )}
+            </div>
+          </section>
+        </div>
+      )}
+
       {/* ── 12. ATTACHMENT SHEET ─────────────────────────────────────────── */}
       {showAttachmentSheet && (
         <AttachmentSheet
@@ -1267,7 +1650,11 @@ export default function GradieChat({ userId, schoolId, userRole, userName }: Gra
       <main className="flex-1 min-h-0 overflow-hidden relative">
         <div
           ref={messagesContainerRef}
-          className="h-full overflow-y-auto px-[20px] py-4 gradi-scrollbar max-w-[860px] mx-auto"
+          onScroll={(event) => {
+            const element = event.currentTarget;
+            shouldAutoScrollRef.current = element.scrollHeight - element.scrollTop - element.clientHeight < 120;
+          }}
+          className="h-full w-full overflow-y-auto overscroll-contain px-3 sm:px-5 py-4 gradi-scrollbar max-w-[900px] mx-auto"
         >
           {/* Welcome Screen when empty */}
           {!activeConversation && !isLoading && (
@@ -1301,12 +1688,12 @@ export default function GradieChat({ userId, schoolId, userRole, userName }: Gra
                     {/* ── 8. BULLES (User max 82%, radius 26px, padding 16h/12v | IA max 88%, radius 26px) ── */}
                     <div
                       style={{
-                        maxWidth: isUser ? '82%' : '88%',
+                        maxWidth: isUser ? '90%' : '94%',
                         borderRadius: '26px',
                       }}
                       className={`px-[16px] py-[12px] shadow-sm ${
                         isUser
-                          ? 'bg-gradient-to-r from-indigo-600 to-indigo-500 text-white rounded-br-md'
+                          ? 'bg-gradient-to-br from-indigo-600 to-indigo-500 text-white rounded-br-md'
                           : 'bg-white/8 border border-white/10 text-white/90 rounded-bl-md backdrop-blur-md'
                       }`}
                     >
@@ -1327,8 +1714,8 @@ export default function GradieChat({ userId, schoolId, userRole, userName }: Gra
                       )}
                     </div>
 
-                    <span className={`text-[11px] text-white/30 mt-1 ${isUser ? 'mr-2' : 'ml-2'}`}>
-                      {formatDate(msg.createdAt)}
+                    <span className={`flex items-center gap-1.5 text-[11px] mt-1 ${isUser ? 'mr-2' : 'ml-2'} ${msg.deliveryStatus === 'draft' ? 'text-amber-300/80' : msg.deliveryStatus === 'sending' ? 'text-indigo-300/75' : 'text-white/30'}`}>
+                      {msg.deliveryStatus === 'draft' ? <><AlertTriangle className="h-3 w-3" /> Brouillon · en attente du réseau</> : msg.deliveryStatus === 'sending' ? <><Loader2 className="h-3 w-3 animate-spin" /> Envoi en cours…</> : formatDate(msg.createdAt)}
                     </span>
                   </div>
                 );
@@ -1338,22 +1725,39 @@ export default function GradieChat({ userId, schoolId, userRole, userName }: Gra
 
           {/* ── 13. PENDANT QUE L'IA REPOND ("L'IA réfléchit...", ■ Arrêter) ── */}
           {isStreaming && (
-            <div className="flex flex-col items-start gap-2 my-3">
-              <div className="max-w-[88%] bg-white/8 border border-white/10 rounded-[26px] p-4 flex items-center gap-3">
-                <div className="flex gap-1 items-center">
-                  <span className="w-2 h-2 rounded-full bg-indigo-400 animate-ping" />
-                  <span className="w-2 h-2 rounded-full bg-indigo-400 animate-ping delay-150" />
-                  <span className="w-2 h-2 rounded-full bg-indigo-400 animate-ping delay-300" />
+            <div className="flex flex-col items-start gap-2 my-3" aria-live="polite" aria-label="Réponse de Gradie en cours">
+              {streamingContent ? (
+                <div className="max-w-[94%] rounded-[24px] rounded-bl-md border border-white/10 bg-white/[0.06] px-4 py-3 text-white/90 shadow-sm">
+                  <div className="gradi-msg-text leading-relaxed break-words [&_p]:mb-3 [&_p:last-child]:mb-0 [&_ul]:my-3 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:my-3 [&_ol]:list-decimal [&_ol]:pl-5 [&_li]:my-1 [&_h1]:mb-3 [&_h1]:text-xl [&_h1]:font-bold [&_h2]:mb-2 [&_h2]:mt-4 [&_h2]:text-lg [&_h2]:font-bold [&_pre]:my-3 [&_pre]:overflow-x-auto [&_pre]:rounded-xl [&_pre]:bg-black/30 [&_pre]:p-3 [&_code]:rounded [&_code]:bg-black/20 [&_code]:px-1 [&_code]:py-0.5">
+                    <ReactMarkdown>{streamingContent.replace(/\[PREF:\s*[^\]]+\]/gi, '').replace(/\[MEM:\s*[^\]]+\]/gi, '')}</ReactMarkdown>
+                  </div>
+                  <span className="inline-block ml-1 h-4 w-0.5 translate-y-0.5 rounded bg-indigo-300 animate-pulse" />
                 </div>
-                <span className="text-xs font-semibold text-indigo-300">L'IA réfléchit...</span>
-              </div>
+              ) : (
+                <div className="rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 flex items-center gap-3">
+                  <div className="flex gap-1 items-center">
+                    <span className="w-1.5 h-1.5 rounded-full bg-indigo-300 animate-bounce" />
+                    <span className="w-1.5 h-1.5 rounded-full bg-indigo-300 animate-bounce [animation-delay:120ms]" />
+                    <span className="w-1.5 h-1.5 rounded-full bg-indigo-300 animate-bounce [animation-delay:240ms]" />
+                  </div>
+                  <span className="text-sm text-white/60">Gradie prépare sa réponse…</span>
+                </div>
+              )}
               <button
                 onClick={stopGeneration}
-                className="flex items-center gap-2 bg-red-500/20 border border-red-500/30 text-red-300 px-4 py-2 rounded-full text-xs font-semibold hover:bg-red-500/30 transition-all"
+                className="flex items-center gap-2 text-white/55 hover:text-rose-300 px-3 py-2 rounded-full text-xs font-medium transition-colors"
               >
-                <StopCircle className="w-4 h-4 text-red-400" />
-                ■ Arrêter la génération
+                <StopCircle className="w-4 h-4" />
+                Arrêter
               </button>
+            </div>
+          )}
+
+          {error && (
+            <div role="alert" className="my-3 flex items-start gap-2 rounded-xl border border-rose-400/25 bg-rose-500/10 p-3 text-sm text-rose-200">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>{error}</span>
+              <button onClick={() => setError(null)} className="ml-auto rounded p-1 text-rose-200/70 hover:text-white" aria-label="Fermer le message d'erreur"><X className="h-4 w-4" /></button>
             </div>
           )}
 
@@ -1363,35 +1767,41 @@ export default function GradieChat({ userId, schoolId, userRole, userName }: Gra
 
       {/* ── 11. CHAMP DE SAISIE (Fixé en bas, min 56px, max 180px, coins 28px, padding 16px) ── */}
       <footer
-        className="shrink-0 bg-[#12121A]/95 border-t border-white/5 px-[16px] pt-3 z-20"
-        style={{ paddingBottom: 'max(16px, env(safe-area-inset-bottom, 0px))' }}
+        className="shrink-0 bg-[#12121A]/95 border-t border-white/5 px-3 sm:px-4 pt-2.5 z-20"
+        style={{ paddingBottom: 'max(8px, env(safe-area-inset-bottom, 0px))' }}
       >
         <div className="max-w-[860px] mx-auto flex items-end gap-2">
           {/* ── 12. BOUTON + A GAUCHE ── */}
           <button
             onClick={() => setShowAttachmentSheet(true)}
-            className="w-[48px] h-[48px] rounded-[24px] bg-white/8 hover:bg-white/12 text-white/70 hover:text-white flex items-center justify-center shrink-0 transition-all"
+            className="w-11 h-11 rounded-2xl bg-white/8 hover:bg-white/12 text-white/70 hover:text-white flex items-center justify-center shrink-0 transition-all"
             title="Joindre un média"
+            aria-label="Joindre un document"
           >
             <Plus className="w-[24px] h-[24px]" />
           </button>
 
           {/* Champ de texte au centre */}
-          <div className="flex-1 min-h-[56px] max-h-[180px] bg-white/8 border border-white/10 rounded-[28px] px-[16px] py-3 flex items-center">
+          <div className="flex-1 min-h-[46px] max-h-[160px] bg-white/8 border border-white/10 rounded-[24px] px-4 py-2.5 flex items-center focus-within:border-indigo-400/50 transition-colors">
             <textarea
               ref={textareaRef}
               value={input}
-              onChange={(e) => setInput(e.target.value)}
+              onChange={(e) => {
+                setInput(e.target.value);
+                e.target.style.height = 'auto';
+                e.target.style.height = `${Math.min(e.target.scrollHeight, 132)}px`;
+              }}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault();
                   sendMessage();
                 }
               }}
-              placeholder="Écrivez votre message..."
+              placeholder="Écrivez à Gradie…"
               disabled={isStreaming}
               rows={1}
-              className="w-full bg-transparent text-white placeholder:text-white/30 text-sm outline-none resize-none max-h-[150px] leading-relaxed"
+              aria-label="Votre message pour Gradie"
+              className="w-full bg-transparent text-white placeholder:text-white/30 text-sm outline-none resize-none max-h-[132px] leading-relaxed"
             />
           </div>
 
@@ -1399,7 +1809,7 @@ export default function GradieChat({ userId, schoolId, userRole, userName }: Gra
           <div className="flex items-center gap-1 shrink-0">
             <button
               onClick={listening ? () => recognitionRef.current?.stop() : startVoice}
-              className={`w-[48px] h-[48px] rounded-[24px] flex items-center justify-center transition-all ${
+              className={`w-11 h-11 rounded-2xl flex items-center justify-center transition-all ${
                 listening ? 'bg-red-500 text-white animate-pulse' : 'bg-white/8 text-white/70 hover:text-white'
               }`}
               title="Dictée vocale"
@@ -1410,7 +1820,7 @@ export default function GradieChat({ userId, schoolId, userRole, userName }: Gra
             <button
               onClick={() => sendMessage()}
               disabled={!input.trim() && !isStreaming}
-              className={`w-[48px] h-[48px] rounded-[24px] flex items-center justify-center transition-all shadow-lg ${
+              className={`w-11 h-11 rounded-2xl flex items-center justify-center transition-all shadow-lg ${
                 input.trim()
                   ? 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-indigo-500/30'
                   : 'bg-white/5 text-white/20 cursor-not-allowed'
@@ -1421,6 +1831,11 @@ export default function GradieChat({ userId, schoolId, userRole, userName }: Gra
             </button>
           </div>
         </div>
+        {queuedDraftCount > 0 && (
+          <p className="mx-auto mt-1.5 max-w-[860px] px-1 text-[11px] text-amber-200/70" role="status">
+            {queuedDraftCount} brouillon{queuedDraftCount > 1 ? 's' : ''} en attente · envoi automatique à la reconnexion
+          </p>
+        )}
       </footer>
 
       {/* ── MEMORY PANEL ─────────────────────────────────────────────── */}

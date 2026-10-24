@@ -32,6 +32,9 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ classes });
   } catch (error: unknown) {
+    if (error instanceof AuthError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
     const message = error instanceof Error ? error.message : 'Internal server error';
     return NextResponse.json({ error: message }, { status: 500 });
   }
@@ -46,7 +49,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { schoolId, name, level, fees, titulaireId } = body;
+    const { schoolId, name, level, fees, titulaireId, cycle, section, option } = body;
 
     if (schoolId !== auth.schoolId) {
       return NextResponse.json({ error: 'Accès non autorisé' }, { status: 403 });
@@ -74,6 +77,9 @@ export async function POST(request: NextRequest) {
         schoolId,
         name,
         level: level || 'Primaire',
+        cycle: level === 'Secondaire' ? (cycle === 'Humanites' ? 'Humanites' : 'EB') : (level || 'Primaire'),
+        section: level === 'Secondaire' && cycle === 'Humanites' ? String(section || '').trim() : '',
+        option: level === 'Secondaire' && cycle === 'Humanites' ? String(option || '').trim() : '',
         fees: typeof fees === 'number' ? fees : parseFloat(fees) || 0,
         titulaireId: titulaireId || null,
       },

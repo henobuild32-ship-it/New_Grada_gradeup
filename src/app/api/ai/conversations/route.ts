@@ -31,13 +31,18 @@ export async function GET(request: NextRequest) {
       ownerId = userId;
     }
 
-    const where: any = { userId: ownerId };
+    const where: any = { userId: ownerId, deletedAt: null };
     if (favorite === '1') where.favorite = true;
     if (pinned === '1') where.pinned = true;
     if (search) {
       where.OR = [
         { title: { contains: search, mode: 'insensitive' } },
         { tags: { contains: search, mode: 'insensitive' } },
+        { messages: { some: { deletedAt: null, content: { contains: search, mode: 'insensitive' } } } },
+        { documents: { some: { deletedAt: null, OR: [
+          { name: { contains: search, mode: 'insensitive' } },
+          { extractedText: { contains: search, mode: 'insensitive' } },
+        ] } } },
       ];
     }
 

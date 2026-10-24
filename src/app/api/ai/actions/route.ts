@@ -29,7 +29,7 @@ export async function POST(request: NextRequest) {
     switch (action) {
       // ── CREATE CLASSES ──────────────────────────────────────────────────
       case 'create_classes': {
-        const { classes } = params as { classes: Array<{ name: string; level?: string; fees?: number }> };
+        const { classes } = params as { classes: Array<{ name: string; level?: string; cycle?: string; section?: string; option?: string; fees?: number }> };
         if (!classes || !Array.isArray(classes) || classes.length === 0) {
           return NextResponse.json({ error: 'classes array requis' }, { status: 400 });
         }
@@ -51,6 +51,11 @@ export async function POST(request: NextRequest) {
                 schoolId,
                 name: cls.name,
                 level: cls.level || 'Secondaire',
+                cycle: (cls.level || 'Secondaire') === 'Secondaire'
+                  ? (cls.cycle === 'Humanites' ? 'Humanites' : 'EB')
+                  : cls.level || 'Primaire',
+                section: (cls.level || 'Secondaire') === 'Secondaire' && cls.cycle === 'Humanites' ? cls.section?.trim() || '' : '',
+                option: (cls.level || 'Secondaire') === 'Secondaire' && cls.cycle === 'Humanites' ? cls.option?.trim() || '' : '',
                 fees: cls.fees || 0,
               },
               include: {

@@ -57,6 +57,9 @@ export interface ClassInfo {
   schoolId: string;
   name: string;
   level: string;
+  cycle?: string;
+  section?: string;
+  option?: string;
   fees: number;
   _count?: {
     enrollments: number;
