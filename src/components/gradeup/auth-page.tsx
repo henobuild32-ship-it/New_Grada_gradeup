@@ -423,6 +423,14 @@ export default function AuthPage({ initialView }: { initialView?: LandingAction 
         });
         return;
       }
+      if (loginRole === 'CAISSIER' && !identityValue.includes('@')) {
+        toast({
+          title: 'Adresse email requise',
+          description: 'Connectez-vous avec l’adresse email associée à votre compte de caisse.',
+          variant: 'destructive',
+        });
+        return;
+      }
     }
     setLoginLoading(true);
     try {
@@ -825,33 +833,46 @@ export default function AuthPage({ initialView }: { initialView?: LandingAction 
                 <p className="mt-2 text-sm leading-relaxed text-muted-foreground">Accédez à votre espace personnel GradeUp.</p>
               </div>
 
-            {/* Toggle Mode User vs Admin */}
-            <div className="grid grid-cols-2 gap-1.5 rounded-2xl bg-slate-100 p-1.5 dark:bg-slate-800">
+            {/* Choix du profil de connexion : le rôle réel reste déterminé par le compte. */}
+            <div className="grid grid-cols-3 gap-1 rounded-2xl bg-slate-100 p-1.5 dark:bg-slate-800">
               <button
                 type="button"
-                onClick={() => setLoginIsAdmin(false)}
-                aria-pressed={!loginIsAdmin}
-                className={`min-h-11 rounded-xl px-2 py-2.5 text-xs font-bold transition-all sm:px-3 ${
-                  !loginIsAdmin
+                onClick={() => { setLoginIsAdmin(false); setLoginRole('STUDENT'); }}
+                aria-pressed={!loginIsAdmin && loginRole !== 'CAISSIER'}
+                className={`min-h-11 rounded-xl px-1.5 py-2 text-[10px] font-bold transition-all sm:px-3 sm:text-xs ${
+                  !loginIsAdmin && loginRole !== 'CAISSIER'
                     ? 'bg-card text-foreground shadow-sm'
                     : 'text-muted-foreground hover:text-foreground'
                 }`}
               >
-                <User className="w-3.5 h-3.5 inline mr-1.5" />
-                Élève / Prof / Parent
+                <User className="mr-1 inline size-3 sm:mr-1.5 sm:size-3.5" />
+                Élève · Prof · Parent
+              </button>
+              <button
+                type="button"
+                onClick={() => { setLoginIsAdmin(false); setLoginRole('CAISSIER'); }}
+                aria-pressed={!loginIsAdmin && loginRole === 'CAISSIER'}
+                className={`min-h-11 rounded-xl px-1.5 py-2 text-[10px] font-bold transition-all sm:px-3 sm:text-xs ${
+                  !loginIsAdmin && loginRole === 'CAISSIER'
+                    ? 'bg-card text-foreground shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                <DollarSign className="mr-1 inline size-3 text-emerald-600 sm:mr-1.5 sm:size-3.5" />
+                Caissier
               </button>
               <button
                 type="button"
                 onClick={() => setLoginIsAdmin(true)}
                 aria-pressed={loginIsAdmin}
-                className={`min-h-11 rounded-xl px-2 py-2.5 text-xs font-bold transition-all sm:px-3 ${
+                className={`min-h-11 rounded-xl px-1.5 py-2 text-[10px] font-bold transition-all sm:px-3 sm:text-xs ${
                   loginIsAdmin
                     ? 'bg-card text-foreground shadow-sm'
                     : 'text-muted-foreground hover:text-foreground'
                 }`}
               >
-                <Shield className="w-3.5 h-3.5 inline mr-1.5 text-amber-500" />
-                Direction / Admin
+                <Shield className="mr-1 inline size-3 text-amber-500 sm:mr-1.5 sm:size-3.5" />
+                Direction · Admin
               </button>
             </div>
 
@@ -875,13 +896,13 @@ export default function AuthPage({ initialView }: { initialView?: LandingAction 
                   </div>
 
                   <div className="space-y-1.5">
-                    <Label htmlFor="login-identity" className="text-xs font-bold flex items-center gap-1.5">
+                      <Label htmlFor="login-identity" className="text-xs font-bold flex items-center gap-1.5">
                       <User className="w-3.5 h-3.5 text-brand" />
-                      {loginIdentity.includes('@') ? 'Email' : loginIdentity ? 'Nom Complet' : 'Email ou Nom Complet'}
+                      {loginRole === 'CAISSIER' ? 'Email professionnel' : loginIdentity.includes('@') ? 'Email' : loginIdentity ? 'Nom Complet' : 'Email ou Nom Complet'}
                     </Label>
                     <Input
                       id="login-identity"
-                      placeholder="Jean Dupont  ou  jean@exemple.com"
+                      placeholder={loginRole === 'CAISSIER' ? 'caissier@ecole.cd' : 'Jean Dupont  ou  jean@exemple.com'}
                       value={loginIdentity}
                       onChange={(e) => setLoginIdentity(e.target.value)}
                       autoComplete="username"
@@ -889,7 +910,9 @@ export default function AuthPage({ initialView }: { initialView?: LandingAction 
                       required
                     />
                     <p className="text-[11px] text-muted-foreground">
-                      {loginIdentity.includes('@')
+                      {loginRole === 'CAISSIER'
+                        ? 'Utilisez l’adresse email associée à votre compte de caisse.'
+                        : loginIdentity.includes('@')
                         ? '✉️ Connexion par adresse email détectée'
                         : loginIdentity
                         ? '👤 Connexion par nom complet détectée'

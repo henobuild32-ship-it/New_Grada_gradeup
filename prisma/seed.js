@@ -5,7 +5,7 @@
  * Exécution :  npm run db:seed   (node prisma/seed.js)
  * Idempotent : supprime/recrée l'école de démo `sch_demo_gradeup` (cascade).
  *
- * Comptes de test (4 rôles liés entre eux) :
+ * Comptes de test (tous les rôles de l'application) :
  *   ADMIN    admin@gradeup.cd       / Demo1234!
  *   TEACHER  prof.kalala@gradeup.cd / Demo1234!
  *   STUDENT  gracia.mputu@student.cd / Demo1234!
@@ -114,6 +114,16 @@ async function main() {
     matricule: 'MAT-2025-1000',
     phone: '+243810000001',
     postName: 'Directeur',
+  });
+
+  await mkUser('usr_demo_cashier', {
+    fullName: 'Mado Kasongo',
+    email: 'caissier@gradeup.cd',
+    role: 'CAISSIER',
+    gender: 'F',
+    matricule: 'MAT-2025-1005',
+    phone: '+243810000006',
+    postName: 'Caissière',
   });
 
   const tKalala = await mkUser('usr_demo_t_kalala', {
@@ -679,6 +689,7 @@ async function main() {
   console.log('  ADMIN    admin@gradeup.cd');
   console.log('  TEACHER  prof.kalala@gradeup.cd   (titulaire 7ème B)');
   console.log('  TEACHER  prof.nsimba@gradeup.cd   (titulaire 6ème A)');
+  console.log('  CAISSIER caissier@gradeup.cd');
   console.log('  STUDENT  gracia.mputu@student.cd  (6ème A, fille de Mputu)');
   console.log('  PARENT   parent.mputu@gradeup.cd  (enfant : Gracia Mputu)');
   console.log('  Invite   ECOLE-DEMO26');

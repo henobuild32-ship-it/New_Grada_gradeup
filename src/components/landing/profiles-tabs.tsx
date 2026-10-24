@@ -6,6 +6,7 @@ import { profiles } from './content';
 import { BrandButton, Container, Icon, Reveal, Section, SectionHeading } from './primitives';
 import {
   CahierScreen,
+  CashierScreen,
   DashboardScreen,
   GradesScreen,
   LaptopFrame,
@@ -15,6 +16,7 @@ import {
 
 const SCREENS = {
   dashboard: { title: 'Tableau de bord de la direction', render: () => <DashboardScreen /> },
+  cashier: { title: 'Espace caisse de l’établissement', render: () => <CashierScreen /> },
   grading: { title: 'Cahier de cotation de l’enseignant', render: () => <CahierScreen /> },
   parent: { title: 'Espace parent sur téléphone', render: () => <ParentPhoneScreen /> },
   grades: { title: 'Notes de l’élève', render: () => <GradesScreen /> },
@@ -32,7 +34,7 @@ export function ProfilesTabs({ onRegister }: { onRegister: () => void }) {
 
         <Reveal delay={80} className="mt-10">
           <Tabs defaultValue={profiles.tabs[0].key} className="w-full">
-            <TabsList className="grid h-auto w-full grid-cols-2 gap-1 sm:grid-cols-4">
+            <TabsList className="grid h-auto w-full grid-cols-2 gap-1 sm:grid-cols-5">
               {profiles.tabs.map((tab) => (
                 <TabsTrigger key={tab.key} value={tab.key} className="h-11 text-sm">
                   {tab.label}

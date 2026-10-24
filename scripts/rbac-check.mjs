@@ -2,7 +2,7 @@
 /**
  * Tests d'autorisation GradeUp — PHASE 3.
  *
- * Vérifie que chaque route sensible répond selon les 4 rôles (401 sans
+ * Vérifie que chaque route sensible répond selon les rôles de l'application (401 sans
  * session, 403 hors rôle, ownership respecté, pas d'escalade, isolation
  * inter-écoles, rate limiting).
  *
@@ -14,7 +14,8 @@
  * Usage : npm run test:rbac   |   BASE_URL=http://localhost:3000 node scripts/rbac-check.mjs
  *
  * Comptes (seed) : admin@gradeup.cd / prof.kalala@gradeup.cd /
- * gracia.mputu@student.cd / parent.mputu@gradeup.cd — Mot de passe : Demo1234!
+ * gracia.mputu@student.cd / parent.mputu@gradeup.cd / caissier@gradeup.cd
+ * — Mot de passe : Demo1234!
  * (chaque login utilise une IP X-Forwarded-For distincte pour ne pas
  *  déclencher le rate limit 5/15min par IP.)
  */
@@ -36,6 +37,7 @@ const ACCOUNTS = {
   teacher: { email: 'prof.kalala@gradeup.cd', ip: '10.10.0.2' },
   student: { email: 'gracia.mputu@student.cd', ip: '10.10.0.3' },
   parent: { email: 'parent.mputu@gradeup.cd', ip: '10.10.0.4' },
+  cashier: { email: 'caissier@gradeup.cd', ip: '10.10.0.5' },
 };
 
 const results = [];
@@ -153,11 +155,49 @@ async function main() {
   await expectStatus('B2 STUDENT → /api/audit-logs', ['GET', '/api/audit-logs', cookies.student], 403);
   await expectStatus('B3 TEACHER → /api/audit-logs', ['GET', '/api/audit-logs', cookies.teacher], 403);
   await expectStatus('B4 ADMIN → /api/audit-logs', ['GET', '/api/audit-logs', cookies.admin], 200);
+  await expectStatus('B4b CAISSIER → /api/audit-logs', ['GET', '/api/audit-logs', cookies.cashier], 403);
   await expectStatus('B5 STUDENT → POST /api/grades', ['POST', '/api/grades', cookies.student, {}], 403);
   await expectStatus('B6 PARENT → POST /api/events', ['POST', '/api/events', cookies.parent, {}], 403);
   await expectStatus('B7 STUDENT → POST /api/fees', ['POST', '/api/fees', cookies.student, {}], 403);
   await expectStatus('B8 PARENT → POST /api/users', ['POST', '/api/users', cookies.parent, {}], 403);
   await expectStatus('B10 TEACHER → GET /api/payments', ['GET', '/api/payments', cookies.teacher], 403);
+  await expectStatus('B11 CAISSIER → GET /api/payments', ['GET', '/api/payments', cookies.cashier], 200);
+  const b12 = await expectStatus('B12 CAISSIER → POST /api/payments (rôle OK, corps invalide)', [
+    'POST',
+    '/api/payments',
+    cookies.cashier,
+    {},
+  ], [400, 422]);
+  if (b12 && [401, 403].includes(b12.status)) record('B12 bis rôle CAISSIER accepté', false, `HTTP ${b12.status}`);
+  const cashierPayment = await expectStatus('B13 CAISSIER enregistre un paiement avec reçu', [
+    'POST',
+    '/api/payments',
+    cookies.cashier,
+    {
+      studentId: STUDENT_ID,
+      amount: 1,
+      currency: 'USD',
+      month: 'Contrôle de caisse',
+      method: 'virement',
+      status: 'paid',
+      academicYear: '2025-2026',
+    },
+  ], 201);
+  expectData('B13 reçu créé pour le bon élève', cashierPayment, (j) =>
+    j?.payment?.studentId === STUDENT_ID && j.payment.status === 'paid' && typeof j.payment.receiptNumber === 'string' && j.payment.receiptNumber.length > 0
+      ? true
+      : 'paiement, élève ou reçu absent de la réponse'
+  );
+  const cashierHistory = await expectStatus('B14 CAISSIER consulte les paiements de l’élève', [
+    'GET',
+    `/api/payments?studentId=${STUDENT_ID}`,
+    cookies.cashier,
+  ], 200);
+  expectData('B14 paiement créé visible dans l’historique', cashierHistory, (j) =>
+    cashierPayment?.json?.payment?.id && Array.isArray(j?.payments) && j.payments.some((payment) => payment.id === cashierPayment.json.payment.id)
+      ? true
+      : 'paiement créé absent de l’historique'
+  );
   const b9 = await expectStatus('B9 TEACHER → POST /api/periods (rôle OK, corps invalide)', [
     'POST',
     '/api/periods',

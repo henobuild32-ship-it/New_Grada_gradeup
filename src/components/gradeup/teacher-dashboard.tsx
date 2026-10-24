@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { BookOpen, Users, FileText, Plus, GraduationCap, Clock, Lightbulb, RefreshCw, CalendarDays, AlertTriangle } from 'lucide-react';
+import { BookOpen, Users, FileText, Plus, GraduationCap, Clock, Lightbulb, RefreshCw, CalendarDays, AlertTriangle, ClipboardList, FolderOpen } from 'lucide-react';
 import type { CourseInfo, LessonInfo, UserInfo } from '@/lib/types';
 import { toast } from 'sonner';
 import PresenceWidget from './presence-widget';
@@ -362,6 +362,22 @@ export default function TeacherDashboard() {
               >
                 <Users className="h-4 w-4" />
                 Appel du jour
+              </Button>
+              <Button
+                variant="outline"
+                className="w-full justify-start gap-3 border-blue-200 text-blue-700 hover:bg-gradient-to-r hover:from-blue-50 hover:to-blue-100 hover:border-blue-300 hover:scale-[1.01] transition-all duration-300"
+                onClick={() => useAppStore.getState().setCurrentPage('teacher-documents')}
+              >
+                <FolderOpen className="h-4 w-4" />
+                Partager un document
+              </Button>
+              <Button
+                variant="outline"
+                className="w-full justify-start gap-3 border-blue-200 text-blue-700 hover:bg-gradient-to-r hover:from-blue-50 hover:to-blue-100 hover:border-blue-300 hover:scale-[1.01] transition-all duration-300"
+                onClick={() => useAppStore.getState().setCurrentPage('cahier-cotation')}
+              >
+                <ClipboardList className="h-4 w-4" />
+                Cahier de cotation & titulaire
               </Button>
             </CardContent>
           </Card>

@@ -453,13 +453,22 @@ export default function StudentDashboard() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Recent Lessons with subject-colored borders */}
         <Card className="transition-all duration-300 hover:shadow-lg hover:-translate-y-0.5">
-          <CardHeader>
+          <CardHeader className="flex flex-row items-center justify-between gap-2">
             <CardTitle className="flex items-center gap-2">
               <div className="p-1.5 rounded-lg bg-blue-50">
                 <FileText className="h-4 w-4 text-blue-500" />
               </div>
               Leçons récentes
             </CardTitle>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="shrink-0"
+              onClick={() => setCurrentPage('student-lessons')}
+            >
+              Voir les leçons
+            </Button>
           </CardHeader>
           <CardContent>
             {lessons.length === 0 ? (

@@ -122,6 +122,52 @@ export function DashboardScreen() {
   );
 }
 
+/** Espace caisse (desktop), présenté sans données de paiement fictives. */
+export function CashierScreen() {
+  return (
+    <div className="flex min-h-[240px] text-left sm:min-h-[300px]">
+      <div className="hidden w-[112px] shrink-0 border-r border-line bg-muted/40 p-2 sm:block">
+        <div className="mb-3 flex items-center gap-1.5 px-1">
+          <span className="grid size-4 place-items-center rounded-[5px] bg-brand text-[8px] font-bold text-white">G</span>
+          <span className="text-[10px] font-semibold text-foreground">GradeUp</span>
+        </div>
+        <ul className="space-y-0.5">
+          {['Caisse', 'Notifications', 'Profil', 'Aide'].map((item, index) => (
+            <li key={item} className={`rounded-md px-1.5 py-1 text-[9.5px] ${index === 0 ? 'bg-brand text-brand-foreground font-semibold' : 'text-muted-foreground'}`}>
+              {item}
+            </li>
+          ))}
+        </ul>
+      </div>
+      <div className="min-w-0 flex-1 p-3 sm:p-4">
+        <div className="mb-3 flex items-center justify-between gap-2">
+          <div>
+            <p className="text-[13px] font-semibold leading-tight text-foreground">Caisse de l’établissement</p>
+            <p className="text-[9.5px] text-muted-foreground">Recherche élève, solde et reçus</p>
+          </div>
+          <span className="rounded-full border border-line px-2 py-0.5 text-[9px] text-muted-foreground">Caissier</span>
+        </div>
+        <div className="rounded-lg border border-line p-3">
+          <p className="text-[10px] font-medium text-muted-foreground">Rechercher un élève par nom ou matricule</p>
+          <div className="mt-2 rounded-md border border-line bg-muted/30 px-2.5 py-2 text-[9.5px] text-muted-foreground">
+            Les résultats de votre établissement s’affichent ici.
+          </div>
+        </div>
+        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+          <div className="rounded-lg border border-line p-3">
+            <p className="text-[10px] font-semibold text-foreground">Paiements</p>
+            <p className="mt-1.5 text-[9px] leading-relaxed text-muted-foreground">Enregistrer un versement et générer son reçu après sélection de l’élève.</p>
+          </div>
+          <div className="rounded-lg border border-line p-3">
+            <p className="text-[10px] font-semibold text-foreground">Historique</p>
+            <p className="mt-1.5 text-[9px] leading-relaxed text-muted-foreground">Consulter les opérations autorisées et retrouver un reçu.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /** Bulletin scolaire (desktop). */
 export function BulletinScreen() {
   const rows: [string, string, string, string][] = [

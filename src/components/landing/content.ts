@@ -63,7 +63,7 @@ export const hero = {
   secondaryCta: 'Voir comment ça marche',
   secondaryCtaHref: '#comment-ca-marche',
   joinLine: {
-    prefix: 'Vous êtes parent, enseignant ou élève ?',
+    prefix: 'Vous êtes parent, enseignant, élève ou caissier ?',
     link: 'Rejoignez votre école',
     href: '#profils',
   },
@@ -176,7 +176,7 @@ export const gradie = {
 export const profiles = {
   id: 'profils',
   eyebrow: 'Pour chaque profil',
-  title: 'Un espace, trois choses à faire',
+  title: 'Un espace adapté à chaque profil',
   tabs: [
     {
       key: 'admin' as const,
@@ -190,12 +190,23 @@ export const profiles = {
       screen: 'dashboard' as const,
     },
     {
+      key: 'cashier' as const,
+      label: 'Caissier',
+      tasks: [
+        'Rechercher un élève et consulter son solde',
+        'Enregistrer un paiement et remettre un reçu',
+        'Retrouver l’historique des encaissements',
+      ],
+      cta: 'Rejoindre une école',
+      screen: 'cashier' as const,
+    },
+    {
       key: 'teacher' as const,
       label: 'Enseignant',
       tasks: [
-        'Encoder les notes depuis le cahier de cotation',
+        'Publier des leçons, devoirs et documents pour vos classes',
         'Pointer les présences en début de cours',
-        'Publier les leçons et les devoirs',
+        'Saisir les notes et transmettre le cahier au titulaire',
       ],
       cta: 'Commencer',
       screen: 'grading' as const,
@@ -215,7 +226,7 @@ export const profiles = {
       key: 'student' as const,
       label: 'Élève',
       tasks: [
-        'Voir les cours, les devoirs et les notes',
+        'Ouvrir les leçons, devoirs et documents de votre classe',
         'Consulter le bulletin publié',
         'Recevoir les annonces de l’école',
       ],
@@ -236,7 +247,7 @@ export const steps = {
     {
       step: '01',
       title: 'Créez votre école',
-      description: 'Nom de l’école, année scolaire et rôles : direction, enseignants, parents, élèves.',
+      description: 'Nom de l’école, année scolaire et rôles : direction, enseignants, caissiers, parents, élèves.',
     },
     {
       step: '02',
@@ -246,7 +257,7 @@ export const steps = {
     {
       step: '03',
       title: 'Invitez enseignants et parents',
-      description: 'Chaque profil reçoit son code d’accès et rejoint l’école sans créer de compte supplémentaire.',
+      description: 'Chaque profil reçoit son code d’accès et rejoint l’école avec les permissions prévues pour son rôle.',
     },
   ],
 };
