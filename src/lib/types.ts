@@ -278,6 +278,7 @@ export interface TeacherDocumentInfo {
   subject: string;
   level: string;
   period: string;
+  targetClassId: string;
   content: string;
   fileUrl: string;
   fileName: string;

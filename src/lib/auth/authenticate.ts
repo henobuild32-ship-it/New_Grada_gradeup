@@ -16,6 +16,7 @@ export interface AuthUser {
   schoolId: string;
   role: string;
   name: string;
+  authVersion?: number;
 }
 
 export function authenticateRequest(req: NextRequest): AuthUser {
@@ -30,6 +31,7 @@ export function authenticateRequest(req: NextRequest): AuthUser {
     schoolId: claims.schoolId,
     role: claims.role,
     name: claims.name,
+    authVersion: claims.authVersion,
   };
 }
 
@@ -41,10 +43,13 @@ export async function authenticateRequestActive(req: NextRequest): Promise<AuthU
   const auth = authenticateRequest(req);
   const user = await db.user.findUnique({
     where: { id: auth.userId },
-    select: { id: true, active: true, deletedAt: true },
+    select: { id: true, active: true, authVersion: true, deletedAt: true },
   });
   if (!user || user.active === false || user.deletedAt) {
     throw new AuthError('Compte désactivé ou supprimé. Veuillez contacter l’administrateur.', 403);
+  }
+  if ((auth.authVersion ?? 0) !== (user.authVersion ?? 0)) {
+    throw new AuthError('Session révoquée. Veuillez vous reconnecter.', 401);
   }
   return auth;
 }

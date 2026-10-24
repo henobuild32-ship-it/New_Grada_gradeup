@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { authenticateRequest, type AuthUser } from '@/lib/auth/authenticate';
+import { authenticateRequestActive, type AuthUser } from '@/lib/auth/authenticate';
 import { assertSchool, assertTeacherCourse } from '@/lib/api/rbac';
 import { ApiError, handleApiError } from '@/lib/api/errors';
 
@@ -61,7 +61,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const auth = authenticateRequest(request);
+    const auth = await authenticateRequestActive(request);
     const { id } = await params;
 
     const homework = await db.homework.findUnique({
@@ -96,7 +96,7 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const auth = authenticateRequest(request);
+    const auth = await authenticateRequestActive(request);
     const { id } = await params;
     const body = await request.json();
     const { title, description, dueDate, gradingType, courseId, fileUrl, fileName } = body;
@@ -160,7 +160,7 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const auth = authenticateRequest(request);
+    const auth = await authenticateRequestActive(request);
     const { id } = await params;
 
     const existing = await db.homework.findUnique({ where: { id } });

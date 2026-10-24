@@ -488,13 +488,17 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ error: 'Accès non autorisé. Action réservée aux administrateurs.' }, { status: 403 });
     }
 
-    const targetUser = await db.user.findUnique({ where: { id: userId }, select: { id: true, schoolId: true } });
+    const targetUser = await db.user.findUnique({ where: { id: userId }, select: { id: true, schoolId: true, active: true } });
     if (!targetUser || targetUser.schoolId !== auth.schoolId) {
       return NextResponse.json({ error: 'Utilisateur introuvable dans votre établissement.' }, { status: 403 });
     }
 
     const updateData: Record<string, unknown> = {};
-    if (active !== undefined) updateData.active = active;
+    if (active !== undefined) {
+      if (typeof active !== 'boolean') return NextResponse.json({ error: 'Le statut du compte doit être un booléen.' }, { status: 400 });
+      updateData.active = active;
+      if (active !== targetUser.active) updateData.authVersion = { increment: 1 };
+    }
     if (fullName !== undefined) updateData.fullName = fullName;
     if (email !== undefined) updateData.email = email;
     if (postName !== undefined) updateData.postName = postName;
@@ -563,15 +567,20 @@ export async function PATCH(request: NextRequest) {
       await syncStudentClassEnrollment(user.id, user.schoolId, classId, className);
     }
 
-    // Notify the user in real-time that their profile was updated by admin
+    // Reflect access changes immediately; a status transition also revokes old
+    // access/refresh tokens so they cannot become usable again later.
     try { await notifyUser({
       schoolId: user.schoolId,
       userId: user.id,
-      title: 'Profil Modifié 👤',
-      message: 'Vos informations de profil ont été mises à jour par l\'administration.',
-      type: 'PROFILE',
-      priority: 'LOW',
-      metadata: { userId: user.id },
+      title: active !== undefined && active !== targetUser.active
+        ? (active ? 'Compte activé' : 'Compte désactivé')
+        : 'Profil modifié 👤',
+      message: active !== undefined && active !== targetUser.active
+        ? (active ? 'Votre compte GradeUp a été activé par la direction.' : 'Votre compte GradeUp a été désactivé par la direction.')
+        : 'Vos informations de profil ont été mises à jour par l’administration.',
+      type: active !== undefined && active !== targetUser.active ? 'SYSTEM' : 'PROFILE',
+      priority: active !== undefined && active !== targetUser.active ? 'HIGH' : 'LOW',
+      metadata: { userId: user.id, active: user.active },
     }); } catch (e) { console.error('[Users PATCH] Notification failed (non-blocking):', e); }
 
     return NextResponse.json({ user });

@@ -91,7 +91,7 @@ export default function ProfilePage() {
   }, [user]);
 
   useEffect(() => {
-    if (user?.id && (user.role === 'STUDENT' || user.role === 'TEACHER')) {
+    if (user?.id && user.role === 'TEACHER') {
       const fetchFullUser = async () => {
         try {
           setLoadingCard(true);
@@ -307,7 +307,7 @@ export default function ProfilePage() {
       </Card>
 
       {/* Ma Carte d'Identité 3D (Élèves & Enseignants uniquement) */}
-      {(user.role === 'STUDENT' || user.role === 'TEACHER') && (
+      {user.role === 'TEACHER' && (
         <Card className="transition-all duration-300 hover:shadow-lg">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-lg">

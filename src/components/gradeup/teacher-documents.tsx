@@ -37,6 +37,7 @@ interface TeacherDocumentFormState {
   subject: string;
   level: string;
   period: string;
+  targetClassId: string;
   content: string;
   fileName: string;
   fileUrl: string;
@@ -49,6 +50,7 @@ const emptyForm = (): TeacherDocumentFormState => ({
   subject: '',
   level: '',
   period: '',
+  targetClassId: '',
   content: '',
   fileName: '',
   fileUrl: '',
@@ -60,6 +62,7 @@ export default function TeacherDocuments() {
   const selectedFileRef = useRef<File | null>(null);
 
   const [documents, setDocuments] = useState<TeacherDocumentInfo[]>([]);
+  const [classes, setClasses] = useState<Array<{ id: string; name: string; level?: string; section?: string; option?: string }>>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingDoc, setEditingDoc] = useState<TeacherDocumentInfo | null>(null);
@@ -79,10 +82,15 @@ export default function TeacherDocuments() {
     }
     const fetchDocuments = async () => {
       try {
-        const res = await fetch(`/api/documents?schoolId=${user.schoolId}&teacherId=${user.id}`);
+        const [res, classRes] = await Promise.all([
+          fetch(`/api/documents?schoolId=${user.schoolId}&teacherId=${user.id}`),
+          fetch(`/api/classes?schoolId=${user.schoolId}`),
+        ]);
         if (!res.ok) throw new Error();
         const data = await res.json();
+        const classData = classRes.ok ? await classRes.json() : {};
         setDocuments(Array.isArray(data.documents) ? data.documents : []);
+        setClasses(Array.isArray(classData.classes) ? classData.classes : Array.isArray(classData) ? classData : []);
       } catch {
         toast.error('Impossible de charger les documents pédagogiques.');
       } finally {
@@ -117,6 +125,7 @@ export default function TeacherDocuments() {
       subject: doc.subject,
       level: doc.level,
       period: doc.period,
+      targetClassId: doc.targetClassId || '',
       content: doc.content,
       fileName: doc.fileName,
       fileUrl: doc.fileUrl,
@@ -157,6 +166,7 @@ export default function TeacherDocuments() {
         subject: form.subject.trim(),
         level: form.level.trim(),
         period: form.period.trim(),
+        targetClassId: form.targetClassId,
         content: form.content.trim(),
         fileName,
         fileUrl,
@@ -225,7 +235,7 @@ export default function TeacherDocuments() {
         fileUrl: doc.fileUrl || '',
         type: doc.fileUrl?.toLowerCase().endsWith('.pdf') ? 'PDF' : doc.fileUrl ? 'FICHIER' : 'LIEN',
         category: doc.category || 'Documents pédagogiques',
-        targetClassId: '',
+        targetClassId: doc.targetClassId || '',
       });
 
       if (!result.ok) {
@@ -233,11 +243,12 @@ export default function TeacherDocuments() {
       }
 
       // Persiste l'état publié en base
-      await fetch(`/api/documents?id=${doc.id}`, {
+      const persisted = await fetch(`/api/documents?id=${doc.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ published: true }),
       });
+      if (!persisted.ok) throw new Error('Le document est dans la bibliothèque, mais son statut n’a pas été enregistré. Réessayez la publication.');
 
       setDocuments((prev) => prev.map((item) => (item.id === doc.id ? { ...item, published: true } : item)));
       toast.success('Document publié dans la bibliothèque avec succès !');
@@ -525,6 +536,20 @@ export default function TeacherDocuments() {
               <div className="space-y-2">
                 <Label>Niveau</Label>
                 <Input value={form.level} onChange={(e) => setForm({ ...form, level: e.target.value })} placeholder="6e A" />
+              </div>
+              <div className="space-y-2">
+                <Label>Classe destinataire</Label>
+                <Select value={form.targetClassId || '__school__'} onValueChange={(value) => setForm({ ...form, targetClassId: value === '__school__' ? '' : value })}>
+                  <SelectTrigger><SelectValue placeholder="Choisir la classe" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__school__">Toutes les classes</SelectItem>
+                    {classes.map((schoolClass) => (
+                      <SelectItem key={schoolClass.id} value={schoolClass.id}>
+                        {[schoolClass.name, schoolClass.level, schoolClass.section, schoolClass.option].filter(Boolean).join(' · ')}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
               <div className="space-y-2">
                 <Label>Période</Label>

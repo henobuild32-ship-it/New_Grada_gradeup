@@ -8,12 +8,15 @@ export type NotificationType =
   | 'MESSAGE'
   | 'PROFILE'
   | 'LESSON'
+  | 'DOCUMENT'
   | 'HOMEWORK'
   | 'HOMEWORK_SUBMISSION'
   | 'ATTENDANCE'
   | 'PAYMENT'
   | 'REPORT_CARD'
-  | 'SCHEDULE_UPDATED';
+  | 'SCHEDULE_UPDATED'
+  | 'COTATION'
+  | 'COTATION_RECEIVED';
 
 export type NotificationPriority = 'LOW' | 'NORMAL' | 'HIGH' | 'URGENT';
 

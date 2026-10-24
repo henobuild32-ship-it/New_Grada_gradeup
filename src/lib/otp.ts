@@ -16,9 +16,12 @@ export { OTP_LENGTH };
 const MAX_ATTEMPTS = 5;
 
 export class OtpDeliveryError extends Error {
-  constructor(message = 'Le service email ne peut pas envoyer de message actuellement.') {
+  readonly deliveryCause?: unknown;
+
+  constructor(message = 'Le service email ne peut pas envoyer de message actuellement.', deliveryCause?: unknown) {
     super(message);
     this.name = 'OtpDeliveryError';
+    this.deliveryCause = deliveryCause;
   }
 }
 
@@ -109,7 +112,7 @@ export async function createAndSendOtp(
       where: { id: recordId, used: false },
       data: { used: true },
     });
-    throw error instanceof OtpDeliveryError ? error : new OtpDeliveryError();
+    throw error instanceof OtpDeliveryError ? error : new OtpDeliveryError(undefined, error);
   }
 
   return otp;

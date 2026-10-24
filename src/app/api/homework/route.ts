@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { authenticateRequest } from '@/lib/auth/authenticate';
+import { authenticateRequestActive } from '@/lib/auth/authenticate';
 import { assertSchool, assertTeacherCourse, scopedStudentIds } from '@/lib/api/rbac';
 import { ApiError, handleApiError } from '@/lib/api/errors';
 import { notifyUser } from '@/services/notifications/notificationEngine';
 
 export async function GET(request: NextRequest) {
   try {
-    const auth = authenticateRequest(request);
+    const auth = await authenticateRequestActive(request);
     const { searchParams } = new URL(request.url);
     const courseId = searchParams.get('courseId');
     const teacherId = searchParams.get('teacherId');
@@ -67,7 +67,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const auth = await authenticateRequest(request);
+    const auth = await authenticateRequestActive(request);
     if (auth.role !== 'ADMIN' && auth.role !== 'TEACHER') {
       throw new ApiError('Accès refusé : réservé aux enseignants et à l’administration.', 403, 'ROLE_FORBIDDEN');
     }

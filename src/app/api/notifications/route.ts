@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { authenticateRequest, AuthError } from '@/lib/auth/authenticate';
+import { authenticateRequestActive, AuthError } from '@/lib/auth/authenticate';
 import { createNotification } from '@/services/notifications/createNotification';
 import { auditFromRequest } from '@/lib/api/audit';
 import { z } from 'zod';
@@ -14,7 +14,7 @@ const createNotificationSchema = z.object({
   title: z.string().trim().max(200).optional(),
   type: z.enum([
     'INFO', 'SYSTEM', 'CONFERENCE', 'CARD', 'GRADE', 'CLASS', 'MESSAGE', 'PROFILE',
-    'LESSON', 'HOMEWORK', 'HOMEWORK_SUBMISSION', 'ATTENDANCE', 'PAYMENT', 'REPORT_CARD', 'SCHEDULE_UPDATED',
+    'LESSON', 'DOCUMENT', 'HOMEWORK', 'HOMEWORK_SUBMISSION', 'ATTENDANCE', 'PAYMENT', 'REPORT_CARD', 'SCHEDULE_UPDATED', 'COTATION', 'COTATION_RECEIVED',
   ]).optional(),
   priority: z.enum(['LOW', 'NORMAL', 'HIGH', 'URGENT']).optional(),
   metadata: z.record(z.string(), z.unknown()).optional(),
@@ -33,11 +33,12 @@ async function getChildrenClassIds(schoolId: string, parentId: string): Promise<
 
 export async function GET(request: NextRequest) {
   try {
-    const auth = authenticateRequest(request);
+    const auth = await authenticateRequestActive(request);
     const { searchParams } = new URL(request.url);
     // Tenant forcé à la session : le paramètre schoolId du client est ignoré
     const schoolId = auth.schoolId;
     const targetRole = searchParams.get('targetRole');
+    const sinceValue = searchParams.get('since');
 
     const where: Record<string, unknown> = { schoolId };
 
@@ -49,8 +50,8 @@ export async function GET(request: NextRequest) {
       const classIds = enrollments.map(e => e.classId);
       where.OR = [
         { userId: auth.userId },
-        { targetRole: 'STUDENT' },
-        { targetRole: 'ALL' },
+        { targetRole: 'STUDENT', targetClassId: { in: ['', ...classIds] } },
+        { targetRole: 'ALL', targetClassId: '' },
         { targetRole: 'CLASS', targetClassId: { in: classIds } },
       ];
     } else if (auth.role === 'TEACHER') {
@@ -68,16 +69,17 @@ export async function GET(request: NextRequest) {
       const classIds = [...new Set([...courses.map((course) => course.classId), ...titularClasses.map((item) => item.id)])];
       where.OR = [
         { userId: auth.userId },
-        { targetRole: 'TEACHER' },
-        { targetRole: 'ALL' },
+        { targetRole: 'TEACHER', targetClassId: { in: ['', ...classIds] } },
+        { targetRole: 'ALL', targetClassId: '' },
         { targetRole: 'CLASS', targetClassId: { in: classIds } },
       ];
     } else if (auth.role === 'PARENT') {
+      const classIds = await getChildrenClassIds(schoolId, auth.userId);
       where.OR = [
         { userId: auth.userId },
-        { targetRole: 'PARENT' },
-        { targetRole: 'ALL' },
-        { targetRole: 'CLASS', targetClassId: { in: await getChildrenClassIds(schoolId, auth.userId) } },
+        { targetRole: 'PARENT', targetClassId: { in: ['', ...classIds] } },
+        { targetRole: 'ALL', targetClassId: '' },
+        { targetRole: 'CLASS', targetClassId: { in: classIds } },
       ];
     } else if (auth.role === 'CAISSIER') {
       where.OR = [
@@ -91,6 +93,11 @@ export async function GET(request: NextRequest) {
 
     if (auth.role !== 'ADMIN') {
       where.AND = [{ OR: [{ userId: auth.userId }, { userId: null }] }];
+    }
+
+    if (sinceValue) {
+      const since = new Date(sinceValue);
+      if (!Number.isNaN(since.getTime())) where.createdAt = { gt: since };
     }
 
     const notifications = await db.notification.findMany({
@@ -114,7 +121,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const auth = authenticateRequest(request);
+    const auth = await authenticateRequestActive(request);
     if (auth.role !== 'ADMIN') {
       return NextResponse.json({ error: 'Seul un administrateur peut diffuser une notification.' }, { status: 403 });
     }

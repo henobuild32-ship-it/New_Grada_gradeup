@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { authenticateRequest, AuthError } from '@/lib/auth/authenticate';
+import { authenticateRequestActive, AuthError } from '@/lib/auth/authenticate';
 
 export const runtime = 'nodejs';
 
 // GET /api/school-years
 export async function GET(req: NextRequest) {
   try {
-    const auth = authenticateRequest(req);
+    const auth = await authenticateRequestActive(req);
     // Tenant forcé à la session : le paramètre schoolId du client est ignoré
     const schoolId = auth.schoolId;
 
@@ -28,7 +28,7 @@ export async function GET(req: NextRequest) {
 // POST /api/school-years — créer une nouvelle année scolaire
 export async function POST(req: NextRequest) {
   try {
-    const auth = authenticateRequest(req);
+    const auth = await authenticateRequestActive(req);
     if (auth.role !== 'ADMIN') {
       return NextResponse.json({ error: 'Action réservée aux administrateurs.' }, { status: 403 });
     }
@@ -73,7 +73,7 @@ export async function POST(req: NextRequest) {
 // PUT /api/school-years — mettre à jour le statut d'une année scolaire
 export async function PUT(req: NextRequest) {
   try {
-    const auth = authenticateRequest(req);
+    const auth = await authenticateRequestActive(req);
     if (auth.role !== 'ADMIN') {
       return NextResponse.json({ error: 'Action réservée aux administrateurs.' }, { status: 403 });
     }

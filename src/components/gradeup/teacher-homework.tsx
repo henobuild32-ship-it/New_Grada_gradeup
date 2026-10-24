@@ -27,6 +27,7 @@ export default function TeacherHomework() {
   const [editingHomework, setEditingHomework] = useState<HomeworkInfo | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
+  const [formClassId, setFormClassId] = useState('');
   const [formCourseId, setFormCourseId] = useState('');
   const [formTitle, setFormTitle] = useState('');
   const [formDescription, setFormDescription] = useState('');
@@ -44,6 +45,9 @@ export default function TeacherHomework() {
   const [loadingSubmissions, setLoadingSubmissions] = useState(false);
   const [gradingSubId, setGradingSubId] = useState<string | null>(null);
   const [gradingScore, setGradingScore] = useState('');
+
+  const availableClasses = Array.from(new Map(courses.filter((course) => course.classId).map((course) => [course.classId, { id: course.classId, name: course.class?.name || 'Classe' }])).values());
+  const formCourses = courses.filter((course) => !formClassId || course.classId === formClassId);
 
   const viewSubmissions = async (hw: HomeworkInfo) => {
     setSubmissionsHomework(hw);
@@ -103,6 +107,7 @@ export default function TeacherHomework() {
   };
 
   const resetForm = () => {
+    setFormClassId('');
     setFormCourseId('');
     setFormTitle('');
     setFormDescription('');
@@ -114,9 +119,10 @@ export default function TeacherHomework() {
     setEditingHomework(null);
   };
 
-  const openCreateDialog = () => { resetForm(); setDialogOpen(true); };
+  const openCreateDialog = () => { resetForm(); setFormClassId(availableClasses[0]?.id || ''); setDialogOpen(true); };
   const openEditDialog = (hw: any) => {
     setEditingHomework(hw);
+    setFormClassId(hw.course?.classId || courses.find((course) => course.id === hw.courseId)?.classId || '');
     setFormCourseId(hw.courseId);
     setFormTitle(hw.title);
     setFormDescription(hw.description);
@@ -345,12 +351,21 @@ export default function TeacherHomework() {
           </DialogHeader>
           <div className="space-y-4">
             <div className="space-y-2">
-              <Label>Cours *</Label>
+              <Label>Classe *</Label>
+              <Select value={formClassId} onValueChange={(classId) => { setFormClassId(classId); setFormCourseId(''); }}>
+                <SelectTrigger className="w-full focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all">
+                  <SelectValue placeholder="Sélectionner d’abord une classe" />
+                </SelectTrigger>
+                <SelectContent>{availableClasses.map((klass) => <SelectItem key={klass.id} value={klass.id}>{klass.name}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Matière *</Label>
               <Select value={formCourseId} onValueChange={setFormCourseId}>
                 <SelectTrigger className="w-full focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all">
-                  <SelectValue placeholder="Sélectionner un cours" />
+                  <SelectValue placeholder={formClassId ? 'Sélectionner une matière' : 'Choisir d’abord une classe'} />
                 </SelectTrigger>
-                <SelectContent>{courses.map((c) => <SelectItem key={c.id} value={c.id}>{c.name} — {c.class?.name}</SelectItem>)}</SelectContent>
+                <SelectContent>{formCourses.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
               </Select>
             </div>
             <div className="space-y-2">

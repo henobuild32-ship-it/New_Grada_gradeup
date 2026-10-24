@@ -8,7 +8,7 @@ import { findPasswordRecoveryUser, getRecoveryIdentityKey } from '@/lib/auth/pas
 export const runtime = 'nodejs';
 
 const GENERIC_SUCCESS_MESSAGE =
-  'Si un compte correspond à ces informations, un code à 6 chiffres a été envoyé. Vérifiez aussi vos courriers indésirables.';
+  'Si un compte correspond à ces informations, vous recevrez un code à 6 chiffres par e-mail. Vérifiez aussi vos courriers indésirables.';
 
 /**
  * POST /api/auth/forgot
@@ -65,7 +65,12 @@ export async function POST(request: NextRequest) {
       await createAndSendOtp(user.id, recipient, user.school?.name || 'GradeUp');
     } catch (error) {
       if (error instanceof OtpDeliveryError) {
-        console.error('[ForgotPassword] Delivery failed; account details withheld.');
+        const cause = error.deliveryCause as { code?: unknown; command?: unknown; responseCode?: unknown } | undefined;
+        console.error('[ForgotPassword] Échec de livraison; compte et destinataire masqués.', {
+          code: typeof cause?.code === 'string' ? cause.code : undefined,
+          command: typeof cause?.command === 'string' ? cause.command : undefined,
+          responseCode: typeof cause?.responseCode === 'number' ? cause.responseCode : undefined,
+        });
         return NextResponse.json({ message: GENERIC_SUCCESS_MESSAGE }, { status: 200 });
       }
       throw error;

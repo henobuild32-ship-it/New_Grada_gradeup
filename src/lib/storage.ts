@@ -3,6 +3,7 @@ import { join } from 'path';
 import { getSupabaseServerClient } from './supabase-server';
 
 const BUCKET = process.env.SUPABASE_STORAGE_BUCKET || 'gradeup';
+const PRIVATE_BUCKET = process.env.SUPABASE_PRIVATE_STORAGE_BUCKET || 'gradeup-private';
 
 export interface StorageResult {
   url: string;
@@ -83,4 +84,42 @@ export async function uploadFile(
 
 export function isCloudStorageConfigured(): boolean {
   return getSupabaseServerClient() !== null;
+}
+
+/** Store originals that contain student information in a private Supabase bucket. */
+export async function uploadPrivateFile(buffer: Buffer, path: string, contentType: string): Promise<string> {
+  const client = getSupabaseServerClient();
+  if (!client) throw new Error('Private cloud storage is not configured.');
+
+  const { data: existing, error: lookupError } = await client.storage.getBucket(PRIVATE_BUCKET);
+  if (lookupError) {
+    const { error: createError } = await client.storage.createBucket(PRIVATE_BUCKET, { public: false });
+    if (createError) throw new Error('Private storage is unavailable.');
+  } else if (existing.public) {
+    throw new Error('The configured private storage bucket is public.');
+  }
+
+  const { error } = await client.storage.from(PRIVATE_BUCKET).upload(path, buffer, {
+    contentType,
+    upsert: true,
+  });
+  if (error) throw new Error('The original document could not be stored securely.');
+  return path;
+}
+
+export async function createPrivateFileUrl(path: string, expiresInSeconds = 300): Promise<string> {
+  const client = getSupabaseServerClient();
+  if (!client) throw new Error('Private cloud storage is not configured.');
+  const { data: bucket, error: bucketError } = await client.storage.getBucket(PRIVATE_BUCKET);
+  if (bucketError || !bucket || bucket.public) throw new Error('Private storage is unavailable.');
+  const { data, error } = await client.storage.from(PRIVATE_BUCKET).createSignedUrl(path, expiresInSeconds);
+  if (error || !data?.signedUrl) throw new Error('The original document is unavailable.');
+  return data.signedUrl;
+}
+
+export async function deletePrivateFile(path: string): Promise<void> {
+  const client = getSupabaseServerClient();
+  if (!client) return;
+  const { error } = await client.storage.from(PRIVATE_BUCKET).remove([path]);
+  if (error) console.warn('[storage] Could not remove temporary private file.');
 }

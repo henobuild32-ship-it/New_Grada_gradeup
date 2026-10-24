@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { authenticateRequest, AuthError } from '@/lib/auth/authenticate';
+import { authenticateRequestActive, AuthError } from '@/lib/auth/authenticate';
 import { ApiError, handleApiError } from '@/lib/api/errors';
 import { auditFromRequest } from '@/lib/api/audit';
 import { parseOrThrow, paymentSchema } from '@/lib/validation/entities';
@@ -8,7 +8,7 @@ import { assignReceiptNumber } from '@/lib/business/rules';
 
 export async function GET(request: NextRequest) {
   try {
-    const auth = authenticateRequest(request);
+    const auth = await authenticateRequestActive(request);
     if (!['ADMIN', 'CAISSIER', 'STUDENT', 'PARENT'].includes(auth.role)) {
       return NextResponse.json({ error: 'Accès non autorisé' }, { status: 403 });
     }
@@ -102,7 +102,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const auth = authenticateRequest(request);
+    const auth = await authenticateRequestActive(request);
     // Caisse : enregistrement réservé à l'administration de l'établissement.
     if (auth.role !== 'ADMIN' && auth.role !== 'CAISSIER') {
       return NextResponse.json({ error: 'Réservé à l’administration.', code: 'ROLE_FORBIDDEN' }, { status: 403 });

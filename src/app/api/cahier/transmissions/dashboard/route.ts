@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { requireAuth } from '@/lib/api/rbac';
+import { requireActiveAuth } from '@/lib/api/rbac';
 import { handleApiError } from '@/lib/api/errors';
 
 export async function GET(request: NextRequest) {
   try {
-    const auth = await requireAuth(request, ['ADMIN', 'TEACHER']);
+    const auth = await requireActiveAuth(request, ['ADMIN', 'TEACHER']);
     const { searchParams } = new URL(request.url);
     // Tenant forcé à la session ; un titulaire ne voit que ses propres classes
     const schoolId = auth.schoolId;

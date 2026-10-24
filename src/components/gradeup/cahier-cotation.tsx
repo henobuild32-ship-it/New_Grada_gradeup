@@ -15,7 +15,7 @@
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useAppStore } from '@/lib/store';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -23,6 +23,7 @@ import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import {
   Dialog,
   DialogContent,
@@ -57,9 +58,14 @@ import {
   AlertCircle,
   Clock,
   Pencil,
+  Camera,
+  FileUp,
+  ScanText,
+  ExternalLink,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { fetchJsonWithCache } from '@/lib/offline-sync';
+import TitulaireCotation from '@/components/gradeup/titulaire-cotation';
 
 interface Student {
   id: string;
@@ -75,6 +81,39 @@ interface Evaluation {
   period: string;
   date: string;
   marks: Array<{ studentId: string; score: number }>;
+  transmissions?: Array<{ status: string; notes?: string; sentAt?: string | null; receivedAt?: string | null }>;
+  sourceDocumentName?: string;
+  ocrConfidence?: number | null;
+  schoolYearId?: string | null;
+}
+
+interface OcrReviewRow {
+  id: string;
+  studentId: string;
+  sourceName: string;
+  suggestedScore: string;
+  score: string;
+  sourceLine: string;
+  confidence: number;
+  confirmed: boolean;
+}
+
+interface OcrImportResult {
+  sourceDocumentPath: string;
+  sourceDocumentName: string;
+  text: string;
+  confidence: number | null;
+  provider: string;
+  lines: Array<{ text: string; confidence: number }>;
+  classId: string;
+  courseId: string;
+  period: string;
+  schoolYearId: string;
+  studentRoster: Student[];
+}
+
+function normalizeOcrName(value: string) {
+  return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 }
 
 interface ClassInfo {
@@ -90,6 +129,8 @@ interface CourseInfo {
   teacher: { fullName: string };
 }
 
+interface SchoolYearInfo { id: string; year: string; status: string }
+
 export default function CahierCotation() {
   const { user } = useAppStore();
 
@@ -98,6 +139,8 @@ export default function CahierCotation() {
   const [selectedClassId, setSelectedClassId] = useState('');
   const [selectedCourseId, setSelectedCourseId] = useState('');
   const [selectedPeriod, setSelectedPeriod] = useState('P1'); // P1, P2, EX1, P3, P4, EX2
+  const [schoolYears, setSchoolYears] = useState<SchoolYearInfo[]>([]);
+  const [selectedSchoolYearId, setSelectedSchoolYearId] = useState('');
 
   const [students, setStudents] = useState<Student[]>([]);
   const [evaluations, setEvaluations] = useState<Evaluation[]>([]);
@@ -120,6 +163,45 @@ export default function CahierCotation() {
   const [editMaxScore, setEditMaxScore] = useState('20');
   const [editDate, setEditDate] = useState('');
   const [savingEdit, setSavingEdit] = useState(false);
+
+  // Photo/PDF OCR import with explicit per-student confirmation.
+  const [ocrOpen, setOcrOpen] = useState(false);
+  const [ocrBusy, setOcrBusy] = useState(false);
+  const [ocrSaving, setOcrSaving] = useState(false);
+  const [ocrResult, setOcrResult] = useState<OcrImportResult | null>(null);
+  const [ocrRows, setOcrRows] = useState<OcrReviewRow[]>([]);
+  const [ocrTitle, setOcrTitle] = useState('');
+  const [ocrMaxScore, setOcrMaxScore] = useState('20');
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+  const documentInputRef = useRef<HTMLInputElement>(null);
+  const ocrDraftKey = user?.schoolId && user.id && (ocrResult?.classId || selectedClassId) && (ocrResult?.courseId || selectedCourseId)
+    ? `gradeup:cahier-ocr-draft:${user.schoolId}:${user.id}:${ocrResult?.schoolYearId || selectedSchoolYearId}:${ocrResult?.classId || selectedClassId}:${ocrResult?.courseId || selectedCourseId}`
+    : null;
+
+  useEffect(() => {
+    if (!ocrDraftKey || ocrResult) return;
+    try {
+      const saved = localStorage.getItem(ocrDraftKey);
+      if (!saved) return;
+      const draft = JSON.parse(saved) as { result?: OcrImportResult; rows?: OcrReviewRow[]; title?: string; maxScore?: string; period?: string };
+      if (!draft.result || !Array.isArray(draft.rows)) return;
+      setOcrResult(draft.result);
+      setOcrRows(draft.rows.map((row, index) => ({ ...row, id: row.id || `saved-${index}`, sourceName: row.sourceName || '' })));
+      setOcrTitle(draft.title || 'Évaluation importée');
+      setOcrMaxScore(draft.maxScore || '20');
+      if (draft.period) setSelectedPeriod(draft.period);
+      if (draft.result.schoolYearId) setSelectedSchoolYearId(draft.result.schoolYearId);
+      setOcrOpen(true);
+      toast.info('Votre import OCR en brouillon a été repris. Vérifiez les notes avant de les enregistrer.');
+    } catch {
+      localStorage.removeItem(ocrDraftKey);
+    }
+  }, [ocrDraftKey, ocrResult]);
+
+  useEffect(() => {
+    if (!ocrDraftKey || !ocrResult || !ocrRows.length) return;
+    localStorage.setItem(ocrDraftKey, JSON.stringify({ result: ocrResult, rows: ocrRows, title: ocrTitle, maxScore: ocrMaxScore, period: selectedPeriod }));
+  }, [ocrDraftKey, ocrResult, ocrRows, ocrTitle, ocrMaxScore, selectedPeriod]);
 
   // Offline status & unsaved changes
   const [isOnline, setIsOnline] = useState(true);
@@ -185,9 +267,13 @@ export default function CahierCotation() {
   // Fetch classes appropriate for secondary level
   useEffect(() => {
     if (!user?.schoolId) return;
-    fetchJsonWithCache<{ classes: ClassInfo[] }>(`/api/classes?schoolId=${user.schoolId}`, { classes: [] })
-      .then((d) => {
-        const all = d.classes || [];
+    let cancelled = false;
+    Promise.all([
+      fetchJsonWithCache<{ classes: ClassInfo[] }>(`/api/classes?schoolId=${user.schoolId}`, { classes: [] }),
+      fetchJsonWithCache<{ years: SchoolYearInfo[] }>('/api/school-years', { years: [] }),
+    ]).then(([classesData, yearsData]) => {
+      if (cancelled) return;
+      const all = classesData.classes || [];
         // Filter to secondary education classes (RDC Levels: 7e EB, 8e EB, 1-4e Humanités, or Secondaire)
         const secondary = all.filter((c: ClassInfo) => {
           const name = c.name.toLowerCase();
@@ -204,8 +290,12 @@ export default function CahierCotation() {
         if (secondary.length > 0) {
           setSelectedClassId(secondary[0].id);
         }
-      })
-      .catch(() => {});
+        const years = yearsData.years || [];
+        setSchoolYears(years);
+        const activeYear = years.find((year) => year.status === 'OPEN') || years.find((year) => year.status !== 'CLOSED');
+        if (activeYear) setSelectedSchoolYearId(activeYear.id);
+    }).catch(() => {});
+    return () => { cancelled = true; };
   }, [user?.schoolId]);
 
   // Fetch courses for the selected class (scoped to school and optionally teacher)
@@ -235,7 +325,7 @@ export default function CahierCotation() {
     if (!selectedClassId || !selectedCourseId) return;
     setLoading(true);
     try {
-      const url = `/api/cahier/evaluations?schoolId=${user?.schoolId}&classId=${selectedClassId}&courseId=${selectedCourseId}&period=${selectedPeriod}`;
+      const url = `/api/cahier/evaluations?schoolId=${user?.schoolId}&classId=${selectedClassId}&courseId=${selectedCourseId}&period=${selectedPeriod}${selectedSchoolYearId ? `&schoolYearId=${encodeURIComponent(selectedSchoolYearId)}` : ''}`;
       const data = await fetchJsonWithCache(url, { students: [], evaluations: [] });
       setStudents(data.students || []);
       setEvaluations(data.evaluations || []);
@@ -244,7 +334,7 @@ export default function CahierCotation() {
     } finally {
       setLoading(false);
     }
-  }, [selectedClassId, selectedCourseId, selectedPeriod, user?.schoolId]);
+  }, [selectedClassId, selectedCourseId, selectedPeriod, selectedSchoolYearId, user?.schoolId]);
 
   useEffect(() => {
     fetchData();
@@ -432,15 +522,172 @@ export default function CahierCotation() {
     }
   };
 
+  const handleOcrFile = async (file?: File) => {
+    if (!file || !selectedClassId || !selectedCourseId || students.length === 0) {
+      if (file && students.length === 0) toast.error('Chargez d’abord la liste des élèves de la classe.');
+      return;
+    }
+    setOcrBusy(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('classId', selectedClassId);
+      formData.append('courseId', selectedCourseId);
+      const response = await fetch('/api/cahier/ocr', { method: 'POST', body: formData });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || 'Échec de la reconnaissance OCR.');
+
+      const result = {
+        ...(payload as OcrImportResult),
+        classId: selectedClassId,
+        courseId: selectedCourseId,
+        period: selectedPeriod,
+        schoolYearId: selectedSchoolYearId,
+        studentRoster: students,
+      };
+      const used = new Set<string>();
+      const names = result.studentRoster.map((student) => ({
+        student,
+        normalized: normalizeOcrName(`${student.fullName} ${student.postName}`),
+      }));
+      const maxValue = Number(ocrMaxScore) || 20;
+      const rows: OcrReviewRow[] = [];
+
+      for (const line of result.lines || []) {
+        const numericTokens = [...line.text.matchAll(/(?:^|\D)(\d{1,3}(?:[.,]\d{1,2})?)(?=\D|$)/g)].map((match) => Number(match[1].replace(',', '.')));
+        const score = numericTokens.reverse().find((value) => Number.isFinite(value) && value >= 0 && value <= maxValue);
+        if (score === undefined) continue;
+        const sourceName = line.text.replace(/\d+(?:[.,]\d+)?/g, ' ').replace(/[|:;=+\-_/\\]+/g, ' ').trim();
+        const lineName = normalizeOcrName(sourceName);
+        const candidates: Array<{ id: string; ratio: number }> = [];
+        for (const { student, normalized } of names) {
+          if (used.has(student.id)) continue;
+          const tokens = normalized.split(' ').filter((token) => token.length > 1);
+          const matches = tokens.filter((token) => lineName.includes(token)).length;
+          const ratio = tokens.length ? matches / tokens.length : 0;
+          if (ratio >= 0.6) candidates.push({ id: student.id, ratio });
+        }
+        candidates.sort((a, b) => b.ratio - a.ratio);
+        const best = candidates[0];
+        const uniqueBest = best && (candidates.length === 1 || best.ratio > candidates[1].ratio);
+        const studentId = uniqueBest ? best.id : '';
+        if (studentId) used.add(studentId);
+        rows.push({
+          id: crypto.randomUUID(), studentId, sourceName, suggestedScore: String(score), score: String(score),
+          sourceLine: line.text, confidence: line.confidence || result.confidence || 0, confirmed: false,
+        });
+      }
+
+      for (const student of result.studentRoster) {
+        if (used.has(student.id)) continue;
+        rows.push({ id: crypto.randomUUID(), studentId: student.id, sourceName: '', suggestedScore: '', score: '', sourceLine: '', confidence: 0, confirmed: false });
+      }
+
+      setOcrResult(result);
+      setOcrTitle(file.name.replace(/\.[^.]+$/, '').slice(0, 80) || 'Évaluation importée');
+      setOcrRows(rows);
+      setOcrOpen(true);
+      toast.success(result.confidence === null
+        ? result.provider === 'pdf-text'
+          ? 'Texte PDF extrait. Vérifiez les notes proposées avant l’enregistrement.'
+          : 'Document traité par le moteur OCR. Vérifiez chaque association et chaque note avant l’enregistrement.'
+        : `Document analysé (${Math.round(result.confidence)} % de confiance moyenne). Vérifiez chaque note avant l’enregistrement.`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Échec de l’import OCR.');
+    } finally {
+      setOcrBusy(false);
+      if (cameraInputRef.current) cameraInputRef.current.value = '';
+      if (documentInputRef.current) documentInputRef.current.value = '';
+    }
+  };
+
+  const handleSaveOcrImport = async () => {
+    if (!user || !ocrResult || !ocrTitle.trim()) return;
+    const maxScore = Number(ocrMaxScore);
+    if (!Number.isFinite(maxScore) || maxScore <= 0) {
+      toast.error('Saisissez une note maximale valide.');
+      return;
+    }
+    const marks: Record<string, number> = {};
+    for (const row of ocrRows) {
+      if (!row.confirmed || row.score.trim() === '') continue;
+      if (!ocrResult.studentRoster.some((student) => student.id === row.studentId)) {
+        toast.error('Associez chaque note validée à un élève officiel de la classe.');
+        return;
+      }
+      if (marks[row.studentId] !== undefined) {
+        toast.error('Un élève ne peut recevoir qu’une seule note de cette évaluation. Supprimez la ligne en double.');
+        return;
+      }
+      const score = Number(row.score.replace(',', '.'));
+      if (!Number.isFinite(score) || score < 0 || score > maxScore) {
+        toast.error(`Chaque note confirmée doit être comprise entre 0 et ${maxScore}.`);
+        return;
+      }
+      marks[row.studentId] = score;
+    }
+    if (!Object.keys(marks).length) {
+      toast.error('Confirmez au moins une note avant de créer l’évaluation.');
+      return;
+    }
+
+    setOcrSaving(true);
+    try {
+      const response = await fetch('/api/cahier/evaluations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          schoolId: user.schoolId,
+          classId: ocrResult.classId,
+          courseId: ocrResult.courseId,
+          title: ocrTitle.trim(),
+          maxScore,
+          period: ocrResult.period,
+          schoolYearId: ocrResult.schoolYearId,
+          teacherId: user.id,
+          marks,
+          sourceDocumentPath: ocrResult.sourceDocumentPath,
+          sourceDocumentName: ocrResult.sourceDocumentName,
+          ocrSourceText: ocrResult.text,
+          ocrCorrections: ocrRows.map((row) => ({
+            studentId: row.studentId,
+            sourceName: row.sourceName,
+            sourceLine: row.sourceLine,
+            score: row.score,
+            confirmed: row.confirmed,
+          })),
+          ocrConfidence: ocrResult.confidence,
+          ocrProvider: ocrResult.provider,
+        }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || 'Impossible d’enregistrer l’évaluation.');
+      toast.success(`Évaluation enregistrée avec ${Object.keys(marks).length} note(s) validée(s).`);
+      if (ocrDraftKey) localStorage.removeItem(ocrDraftKey);
+      setOcrOpen(false);
+      setOcrResult(null);
+      setOcrRows([]);
+      await fetchData();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Impossible d’enregistrer l’évaluation.');
+    } finally {
+      setOcrSaving(false);
+    }
+  };
+
   // Send evaluations to titular professor
   const handleSendToTitulaire = async (courseId: string) => {
-    if (!courseId || evaluations.length === 0) return;
+    const toSend = evaluations.filter((evaluation) => !['SENT', 'RESENT', 'RECEIVED'].includes(evaluation.transmissions?.[0]?.status || 'DRAFT'));
+    if (!courseId || toSend.length === 0) {
+      toast.info('Aucune cotation non transmise ou à renvoyer dans cette période.');
+      return;
+    }
 
-    if (!confirm(`Envoyer TOUTES les cotations de ce cours au professeur titulaire ?`)) return;
+    if (!confirm(`Transmettre ${toSend.length} cahier(s) au professeur titulaire ?`)) return;
 
     setSendingEval('all');
     try {
-      const evaluationIds = evaluations.map((e) => e.id);
+      const evaluationIds = toSend.map((e) => e.id);
       const res = await fetch('/api/cahier/transmissions/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -448,7 +695,11 @@ export default function CahierCotation() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Erreur serveur');
-      toast.success(`Cotations envoyées au titulaire ✅`);
+      if (Array.isArray(data.errors) && data.errors.length) {
+        toast.error(`${data.sent || 0} cahier(s) transmis; ${data.errors.length} échec(s). ${data.errors[0]?.error || ''}`);
+      } else {
+        toast.success('Cotations envoyées au titulaire ✅');
+      }
       fetchData();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Erreur lors de l'envoi";
@@ -480,6 +731,7 @@ export default function CahierCotation() {
 
   return (
     <div className="space-y-6 animate-fade-in print:bg-white print:p-0">
+      <div className="print:hidden"><TitulaireCotation /></div>
       {/* ── Header (hidden in print) ── */}
       <div className="mb-6 rounded-xl bg-gradient-to-r from-emerald-500 via-teal-600 to-cyan-600 text-white p-6 relative overflow-hidden shadow-lg print:hidden">
         <div className="absolute -right-8 -top-8 w-48 h-48 rounded-full bg-white/10 blur-2xl" />
@@ -558,6 +810,15 @@ export default function CahierCotation() {
             </select>
           </div>
 
+        {schoolYears.length > 0 && (
+          <div className="flex items-center gap-2">
+            <Clock className="w-4 h-4 text-muted-foreground" />
+            <select value={selectedSchoolYearId} onChange={(event) => setSelectedSchoolYearId(event.target.value)} className="h-9 max-w-[190px] rounded-lg border border-input bg-background px-3 text-sm font-medium focus:ring-2 focus:ring-emerald-500/20" aria-label="Année scolaire">
+              {schoolYears.map((year) => <option key={year.id} value={year.id}>{year.year}{year.status === 'CLOSED' ? ' · clôturée' : ''}</option>)}
+            </select>
+          </div>
+        )}
+
           <div className="flex items-center gap-2">
             <ListOrdered className="w-4 h-4 text-muted-foreground" />
             <select
@@ -585,12 +846,55 @@ export default function CahierCotation() {
           </Button>
 
           {canEdit && (
+            <div className="flex flex-wrap gap-2">
+              <input
+                ref={cameraInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                capture="environment"
+                className="hidden"
+                onChange={(event) => void handleOcrFile(event.target.files?.[0])}
+              />
+              <input
+                ref={documentInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp,application/pdf,.pdf,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                className="hidden"
+                onChange={(event) => void handleOcrFile(event.target.files?.[0])}
+              />
+              {ocrResult && !ocrOpen && (
+                <Button variant="outline" size="sm" onClick={() => setOcrOpen(true)} className="gap-1.5">
+                  <ScanText className="w-3.5 h-3.5" /> Reprendre l’import OCR
+                </Button>
+              )}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => cameraInputRef.current?.click()}
+                disabled={!selectedCourseId || students.length === 0 || ocrBusy}
+                className="gap-1.5"
+              >
+                <Camera className="w-3.5 h-3.5" /> Prendre une photo
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => documentInputRef.current?.click()}
+                disabled={!selectedCourseId || students.length === 0 || ocrBusy}
+                className="gap-1.5"
+              >
+                <FileUp className="w-3.5 h-3.5" /> Importer un cahier de cotation
+              </Button>
+            </div>
+          )}
+
+          {canEdit && (
             <div className="flex gap-2 ml-auto">
               <Button
                 variant="outline"
                 size="sm"
                 onClick={() => handleSendToTitulaire(selectedCourseId)}
-                disabled={!selectedCourseId || !evaluations.length || sendingEval !== null}
+                disabled={!selectedCourseId || !evaluations.some((evaluation) => !['SENT', 'RESENT', 'RECEIVED'].includes(evaluation.transmissions?.[0]?.status || 'DRAFT')) || sendingEval !== null}
                 className="gap-1.5"
               >
                 {sendingEval !== null ? (
@@ -600,7 +904,7 @@ export default function CahierCotation() {
                 ) : (
                   <>
                     <Send className="w-4 h-4" />
-                    Envoyer au titulaire
+                    Transmettre au titulaire
                   </>
                 )}
               </Button>
@@ -699,9 +1003,24 @@ export default function CahierCotation() {
                         className="text-center min-w-[80px] border-r border-foreground font-semibold text-foreground p-1"
                       >
                         <div className="flex flex-col items-center justify-between h-14">
-                          <span className="text-xs font-bold truncate max-w-[100px]" title={e.title}>
-                            {e.title}
-                          </span>
+                          <span className="text-xs font-bold truncate max-w-[100px]" title={e.title}>{e.title}</span>
+                          {(() => {
+                            const status = e.transmissions?.[0]?.status || 'DRAFT';
+                            const label = status === 'RECEIVED' ? 'Validé' : status === 'REJECTED' ? 'À corriger' : status === 'SENT' || status === 'RESENT' ? 'Transmis' : status === 'PARTIAL' ? 'Partiel' : 'Brouillon';
+                            return <Badge variant={status === 'RECEIVED' ? 'secondary' : status === 'REJECTED' ? 'destructive' : 'outline'} className="h-5 px-1.5 text-[9px] print:hidden">{label}</Badge>;
+                          })()}
+                          {e.transmissions?.[0]?.notes && <span className="max-w-[100px] truncate text-[9px] text-amber-700 print:hidden" title={e.transmissions[0].notes}>{e.transmissions[0].notes}</span>}
+                          {e.sourceDocumentName && (
+                            <a
+                              href={`/api/cahier/original?evaluationId=${encodeURIComponent(e.id)}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 text-[10px] text-blue-700 hover:underline print:hidden"
+                              title={`Ouvrir l’original : ${e.sourceDocumentName}`}
+                            >
+                              <ExternalLink className="h-3 w-3" /> Original
+                            </a>
+                          )}
                           <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded font-mono">
                             /{e.maxScore}
                           </span>
@@ -860,6 +1179,126 @@ export default function CahierCotation() {
       </Dialog>
 
       {/* ── Column editing Dialog ── */}
+      <Dialog open={ocrOpen} onOpenChange={(open) => {
+        setOcrOpen(open);
+      }}>
+        <DialogContent className="max-h-[92vh] max-w-5xl overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ScanText className="h-5 w-5 text-emerald-600" /> Vérifier les notes reconnues
+            </DialogTitle>
+            <DialogDescription>
+              L’OCR propose des notes à partir du document. Chaque ligne reste non validée jusqu’à votre confirmation; les valeurs incertaines doivent être corrigées manuellement.
+            </DialogDescription>
+          </DialogHeader>
+
+          {ocrResult && (
+            <div className="space-y-4">
+              <div className="grid gap-3 rounded-lg border bg-muted/20 p-3 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="ocr-evaluation-title">Titre de l’évaluation</Label>
+                  <Input id="ocr-evaluation-title" value={ocrTitle} onChange={(event) => setOcrTitle(event.target.value)} maxLength={120} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="ocr-max-score">Note maximale</Label>
+                  <Input id="ocr-max-score" type="number" min="1" step="0.5" value={ocrMaxScore} onChange={(event) => setOcrMaxScore(event.target.value)} />
+                </div>
+                <p className="text-xs text-muted-foreground sm:col-span-2">
+                  {ocrResult.sourceDocumentName} · {ocrResult.provider} · {ocrResult.confidence === null ? (ocrResult.provider === 'pdf-text' ? 'Texte PDF natif' : 'Confiance non fournie par le moteur') : `Confiance OCR moyenne : ${Math.round(ocrResult.confidence)} %`} · {classes.find((item) => item.id === ocrResult.classId)?.name} · {courses.find((item) => item.id === ocrResult.courseId)?.name} · {ocrResult.period} · {schoolYears.find((year) => year.id === ocrResult.schoolYearId)?.year}
+                </p>
+              </div>
+
+              <div className="overflow-x-auto rounded-lg border">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Élève officiel</TableHead>
+                      <TableHead className="min-w-32">Note / {ocrMaxScore || '—'}</TableHead>
+                      <TableHead className="min-w-64">Nom et ligne détectés</TableHead>
+                      <TableHead className="w-32 text-center">Confirmation</TableHead>
+                      <TableHead className="w-12" />
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {ocrRows.map((row) => {
+                      const student = ocrResult.studentRoster.find((item) => item.id === row.studentId);
+                      return (
+                        <TableRow key={row.id}>
+                          <TableCell className="min-w-56">
+                            <select
+                              className="min-h-10 w-full rounded-md border bg-background px-2 text-sm"
+                              value={row.studentId}
+                              onChange={(event) => setOcrRows((current) => current.map((item) => item.id === row.id ? { ...item, studentId: event.target.value, confirmed: false } : item))}
+                              aria-label="Associer cette ligne à un élève officiel"
+                            >
+                              <option value="">Associer à un élève…</option>
+                              {ocrResult.studentRoster.map((item) => <option key={item.id} value={item.id}>{item.fullName} {item.postName}</option>)}
+                            </select>
+                            {student && <span className="mt-1 block text-xs text-muted-foreground">{student.fullName} {student.postName}</span>}
+                          </TableCell>
+                          <TableCell>
+                            <Input
+                              type="number"
+                              min="0"
+                              max={ocrMaxScore}
+                              step="0.01"
+                              value={row.score}
+                              placeholder="—"
+                              onChange={(event) => setOcrRows((current) => current.map((item) => item.id === row.id ? { ...item, score: event.target.value, confirmed: false } : item))}
+                              aria-label={`Note de ${student?.fullName || 'l’élève'}`}
+                            />
+                            {row.suggestedScore !== '' && <span className="mt-1 block text-xs text-muted-foreground">Suggestion : {row.suggestedScore}/{ocrMaxScore}</span>}
+                          </TableCell>
+                          <TableCell className="max-w-sm text-xs text-muted-foreground">
+                            {row.sourceLine ? <>
+                              <Input className="mb-2" value={row.sourceName} placeholder="Nom reconnu (corrigeable)" onChange={(event) => setOcrRows((current) => current.map((item) => item.id === row.id ? { ...item, sourceName: event.target.value, confirmed: false } : item))} />
+                              <span className="block break-words">{row.sourceLine}</span>
+                              {ocrResult.confidence !== null && <span className={row.confidence < 60 ? 'text-amber-700' : ''}>Confiance ligne : {Math.round(row.confidence)} %</span>}
+                            </> : <Input value={row.sourceName} placeholder="Nom de l’élève (optionnel)" onChange={(event) => setOcrRows((current) => current.map((item) => item.id === row.id ? { ...item, sourceName: event.target.value } : item))} />}
+                          </TableCell>
+                          <TableCell className="text-center">
+                            <label className="inline-flex items-center gap-2 text-xs">
+                              <input
+                                type="checkbox"
+                                checked={row.confirmed}
+                                disabled={!row.studentId || !row.score.trim()}
+                                onChange={(event) => setOcrRows((current) => current.map((item) => item.id === row.id ? { ...item, confirmed: event.target.checked } : item))}
+                              />
+                              Validée
+                            </label>
+                          </TableCell>
+                          <TableCell>
+                            <Button type="button" variant="ghost" size="icon" aria-label="Supprimer cette ligne" onClick={() => setOcrRows((current) => current.filter((item) => item.id !== row.id))}>
+                              <Trash2 className="h-4 w-4 text-muted-foreground" />
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+              <Button type="button" variant="outline" className="gap-2" onClick={() => setOcrRows((current) => [...current, { id: crypto.randomUUID(), studentId: '', sourceName: '', suggestedScore: '', score: '', sourceLine: '', confidence: 0, confirmed: false }])}>
+                <Plus className="h-4 w-4" /> Ajouter une ligne manuelle
+              </Button>
+
+              <details className="rounded-md border p-3">
+                <summary className="cursor-pointer text-sm font-medium">Afficher le texte brut reconnu</summary>
+                <Textarea className="mt-3 min-h-36 font-mono text-xs" readOnly value={ocrResult.text} />
+              </details>
+            </div>
+          )}
+
+          <DialogFooter className="gap-2 sm:justify-between">
+            <Button variant="outline" onClick={() => setOcrOpen(false)} disabled={ocrSaving}>Garder en brouillon</Button>
+            <Button onClick={handleSaveOcrImport} disabled={ocrSaving || !ocrResult || !ocrTitle.trim()} className="gap-2 bg-emerald-600 text-white hover:bg-emerald-700">
+              {ocrSaving ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+              {ocrSaving ? 'Enregistrement…' : 'Enregistrer les notes validées'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={editColOpen} onOpenChange={setEditColOpen}>
         <DialogContent className="sm:max-w-md">
           <div className="bg-gradient-to-r from-blue-500 to-indigo-600 h-2 rounded-t-lg -mx-6 -mt-6 mb-0" />

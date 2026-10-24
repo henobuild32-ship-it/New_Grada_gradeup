@@ -1,17 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { authenticateRequest } from '@/lib/auth/authenticate';
-import { assertSchool } from '@/lib/api/rbac';
+import { requireActiveAuth, assertSchool } from '@/lib/api/rbac';
 import { handleApiError } from '@/lib/api/errors';
+import { notifyUser } from '@/services/notifications/notificationEngine';
 
 export async function PATCH(request: NextRequest) {
   try {
-    const auth = authenticateRequest(request);
+    const auth = await requireActiveAuth(request, ['TEACHER', 'ADMIN']);
     const body = await request.json();
-    const { transmissionId, titulaireId, action } = body; // action: 'RECEIVE' | 'REJECT'
+    const { transmissionId, action } = body; // action: 'RECEIVE' | 'REJECT'
+    const notes = typeof body.notes === 'string' ? body.notes.trim().slice(0, 1000) : '';
 
-    if (!transmissionId || !titulaireId || !action) {
-      return NextResponse.json({ error: 'transmissionId, titulaireId et action requis' }, { status: 400 });
+    if (typeof transmissionId !== 'string' || !['RECEIVE', 'REJECT'].includes(action)) {
+      return NextResponse.json({ error: 'transmissionId et action RECEIVE ou REJECT requis' }, { status: 400 });
     }
 
     const transmission = await db.cotationTransmission.findUnique({
@@ -36,8 +37,11 @@ export async function PATCH(request: NextRequest) {
     assertSchool(auth, transmission.schoolId);
 
     // Vérifier que l'utilisateur est bien le titulaire
-    if (transmission.titulaireId !== auth.userId) {
+    if (auth.role !== 'ADMIN' && transmission.titulaireId !== auth.userId) {
       return NextResponse.json({ error: 'Non autorisé' }, { status: 403 });
+    }
+    if (!['SENT', 'RESENT'].includes(transmission.status)) {
+      return NextResponse.json({ error: 'Cette transmission a déjà été traitée ou doit d’abord être renvoyée par le professeur.' }, { status: 409 });
     }
 
     if (action === 'RECEIVE') {
@@ -50,23 +54,32 @@ export async function PATCH(request: NextRequest) {
       });
 
       // Notification au professeur expéditeur
-      await db.notification.create({
-        data: {
-          schoolId: transmission.schoolId,
-          userId: transmission.teacherId,
-          senderId: titulaireId,
-          title: 'Cotations reçues par le titulaire',
-          message: `Le professeur titulaire a bien reçu vos cotations pour "${transmission.evaluation.title}" (${transmission.evaluation.course.name})`,
-          type: 'COTATION_RECEIVED',
-          targetRole: 'TEACHER',
-          targetClassId: transmission.classId,
-          metadata: JSON.stringify({ evaluationId: transmission.evaluationId, transmissionId }),
-        },
+      await notifyUser({
+        schoolId: transmission.schoolId,
+        userId: transmission.teacherId,
+        senderId: auth.userId,
+        title: 'Cotations validées par le titulaire',
+        message: `Le titulaire a validé les cotations « ${transmission.evaluation.title} » (${transmission.evaluation.course.name}).`,
+        type: 'COTATION_RECEIVED',
+        priority: 'NORMAL',
+        metadata: { evaluationId: transmission.evaluationId, transmissionId },
       });
     } else if (action === 'REJECT') {
       await db.cotationTransmission.update({
         where: { id: transmissionId },
-        data: { status: 'REJECTED' },
+        data: { status: 'REJECTED', notes },
+      });
+      await notifyUser({
+        schoolId: transmission.schoolId,
+        userId: transmission.teacherId,
+        senderId: auth.userId,
+        title: 'Cotations à corriger',
+        message: notes
+          ? `Le titulaire demande une correction pour « ${transmission.evaluation.title} » : ${notes}`
+          : `Le titulaire demande une correction pour « ${transmission.evaluation.title} ». Consultez le cahier et renvoyez-le.`,
+        type: 'COTATION',
+        priority: 'HIGH',
+        metadata: { evaluationId: transmission.evaluationId, transmissionId, action: 'REJECT' },
       });
     }
 

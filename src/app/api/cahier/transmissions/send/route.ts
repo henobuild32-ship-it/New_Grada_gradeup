@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { requireAuth, assertSchool } from '@/lib/api/rbac';
+import { requireActiveAuth, assertSchool } from '@/lib/api/rbac';
 import { handleApiError } from '@/lib/api/errors';
+import { notifyUser } from '@/services/notifications/notificationEngine';
 
 export async function POST(request: NextRequest) {
   try {
-    const auth = await requireAuth(request, ['ADMIN', 'TEACHER']);
+    const auth = await requireActiveAuth(request, ['ADMIN', 'TEACHER']);
     const body = await request.json();
     const { evaluationIds } = body;
     // Un enseignant n'envoi jamais au nom d'un autre : teacherId forcé à soi-même
@@ -42,8 +43,12 @@ export async function POST(request: NextRequest) {
         assertSchool(auth, evaluation.schoolId);
 
         // Vérifier que le professeur est bien l'auteur de l'évaluation
-        if (evaluation.teacherId !== auth.userId) {
+        if (auth.role === 'TEACHER' && evaluation.teacherId !== auth.userId) {
           errors.push({ evaluationId, error: 'Non autorisé : vous n\'êtes pas l\'auteur de cette évaluation' });
+          continue;
+        }
+        if (evaluation.teacherId !== teacherId) {
+          errors.push({ evaluationId, error: 'Le professeur indiqué ne correspond pas à cette évaluation.' });
           continue;
         }
 
@@ -63,19 +68,24 @@ export async function POST(request: NextRequest) {
         const now = new Date();
 
         if (transmission) {
+          if (['SENT', 'RESENT', 'RECEIVED'].includes(transmission.status)) {
+            errors.push({ evaluationId, error: transmission.status === 'RECEIVED' ? 'Cette cotation est déjà validée par le titulaire.' : 'Cette cotation est déjà en attente de traitement par le titulaire.' });
+            continue;
+          }
           // Renvoyer - mettre à jour
-          await db.cotationTransmission.update({
+          transmission = await db.cotationTransmission.update({
             where: { id: transmission.id },
             data: {
               status: transmission.status === 'PENDING' ? 'SENT' : 'RESENT',
               sentAt: new Date(),
               lastResentAt: new Date(),
               resentCount: { increment: 1 },
+              notes: '',
             },
           });
         } else {
           // Nouveau envoi
-          await db.cotationTransmission.create({
+          transmission = await db.cotationTransmission.create({
             data: {
               schoolId: evaluation.schoolId,
               evaluationId,
@@ -91,18 +101,15 @@ export async function POST(request: NextRequest) {
 
         // Notifier le titulaire
         const courseName = evaluation.course?.name ?? 'Cours';
-        await db.notification.create({
-          data: {
-            schoolId: evaluation.schoolId,
-            userId: evaluation.class.titulaireId!,
-            senderId: teacherId,
-            title: 'Nouvelles cotations reçues',
-            message: "Le professeur a envoyé les cotations pour \"" + evaluation.title + "\" (" + courseName + ")",
-            type: 'COTATION',
-            targetRole: 'TEACHER',
-            targetClassId: evaluation.classId,
-            metadata: JSON.stringify({ evaluationId: evaluationId, evaluationTitle: evaluation.title }),
-          },
+        await notifyUser({
+          schoolId: evaluation.schoolId,
+          userId: titulaireId,
+          senderId: teacherId,
+          title: 'Nouvelles cotations reçues',
+          message: `Le professeur a transmis les cotations « ${evaluation.title} » (${courseName}).`,
+          type: 'COTATION',
+          priority: 'HIGH',
+          metadata: { evaluationId, evaluationTitle: evaluation.title, transmissionId: transmission?.id },
         });
       } catch (err) {
         console.error(`Erreur envoi évaluation ${evaluationId}:`, err);

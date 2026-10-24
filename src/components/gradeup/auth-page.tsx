@@ -54,6 +54,7 @@ import {
   ShieldCheck,
   Laptop,
   Star,
+  DollarSign,
 } from 'lucide-react';
 
 const roleDashboardMap: Record<UserRole, PageView> = {
@@ -77,6 +78,7 @@ const roleIcons: Record<string, React.ElementType> = {
   TEACHER: UserCheck,
   PARENT: Users,
   ADMIN: Shield,
+  CAISSIER: DollarSign,
 };
 
 const roleColors: Record<string, { bg: string; border: string; badge: string; gradient: string }> = {
@@ -103,6 +105,12 @@ const roleColors: Record<string, { bg: string; border: string; badge: string; gr
     border: 'border-amber-200 dark:border-amber-800/40',
     badge: 'bg-amber-100 text-amber-800 dark:bg-amber-900/60 dark:text-amber-300',
     gradient: 'from-amber-500 to-orange-600',
+  },
+  CAISSIER: {
+    bg: 'bg-emerald-50 dark:bg-emerald-950/20',
+    border: 'border-emerald-200 dark:border-emerald-800/40',
+    badge: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/60 dark:text-emerald-300',
+    gradient: 'from-emerald-600 to-teal-700',
   },
 };
 
@@ -653,7 +661,7 @@ export default function AuthPage({ initialView }: { initialView?: LandingAction 
       toast({ title: 'Mot de passe trop court', description: 'Le mot de passe doit comporter au moins 8 caractères.', variant: 'destructive' });
       return;
     }
-    if (joinRole === 'STUDENT' && joinClassIds.length === 0) {
+    if ((joinRole === 'STUDENT' || joinRole === 'TEACHER') && joinClassIds.length === 0) {
       toast({ title: 'Classe obligatoire', description: 'Veuillez sélectionner au moins une classe.', variant: 'destructive' });
       return;
     }
@@ -679,6 +687,10 @@ export default function AuthPage({ initialView }: { initialView?: LandingAction 
       toast({ title: 'Code élève à vérifier', description: 'Vérifiez le code de votre enfant et confirmez son nom et sa classe.', variant: 'destructive' });
       return;
     }
+    if (joinRole === 'CAISSIER' && !joinEmail.trim()) {
+      toast({ title: 'Adresse e-mail obligatoire', description: 'Le compte caisse doit disposer d’une adresse e-mail pour la récupération du mot de passe.', variant: 'destructive' });
+      return;
+    }
     setJoinLoading(true);
     try {
       const res = await fetch('/api/auth/register', {
@@ -702,6 +714,11 @@ export default function AuthPage({ initialView }: { initialView?: LandingAction 
       const data = await res.json();
       if (!res.ok) {
         toast({ title: "Erreur d'inscription", description: data.error || 'Erreur lors de la création du compte.', variant: 'destructive' });
+        return;
+      }
+      if (data.pendingApproval) {
+        toast({ title: 'Demande envoyée', description: data.message || 'La direction doit activer votre accès à la caisse.' });
+        setView('login');
         return;
       }
       setUser(data.user);
@@ -1488,8 +1505,8 @@ export default function AuthPage({ initialView }: { initialView?: LandingAction 
               {/* Role Selection */}
               <div className="space-y-1.5">
                 <Label className="text-xs font-bold">Votre Rôle dans l'École</Label>
-                <div className="grid grid-cols-3 gap-2">
-                  {(['STUDENT', 'TEACHER', 'PARENT'] as UserRole[]).map((r) => {
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                  {(['STUDENT', 'TEACHER', 'PARENT', 'CAISSIER'] as UserRole[]).map((r) => {
                     const RIcon = roleIcons[r];
                     const isSel = joinRole === r;
                     return (
@@ -1527,7 +1544,7 @@ export default function AuthPage({ initialView }: { initialView?: LandingAction 
                       value={joinClassIds[0] || ''}
                       onChange={(e) => setJoinClassIds([e.target.value])}
                       className="w-full h-11 px-3 rounded-xl border border-input bg-background text-sm font-medium"
-                      required
+                      required={joinRole === 'STUDENT' || joinRole === 'TEACHER'}
                     >
                       <option value="">-- Sélectionner une classe --</option>
                       {availableClasses.map((c) => (
@@ -1679,7 +1696,7 @@ export default function AuthPage({ initialView }: { initialView?: LandingAction 
               </div>
 
               <div className="space-y-1.5">
-                <Label htmlFor="join-email" className="text-xs font-bold">Adresse Email (Optionnel)</Label>
+                <Label htmlFor="join-email" className="text-xs font-bold">Adresse Email {joinRole === 'CAISSIER' ? <span className="text-destructive">*</span> : '(Optionnel)'}</Label>
                 <Input
                   id="join-email"
                   type="email"
@@ -1687,7 +1704,9 @@ export default function AuthPage({ initialView }: { initialView?: LandingAction 
                   value={joinEmail}
                   onChange={(e) => setJoinEmail(e.target.value)}
                   className="h-11 rounded-xl"
+                  required={joinRole === 'CAISSIER'}
                 />
+                {joinRole === 'CAISSIER' && <p className="text-xs text-muted-foreground">La direction validera votre demande avant l’activation de l’accès aux paiements.</p>}
               </div>
 
               {/* Passwords */}

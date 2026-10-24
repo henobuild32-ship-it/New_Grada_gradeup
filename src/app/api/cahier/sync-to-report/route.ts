@@ -13,13 +13,13 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { authenticateRequest, AuthError } from '@/lib/auth/authenticate';
+import { authenticateRequestActive, AuthError } from '@/lib/auth/authenticate';
 import { getCurrentAcademicYear } from '@/lib/grade-sync';
 import { resolveClassCoefficients } from '@/lib/coefficient-resolver';
 
 export async function POST(request: NextRequest) {
   try {
-    const auth = authenticateRequest(request);
+    const auth = await authenticateRequestActive(request);
     const body = await request.json();
     const { classId, trimester } = body;
     const schoolId = auth.schoolId;
@@ -31,9 +31,10 @@ export async function POST(request: NextRequest) {
       );
     }
     if (auth.role !== 'ADMIN' && auth.role !== 'TEACHER') return NextResponse.json({ error: 'Accès refusé.' }, { status: 403 });
-    if (auth.role === 'TEACHER') {
-      const assigned = await db.course.findFirst({ where: { schoolId, classId, teacherId: auth.userId } });
-      if (!assigned) return NextResponse.json({ error: 'Vous n’êtes pas affecté à cette classe.' }, { status: 403 });
+    const schoolClass = await db.schoolClass.findFirst({ where: { id: classId, schoolId, deletedAt: null }, select: { titulaireId: true } });
+    if (!schoolClass) return NextResponse.json({ error: 'Classe introuvable.' }, { status: 404 });
+    if (auth.role === 'TEACHER' && schoolClass.titulaireId !== auth.userId) {
+      return NextResponse.json({ error: 'Seul le titulaire peut synchroniser le bulletin de cette classe.' }, { status: 403 });
     }
 
     // 1. Fetch all students enrolled in the class
@@ -47,9 +48,20 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ message: 'No students enrolled in this class', synced: 0 });
     }
 
-    // 2. Fetch all cahier evaluations for this class + trimester with their marks
+    const activeSchoolYear = await db.schoolYear.findFirst({
+      where: { schoolId, status: 'OPEN', deletedAt: null },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true, year: true },
+    });
+
+    // 2. Only evaluations accepted by the titular feed official report cards.
+    const evaluationWhere: Record<string, unknown> = {
+      classId, schoolId, trimester, deletedAt: null,
+      transmissions: { some: { schoolId, status: 'RECEIVED' } },
+    };
+    if (activeSchoolYear) evaluationWhere.schoolYearId = activeSchoolYear.id;
     const evaluations = await db.cahierEvaluation.findMany({
-      where: { classId, trimester },
+      where: evaluationWhere,
       include: { marks: true, course: true },
     });
 
@@ -178,7 +190,7 @@ export async function POST(request: NextRequest) {
         lastSyncedAt: new Date().toISOString(),
         serializedGrades,
         metadata: {
-          academicYear: getCurrentAcademicYear(),
+          academicYear: activeSchoolYear?.year || getCurrentAcademicYear(),
           trimester,
           totalPointsObtained,
           totalPointsPossible,
@@ -224,7 +236,7 @@ export async function POST(request: NextRequest) {
             classId,
             studentId,
             trimester,
-            academicYear: getCurrentAcademicYear(),
+            academicYear: activeSchoolYear?.year || getCurrentAcademicYear(),
             studentName: student.fullName ?? '',
             studentGender: student.gender ?? 'M',
             studentBirthDate: student.birthDate ?? '',

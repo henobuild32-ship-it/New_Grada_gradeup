@@ -29,9 +29,12 @@ export default function TeacherLessons() {
   const [draftSavedAt, setDraftSavedAt] = useState<number | null>(null);
   const [preview, setPreview] = useState(false);
 
+  const [formClassId, setFormClassId] = useState('');
   const [formCourseId, setFormCourseId] = useState('');
+  const [formPublicationType, setFormPublicationType] = useState<'LESSON' | 'HOMEWORK' | 'DOCUMENT'>('LESSON');
   const [formTitle, setFormTitle] = useState('');
   const [formContent, setFormContent] = useState('');
+  const [formDueDate, setFormDueDate] = useState('');
   const [formFileName, setFormFileName] = useState('');
   const [formFileUrl, setFormFileUrl] = useState('');
   const formFileRef = useRef<File | null>(null);
@@ -44,15 +47,21 @@ export default function TeacherLessons() {
     try {
       const stored = localStorage.getItem(`gradeup:teacher-lesson-draft:${user.schoolId}:${user.id}`);
       if (stored) {
-        const draft = JSON.parse(stored) as { courseId?: string; title?: string; content?: string; savedAt?: number };
+        const draft = JSON.parse(stored) as { classId?: string; courseId?: string; publicationType?: 'LESSON' | 'HOMEWORK' | 'DOCUMENT'; title?: string; content?: string; dueDate?: string; savedAt?: number };
+        setFormClassId(typeof draft.classId === 'string' ? draft.classId : '');
         setFormCourseId(typeof draft.courseId === 'string' ? draft.courseId : '');
+        setFormPublicationType(draft.publicationType === 'HOMEWORK' || draft.publicationType === 'DOCUMENT' ? draft.publicationType : 'LESSON');
         setFormTitle(typeof draft.title === 'string' ? draft.title : '');
         setFormContent(typeof draft.content === 'string' ? draft.content : '');
+        setFormDueDate(typeof draft.dueDate === 'string' ? draft.dueDate : '');
         setDraftSavedAt(typeof draft.savedAt === 'number' ? draft.savedAt : null);
       } else {
+        setFormClassId('');
         setFormCourseId('');
+        setFormPublicationType('LESSON');
         setFormTitle('');
         setFormContent('');
+        setFormDueDate('');
         setDraftSavedAt(null);
       }
     } catch {
@@ -68,15 +77,18 @@ export default function TeacherLessons() {
       if (!formTitle.trim() && !formContent.trim() && !formCourseId) return;
       const savedAt = Date.now();
       localStorage.setItem(`gradeup:teacher-lesson-draft:${user.schoolId}:${user.id}`, JSON.stringify({
+        classId: formClassId,
         courseId: formCourseId,
+        publicationType: formPublicationType,
         title: formTitle,
         content: formContent,
+        dueDate: formDueDate,
         savedAt,
       }));
       setDraftSavedAt(savedAt);
     }, 400);
     return () => window.clearTimeout(timer);
-  }, [user, draftReady, formCourseId, formTitle, formContent]);
+  }, [user, draftReady, formClassId, formCourseId, formPublicationType, formTitle, formContent, formDueDate]);
 
   const fetchData = async () => {
     if (!user) return;
@@ -100,11 +112,28 @@ export default function TeacherLessons() {
 
   const today = new Date().toISOString().split('T')[0];
   const todayLessons = Array.isArray(lessons) ? lessons.filter((l) => l.createdAt?.startsWith(today)) : [];
+  const classMap = new Map<string, { id: string; name: string }>();
+  for (const course of courses) {
+    if (course.classId && course.class?.name) classMap.set(course.classId, { id: course.classId, name: course.class.name });
+  }
+  const assignedClasses = [...classMap.values()];
+  const classCourses = courses.filter((course) => course.classId === formClassId);
+  const selectedCourse = courses.find((course) => course.id === formCourseId);
+
+  useEffect(() => {
+    if (!formCourseId || courses.length === 0) return;
+    const current = courses.find((course) => course.id === formCourseId);
+    if (current && !formClassId) setFormClassId(current.classId);
+    else if (current && current.classId !== formClassId) setFormCourseId('');
+  }, [courses, formCourseId, formClassId]);
 
   const resetForm = () => {
+    setFormClassId('');
     setFormCourseId('');
+    setFormPublicationType('LESSON');
     setFormTitle('');
     setFormContent('');
+    setFormDueDate('');
     setFormFileName('');
     setFormFileUrl('');
     formFileRef.current = null;
@@ -112,8 +141,12 @@ export default function TeacherLessons() {
   };
 
   const handleCreate = async () => {
-    if (!user || !formCourseId || !formTitle.trim()) {
-      toast.error('Veuillez remplir le titre et sélectionner un cours');
+    if (!user || !formClassId || !formCourseId || !formTitle.trim()) {
+      toast.error('Sélectionnez d’abord une classe, une matière et un titre.');
+      return;
+    }
+    if (formContent.length > 1000) {
+      toast.error('Le contenu est limité à 1 000 caractères.');
       return;
     }
 
@@ -123,7 +156,7 @@ export default function TeacherLessons() {
         toast.error('La publication exige une connexion. Votre brouillon reste enregistré sur cet appareil.');
         return;
       }
-      let fileUrl = formFileUrl;
+      let fileUrl = formFileUrl.trim();
       if (formFileRef.current) {
         const uploadFormData = new FormData();
         uploadFormData.append('file', formFileRef.current);
@@ -138,28 +171,47 @@ export default function TeacherLessons() {
         }
       }
 
-      const res = await fetch('/api/lessons', {
+      const requestOptions = {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          schoolId: user.schoolId,
-          courseId: formCourseId,
-          teacherId: user.id,
-          title: formTitle.trim(),
-          content: formContent.trim(),
-          fileUrl,
-          fileName: formFileName.trim(),
-          isPublished: true,
-        }),
-      });
+      };
+      let res: Response;
+      if (formPublicationType === 'LESSON') {
+        res = await fetch('/api/lessons', {
+          ...requestOptions,
+          body: JSON.stringify({ schoolId: user.schoolId, courseId: formCourseId, teacherId: user.id, title: formTitle.trim(), content: formContent.trim(), fileUrl, fileName: formFileName.trim(), isPublished: true }),
+        });
+      } else if (formPublicationType === 'HOMEWORK') {
+        res = await fetch('/api/homework', {
+          ...requestOptions,
+          body: JSON.stringify({ courseId: formCourseId, teacherId: user.id, title: formTitle.trim(), description: formContent.trim(), dueDate: formDueDate, fileUrl, fileName: formFileName.trim(), gradingType: 'manual' }),
+        });
+      } else {
+        const created = await fetch('/api/documents', {
+          ...requestOptions,
+          body: JSON.stringify({ schoolId: user.schoolId, targetClassId: formClassId, title: formTitle.trim(), description: formContent.trim(), subject: courses.find((course) => course.id === formCourseId)?.name || '', content: formContent.trim(), fileUrl, fileName: formFileName.trim(), category: 'Pédagogique' }),
+        });
+        if (!created.ok) {
+          const err = await created.json();
+          toast.error(err.error || 'Erreur lors de la création du document');
+          return;
+        }
+        const createdData = await created.json();
+        res = await fetch(`/api/documents?id=${encodeURIComponent(createdData.document.id)}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ published: true }),
+        });
+      }
 
       if (!res.ok) {
         const err = await res.json();
-        toast.error(err.error || 'Erreur lors de la création');
+        toast.error(err.error || 'Erreur lors de la publication');
         return;
       }
 
-      toast.success('Leçon publiée avec succès');
+      const publicationLabel = formPublicationType === 'HOMEWORK' ? 'Devoir' : formPublicationType === 'DOCUMENT' ? 'Document' : 'Leçon';
+      toast.success(`${publicationLabel} publié avec succès pour la classe sélectionnée.`);
       localStorage.removeItem(`gradeup:teacher-lesson-draft:${user.schoolId}:${user.id}`);
       setDraftSavedAt(null);
       setDialogOpen(false);
@@ -323,16 +375,16 @@ export default function TeacherLessons() {
       )}
 
       {/* Create Lesson Dialog */}
-      <Dialog open={dialogOpen} onOpenChange={(open) => !open && resetForm()}>
-        <DialogContent className="sm:max-w-[500px]">
+      <Dialog open={dialogOpen} onOpenChange={(open) => { setDialogOpen(open); if (!open) resetForm(); }}>
+        <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-[600px]">
           <div className="bg-gradient-to-r from-blue-500 to-indigo-600 h-2 rounded-t-lg -mx-6 -mt-6 mb-0" />
           <DialogHeader className="pt-2">
             <DialogTitle className="flex items-center gap-2">
               <Plus className="h-5 w-5 text-blue-600" />
-              Publier une leçon
+              Publier {formPublicationType === 'HOMEWORK' ? 'un devoir' : formPublicationType === 'DOCUMENT' ? 'un document' : 'une leçon'}
             </DialogTitle>
             <DialogDescription>
-              Partagez du contenu avec vos élèves
+              Choisissez la classe puis uniquement une matière qui vous y est attribuée.
             </DialogDescription>
           </DialogHeader>
 
@@ -346,15 +398,15 @@ export default function TeacherLessons() {
               </Alert>
             )}
             <div className="space-y-2">
-              <Label>Cours *</Label>
-              <Select value={formCourseId} onValueChange={setFormCourseId}>
+              <Label>Classe *</Label>
+              <Select value={formClassId} onValueChange={(value) => { setFormClassId(value); setFormCourseId(''); }}>
                 <SelectTrigger className="w-full focus-visible:ring-2 focus-visible:ring-blue-500/20 focus-visible:border-blue-500 transition-all">
-                  <SelectValue placeholder="Sélectionner un cours" />
+                  <SelectValue placeholder="Sélectionner d’abord une classe" />
                 </SelectTrigger>
                 <SelectContent>
-                  {courses.map((course) => (
-                    <SelectItem key={course.id} value={course.id}>
-                      {course.name} — {course.class?.name}
+                  {assignedClasses.map((schoolClass) => (
+                    <SelectItem key={schoolClass.id} value={schoolClass.id}>
+                      {schoolClass.name}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -362,18 +414,65 @@ export default function TeacherLessons() {
             </div>
 
             <div className="space-y-2">
+              <Label>Matière *</Label>
+              <Select value={formCourseId} onValueChange={setFormCourseId} disabled={!formClassId}>
+                <SelectTrigger className="w-full focus-visible:ring-2 focus-visible:ring-blue-500/20 focus-visible:border-blue-500 transition-all">
+                  <SelectValue placeholder={formClassId ? 'Sélectionner une matière de cette classe' : 'Choisissez une classe pour continuer'} />
+                </SelectTrigger>
+                <SelectContent>
+                  {classCourses.map((course) => <SelectItem key={course.id} value={course.id}>{course.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Type de publication *</Label>
+              <Select value={formPublicationType} onValueChange={(value: 'LESSON' | 'HOMEWORK' | 'DOCUMENT') => setFormPublicationType(value)}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="LESSON">Leçon</SelectItem>
+                  <SelectItem value="HOMEWORK">Devoir</SelectItem>
+                  <SelectItem value="DOCUMENT">Document pédagogique</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {preview && (
+              <div className="rounded-xl border border-blue-200 bg-blue-50/50 p-3 text-sm dark:border-blue-900 dark:bg-blue-950/20">
+                <p className="font-semibold">{formTitle.trim() || 'Titre de la publication'}</p>
+                <p className="mt-1 text-muted-foreground">
+                  Classe : {selectedCourse?.class?.name || '—'}
+                  {' · '}Matière : {selectedCourse?.name || '—'}
+                  {' · '}{formPublicationType === 'HOMEWORK' ? 'Devoir' : formPublicationType === 'DOCUMENT' ? 'Document' : 'Leçon'}
+                </p>
+                {(formFileName || formFileUrl.trim()) && (
+                  <p className="mt-1 break-all text-xs text-blue-700 dark:text-blue-300">
+                    Pièce jointe : {formFileName || formFileUrl.trim()}
+                  </p>
+                )}
+              </div>
+            )}
+
+            <div className="space-y-2">
               <Label>Titre *</Label>
               <Input
-                placeholder="Titre de la leçon"
+                placeholder={formPublicationType === 'HOMEWORK' ? 'Titre du devoir' : formPublicationType === 'DOCUMENT' ? 'Titre du document' : 'Titre de la leçon'}
                 value={formTitle}
                 onChange={(e) => setFormTitle(e.target.value)}
                 className="focus-visible:ring-2 focus-visible:ring-blue-500/20 focus-visible:border-blue-500 transition-all"
               />
             </div>
 
+            {formPublicationType === 'HOMEWORK' && (
+              <div className="space-y-2">
+                <Label htmlFor="lesson-homework-due-date">Date limite de remise</Label>
+                <Input id="lesson-homework-due-date" type="date" value={formDueDate} onChange={(event) => setFormDueDate(event.target.value)} />
+              </div>
+            )}
+
             <div className="space-y-2">
               <div className="flex items-center justify-between gap-2">
-                <Label htmlFor="lesson-markdown-content">Contenu Markdown</Label>
+                <Label htmlFor="lesson-markdown-content">Rédiger un contenu</Label>
                 <Button type="button" variant="outline" size="sm" className="min-h-9" onClick={() => setPreview((value) => !value)}>
                   {preview ? <><PencilLine className="mr-2 size-4" />Modifier</> : <><Eye className="mr-2 size-4" />Aperçu</>}
                 </Button>
@@ -385,14 +484,18 @@ export default function TeacherLessons() {
               ) : (
                 <Textarea
                   id="lesson-markdown-content"
-                  placeholder={'Rédigez en Markdown : ## Titre, **important**, listes…'}
+                  placeholder="Écrivez la leçon ou les consignes pour vos élèves…"
                   value={formContent}
-                  onChange={(e) => setFormContent(e.target.value)}
+                  maxLength={1000}
+                  onChange={(e) => setFormContent(e.target.value.slice(0, 1000))}
                   rows={7}
                   className="min-h-36 focus-visible:ring-2 focus-visible:ring-blue-500/20 focus-visible:border-blue-500 transition-all"
                 />
               )}
-              <p className="text-xs text-muted-foreground">Le brouillon texte est sauvegardé automatiquement sur cet appareil. La publication reste en ligne uniquement.</p>
+              <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
+                <span>Le brouillon est sauvegardé sur cet appareil. La publication reste en ligne uniquement.</span>
+                <span className="shrink-0 tabular-nums">{formContent.length}/1 000</span>
+              </div>
             </div>
 
             <div className="space-y-2">
@@ -443,6 +546,20 @@ export default function TeacherLessons() {
               <p className="text-xs text-muted-foreground">
                 Cliquez pour ouvrir le gestionnaire de fichiers
               </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="lesson-external-link">Lien Google Docs ou autre document accessible (optionnel)</Label>
+              <Input
+                id="lesson-external-link"
+                type="url"
+                inputMode="url"
+                placeholder="https://docs.google.com/document/d/…"
+                value={formFileUrl}
+                onChange={(event) => setFormFileUrl(event.target.value)}
+                className="h-11"
+              />
+              <p className="text-xs text-muted-foreground">Vérifiez que les élèves de la classe ont l’autorisation d’ouvrir ce lien.</p>
             </div>
 
           </div>

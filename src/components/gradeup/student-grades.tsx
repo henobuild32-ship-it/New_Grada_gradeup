@@ -33,16 +33,29 @@ function extractGrades(data: unknown): Record<string, unknown>[] {
 
 export default function StudentGrades() {
   const user = useAppStore((s) => s.user);
-  const [trimester, setTrimester] = useState('1');
+  const [trimester, setTrimester] = useState('P1');
   const [modTarget, setModTarget] = useState<GradeWithMod | null>(null);
   const [modReason, setModReason] = useState('');
   const [modNewScore, setModNewScore] = useState('');
   const [modSending, setModSending] = useState(false);
   const [modStatusMap, setModStatusMap] = useState<Record<string, string>>({});
+  const gradeViews = [
+    { key: 'P1', label: 'Première période', title: 'Première période' },
+    { key: 'P2', label: 'Deuxième période', title: 'Deuxième période' },
+    { key: 'P3', label: 'Troisième période', title: 'Troisième période' },
+    { key: '1', label: 'Premier trimestre', title: 'Premier trimestre' },
+    { key: 'P4', label: 'Quatrième période', title: 'Quatrième période' },
+    { key: '2', label: 'Deuxième trimestre', title: 'Deuxième trimestre' },
+    { key: '3', label: 'Troisième trimestre', title: 'Troisième trimestre' },
+  ];
+  const selectedGradeView = gradeViews.find((view) => view.key === trimester) ?? gradeViews[0];
   const gradeFilter = useCallback(
     (record: LocalRecord) => {
       const grade = record as LocalGrade;
-      return grade.studentId === user?.id && grade.trimester === trimester;
+      if (grade.studentId !== user?.id) return false;
+      if (trimester === '1') return ['1', 'P1', 'P2', 'EX1'].includes(grade.trimester);
+      if (trimester === '2') return ['2', 'P3', 'P4', 'EX2'].includes(grade.trimester);
+      return grade.trimester === trimester;
     },
     [trimester, user?.id]
   );
@@ -132,8 +145,9 @@ export default function StudentGrades() {
   };
 
   const trimesterLabels: Record<string, string> = {
-    '1': '1er Trimestre', '2': '2e Trimestre', '3': '3e Trimestre',
-    P1: 'P1', P2: 'P2', EX1: 'Examen 1', P3: 'P3', P4: 'P4', EX2: 'Examen 2',
+    '1': '1er trimestre', '2': '2e trimestre', '3': '3e trimestre',
+    P1: 'Première période', P2: 'Deuxième période', P3: 'Troisième période', P4: 'Quatrième période',
+    EX1: 'Examen du 1er trimestre', EX2: 'Examen du 2e trimestre',
   };
 
   // Group grades by course so each course shows its period breakdown + average.
@@ -146,8 +160,12 @@ export default function StudentGrades() {
     }
     return Array.from(map.entries()).map(([courseId, list]) => {
       const course = list[0].course;
-      const normalized = list.map((g) => (g.score / g.maxScore) * 20);
-      const avg = normalized.reduce((a, b) => a + b, 0) / normalized.length;
+      // Preserve the school's configured maximum for each period/exam. A
+      // simple average would incorrectly give an exam the same weight as a
+      // smaller continuous-assessment mark.
+      const earned = list.reduce((sum, grade) => sum + grade.score, 0);
+      const possible = list.reduce((sum, grade) => sum + (grade.maxScore > 0 ? grade.maxScore : 20), 0);
+      const avg = possible > 0 ? (earned / possible) * 20 : 0;
       return {
         courseId,
         courseName: course?.name || '—',
@@ -279,7 +297,7 @@ export default function StudentGrades() {
         <CardContent className="flex items-center justify-between p-6">
           <div>
             <CardDescription className="text-sm font-medium text-blue-700">
-              Moyenne générale — Trimestre {trimester}
+              Moyenne générale — {selectedGradeView.title}
             </CardDescription>
             <p className="text-4xl font-bold mt-1" style={{ color: average >= 16 ? '#16a34a' : average >= 14 ? '#2563eb' : average >= 12 ? '#ca8a04' : average >= 10 ? '#ea580c' : '#dc2626' }}>
               {grades.length > 0 ? average.toFixed(2) : '—'}
@@ -301,12 +319,14 @@ export default function StudentGrades() {
         </CardContent>
       </Card>
 
-      {/* Trimester Tabs */}
+      {/* Périodes et trimestres restent des vues distinctes. */}
       <Tabs value={trimester} onValueChange={setTrimester}>
-        <TabsList>
-          <TabsTrigger value="1" className="gap-1.5"><BarChart3 className="h-4 w-4" />Trimestre 1</TabsTrigger>
-          <TabsTrigger value="2" className="gap-1.5"><BarChart3 className="h-4 w-4" />Trimestre 2</TabsTrigger>
-          <TabsTrigger value="3" className="gap-1.5"><BarChart3 className="h-4 w-4" />Trimestre 3</TabsTrigger>
+        <TabsList className="grid h-auto w-full grid-cols-2 gap-1 sm:grid-cols-4 xl:grid-cols-7">
+          {gradeViews.map((view) => (
+            <TabsTrigger key={view.key} value={view.key} className="min-h-10 whitespace-normal px-2 py-2 text-xs leading-tight sm:text-sm">
+              <BarChart3 className="mr-1.5 h-4 w-4 shrink-0" />{view.label}
+            </TabsTrigger>
+          ))}
         </TabsList>
 
         <TabsContent value={trimester} className="mt-4">
@@ -314,7 +334,7 @@ export default function StudentGrades() {
             <div className="text-center py-16">
               <div className="mx-auto w-20 h-20 rounded-full bg-muted/50 flex items-center justify-center mb-4"><BarChart3 className="h-10 w-10 text-muted-foreground/50" /></div>
               <h3 className="text-lg font-semibold mb-1">Aucune note</h3>
-              <p className="text-muted-foreground">Aucune note enregistrée pour ce trimestre.</p>
+              <p className="text-muted-foreground">Aucune note enregistrée pour {selectedGradeView.title.toLowerCase()}.</p>
             </div>
           ) : (
             <Card className="shadow-sm overflow-hidden">

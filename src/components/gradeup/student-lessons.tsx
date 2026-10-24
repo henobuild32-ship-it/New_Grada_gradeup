@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAppStore } from '@/lib/store';
 import type { CourseInfo, LessonInfo } from '@/lib/types';
 import type { LocalRecord } from '@/lib/offline/types';
@@ -19,6 +19,18 @@ import { BookOpen, User, Clock, FileText, ChevronDown, ChevronUp, Download, Filt
 
 type LocalCourse = CourseInfo & LocalRecord;
 type LocalLesson = LessonInfo & LocalRecord;
+interface PublishedDocument {
+  id: string;
+  title: string;
+  subject?: string;
+  content?: string;
+  description?: string;
+  category?: string;
+  fileUrl?: string;
+  fileName?: string;
+  targetClassId?: string;
+  updatedAt: string;
+}
 
 function extractCourses(data: unknown): Record<string, unknown>[] {
   if (!data || typeof data !== 'object') return [];
@@ -36,14 +48,18 @@ export default function StudentLessons() {
   const user = useAppStore((s) => s.user);
   const [selectedCourseId, setSelectedCourseId] = useState<string>('all');
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [expandedDocumentId, setExpandedDocumentId] = useState<string | null>(null);
+  const [documents, setDocuments] = useState<PublishedDocument[]>([]);
+  const [loadingDocuments, setLoadingDocuments] = useState(false);
+  const [documentsError, setDocumentsError] = useState('');
 
-  const classId = user?.classEnrollments?.[0]?.classId;
+  const classIds = useMemo(() => new Set((user?.classEnrollments || []).map((item) => item.classId)), [user?.classEnrollments]);
   const courseFilter = useCallback(
-    (record: LocalRecord) => (record as LocalCourse).classId === classId,
-    [classId]
+    (record: LocalRecord) => classIds.has((record as LocalCourse).classId),
+    [classIds]
   );
-  const courseQuery = classId && user?.schoolId
-    ? new URLSearchParams({ schoolId: user.schoolId, classId }).toString()
+  const courseQuery = classIds.size > 0 && user?.schoolId
+    ? new URLSearchParams({ schoolId: user.schoolId }).toString()
     : null;
   const { data: cachedCourses, loading: loadingCourses, error: courseError, refresh: refreshCourses } = useEntityListState<LocalCourse>(
     'courses',
@@ -63,7 +79,7 @@ export default function StudentLessons() {
     },
     [courseIds, selectedCourseId]
   );
-  const lessonQuery = classId && user?.schoolId
+  const lessonQuery = classIds.size > 0 && user?.schoolId
     ? new URLSearchParams({ schoolId: user.schoolId, ...(selectedCourseId !== 'all' ? { courseId: selectedCourseId } : {}) }).toString()
     : null;
   const { data: cachedLessons, loading: loadingLessons, refreshing, error: lessonError, refresh: refreshLessons } = useEntityListState<LocalLesson>(
@@ -79,9 +95,30 @@ export default function StudentLessons() {
     () => [...cachedLessons].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()),
     [cachedLessons]
   );
-  const loading = loadingCourses || loadingLessons;
-  const loadError = courseError || lessonError;
-  const refreshAll = () => { void Promise.all([refreshCourses(), refreshLessons()]); };
+  const visibleDocuments = useMemo(() => {
+    const classScoped = documents.filter((document) => !document.targetClassId || classIds.has(document.targetClassId));
+    if (selectedCourseId === 'all') return classScoped;
+    const selectedCourse = courses.find((course) => course.id === selectedCourseId);
+    return classScoped.filter((document) => !document.subject || document.subject === selectedCourse?.name);
+  }, [documents, classIds, selectedCourseId, courses]);
+  const loadDocuments = useCallback(async () => {
+    if (!user?.schoolId || !classIds.size) { setDocuments([]); return; }
+    setLoadingDocuments(true);
+    setDocumentsError('');
+    try {
+      const response = await fetch(`/api/documents?schoolId=${encodeURIComponent(user.schoolId)}`, { cache: 'no-store' });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || 'Documents indisponibles.');
+      setDocuments(Array.isArray(payload.documents) ? payload.documents : []);
+    } catch (error) {
+      setDocumentsError(error instanceof Error ? error.message : 'Erreur de chargement des documents.');
+    } finally { setLoadingDocuments(false); }
+  }, [user?.schoolId, classIds]);
+  useEffect(() => { void loadDocuments(); }, [loadDocuments]);
+
+  const loading = loadingCourses || loadingLessons || loadingDocuments;
+  const loadError = courseError || lessonError || documentsError;
+  const refreshAll = () => { void Promise.all([refreshCourses(), refreshLessons(), loadDocuments()]); };
 
   const toggleExpand = (id: string) => { setExpandedId(expandedId === id ? null : id); };
   const formatDate = (dateStr: string) => new Date(dateStr).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' });
@@ -106,7 +143,7 @@ export default function StudentLessons() {
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h1 className="text-2xl font-bold">Mes leçons</h1>
-            <p className="text-sm text-muted-foreground mt-1">{lessons.length} leçon(s) disponible(s)</p>
+            <p className="text-sm text-muted-foreground mt-1">{lessons.length} leçon(s) et {visibleDocuments.length} document(s) disponible(s)</p>
           </div>
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
             <Button type="button" variant="outline" className="min-h-11 self-start gap-2" onClick={refreshAll} disabled={refreshing}>
@@ -134,13 +171,13 @@ export default function StudentLessons() {
 
       {loadingLessons ? (
         <div className="space-y-4">{[...Array(3)].map((_, i) => <Skeleton key={i} className="h-28 rounded-xl" />)}</div>
-      ) : lessons.length === 0 ? (
+      ) : lessons.length === 0 && visibleDocuments.length === 0 ? (
         <div className="text-center py-20">
           <div className="mx-auto w-24 h-24 rounded-full bg-muted/50 flex items-center justify-center mb-4"><BookOpen className="h-12 w-12 text-muted-foreground/50" /></div>
           <h3 className="text-xl font-semibold mb-2">Aucune leçon disponible</h3>
           <p className="text-muted-foreground">{selectedCourseId !== 'all' ? 'Aucune leçon pour ce cours.' : 'Vos enseignants n\'ont pas encore publié de leçons.'}</p>
         </div>
-      ) : (
+      ) : lessons.length > 0 ? (
         <ScrollArea className="max-h-[600px]">
           <div className="space-y-4">
             {lessons.map((lesson) => {
@@ -158,6 +195,7 @@ export default function StudentLessons() {
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 mb-1">
                               <Badge variant="secondary" className="text-xs shrink-0 bg-blue-50 text-blue-700">{lesson.course?.name || 'Cours'}</Badge>
+                              {lesson.course?.class?.name && <Badge variant="outline" className="text-xs shrink-0">{lesson.course.class.name}</Badge>}
                             </div>
                             <h3 className="font-semibold text-base">{lesson.title}</h3>
                             <div className="flex items-center gap-4 mt-2 text-sm text-muted-foreground">
@@ -180,8 +218,8 @@ export default function StudentLessons() {
                           </div>
                         )}
                         <div className="mt-3">
-                          <Button variant="ghost" size="sm" onClick={() => toggleExpand(lesson.id)} className="text-blue-600 hover:text-blue-800 hover:bg-blue-50 hover:scale-[1.02] active:scale-[0.98] transition-all">
-                            {isExpanded ? (<><ChevronUp className="h-4 w-4 mr-1" />Masquer la leçon</>) : (<><ChevronDown className="h-4 w-4 mr-1" />Lire la leçon</>)}
+                              <Button variant="outline" size="sm" onClick={() => toggleExpand(lesson.id)} className="mt-2 min-h-10 border-blue-200 text-blue-700 hover:bg-blue-50">
+                            {isExpanded ? (<><ChevronUp className="h-4 w-4 mr-1" />Fermer</>) : (<><ChevronDown className="h-4 w-4 mr-1" />Ouvrir</>)}
                           </Button>
                         </div>
                         {isExpanded && (
@@ -197,6 +235,36 @@ export default function StudentLessons() {
             })}
           </div>
         </ScrollArea>
+      ) : null}
+
+      {visibleDocuments.length > 0 && (
+        <section className="space-y-3" aria-labelledby="student-published-documents">
+          <div className="flex items-center gap-2"><FileText className="h-5 w-5 text-indigo-600" /><h2 id="student-published-documents" className="text-lg font-semibold">Documents publiés pour mes classes</h2></div>
+          {visibleDocuments.map((document) => {
+            const expanded = expandedDocumentId === document.id;
+            return (
+              <Card key={document.id} className="overflow-hidden">
+                <CardHeader className="pb-3">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="min-w-0 space-y-1">
+                      <CardTitle className="text-base">{document.title}</CardTitle>
+                      <CardDescription>{document.subject || document.category || 'Document pédagogique'} · {formatDate(document.updatedAt)}</CardDescription>
+                    </div>
+                    <Button variant="outline" className="min-h-10 shrink-0 gap-2" onClick={() => setExpandedDocumentId(expanded ? null : document.id)}>
+                      {expanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}{expanded ? 'Fermer' : 'Ouvrir'}
+                    </Button>
+                  </div>
+                </CardHeader>
+                {expanded && (
+                  <CardContent className="space-y-3 pt-0">
+                    {(document.content || document.description) && <div className="rounded-lg border bg-muted/30 p-4 text-sm leading-relaxed [&_p]:mb-3 [&_ul]:list-disc [&_ul]:pl-6"><ReactMarkdown>{document.content || document.description || ''}</ReactMarkdown></div>}
+                    {document.fileUrl && <a href={document.fileUrl} download={document.fileName || true} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-10 items-center gap-2 text-sm font-medium text-blue-700 underline"><Download className="h-4 w-4" />{document.fileName || 'Ouvrir ou télécharger le document'}</a>}
+                  </CardContent>
+                )}
+              </Card>
+            );
+          })}
+        </section>
       )}
     </div>
   );

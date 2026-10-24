@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { authenticateRequest, AuthError } from '@/lib/auth/authenticate';
+import { authenticateRequestActive, AuthError } from '@/lib/auth/authenticate';
 import {
   recomputeStudentPeriodGrade,
   recomputeEvaluationGrades,
@@ -14,12 +14,16 @@ import { assertGradePeriodOpen } from '@/lib/academic-closures';
  */
 export async function GET(request: NextRequest) {
   try {
-    const auth = authenticateRequest(request);
+    const auth = await authenticateRequestActive(request);
+    if (!['ADMIN', 'TEACHER'].includes(auth.role)) {
+      return NextResponse.json({ error: 'Accès réservé aux professeurs et administrateurs.' }, { status: 403 });
+    }
     const { searchParams } = new URL(request.url);
     const schoolId = searchParams.get('schoolId');
     const classId = searchParams.get('classId');
     const courseId = searchParams.get('courseId');
     const period = searchParams.get('period'); // "P1" | "P2" | "EX1" | "P3" | "P4" | "EX2" (optional)
+    let schoolYearId = searchParams.get('schoolYearId');
 
     if (!schoolId || !classId || !courseId) {
       return NextResponse.json(
@@ -59,16 +63,26 @@ export async function GET(request: NextRequest) {
         `${a.fullName} ${a.postName}`.localeCompare(`${b.fullName} ${b.postName}`, 'fr', { sensitivity: 'base' })
       );
 
-    // 2. Fetch all evaluations for this course (optionally filtered by period)
+    if (schoolYearId) {
+      const year = await db.schoolYear.findFirst({ where: { id: schoolYearId, schoolId, deletedAt: null }, select: { id: true } });
+      if (!year) return NextResponse.json({ error: 'Année scolaire introuvable dans cet établissement.' }, { status: 400 });
+    } else {
+      const activeYear = await db.schoolYear.findFirst({ where: { schoolId, status: 'OPEN', deletedAt: null }, orderBy: { createdAt: 'desc' }, select: { id: true } });
+      schoolYearId = activeYear?.id || null;
+    }
+
+    // 2. Fetch all evaluations for this course, academic year and period.
     const evaluationWhere: Record<string, unknown> = { schoolId, classId, courseId };
     if (period) {
       evaluationWhere.trimester = period;
     }
+    if (schoolYearId) evaluationWhere.schoolYearId = schoolYearId;
 
     const evaluations = await db.cahierEvaluation.findMany({
       where: evaluationWhere,
       include: {
         marks: true,
+        transmissions: { select: { status: true, notes: true, sentAt: true, receivedAt: true } },
       },
       orderBy: { date: 'asc' },
     });
@@ -93,9 +107,14 @@ export async function GET(request: NextRequest) {
  */
 export async function POST(request: NextRequest) {
   try {
-    const auth = authenticateRequest(request);
+    const auth = await authenticateRequestActive(request);
     const body = await request.json();
-    const { schoolId, classId, courseId, title, maxScore, period, date, teacherId } = body;
+    const { schoolId, classId, courseId, title, maxScore, period, date, teacherId, marks, schoolYearId: requestedSchoolYearId,
+      sourceDocumentPath, sourceDocumentName, ocrSourceText, ocrCorrections, ocrConfidence, ocrProvider } = body;
+
+    if (!['ADMIN', 'TEACHER'].includes(auth.role)) {
+      return NextResponse.json({ error: 'Accès réservé aux professeurs et administrateurs.' }, { status: 403 });
+    }
 
     if (!schoolId || !classId || !courseId || !title || !period) {
       return NextResponse.json(
@@ -113,26 +132,100 @@ export async function POST(request: NextRequest) {
     if (!course || (auth.role === 'TEACHER' && course.teacherId !== auth.userId)) {
       return NextResponse.json({ error: 'Vous n’êtes pas autorisé à créer cette évaluation.' }, { status: 403 });
     }
+    if (sourceDocumentPath !== undefined) {
+      const expectedPrefix = `cahier/${schoolId}/${classId}/`;
+      if (typeof sourceDocumentPath !== 'string' || !sourceDocumentPath.startsWith(expectedPrefix) || sourceDocumentPath.includes('..')) {
+        return NextResponse.json({ error: 'La source OCR ne correspond pas à cette classe.' }, { status: 400 });
+      }
+    }
+    if (marks !== undefined && (!marks || typeof marks !== 'object' || Array.isArray(marks))) {
+      return NextResponse.json({ error: 'Les notes OCR sont invalides.' }, { status: 400 });
+    }
+    if (ocrCorrections !== undefined && (!Array.isArray(ocrCorrections) || ocrCorrections.length > 500)) {
+      return NextResponse.json({ error: 'Les corrections OCR sont invalides.' }, { status: 400 });
+    }
     const evaluationDate = date ? new Date(date) : new Date();
+    let evaluationSchoolYear: { id: string; status: string } | null = null;
     try {
-      const schoolYear = await db.schoolYear.findFirst({ where: { schoolId, status: { not: 'CLOSED' } }, orderBy: { createdAt: 'desc' }, select: { id: true } });
-      await assertGradePeriodOpen({ schoolId, schoolYearId: schoolYear?.id, date: evaluationDate, trimester: period || 'P1' });
+      evaluationSchoolYear = requestedSchoolYearId
+        ? await db.schoolYear.findFirst({ where: { id: requestedSchoolYearId, schoolId, deletedAt: null }, select: { id: true, status: true } })
+        : await db.schoolYear.findFirst({ where: { schoolId, status: 'OPEN', deletedAt: null }, orderBy: { createdAt: 'desc' }, select: { id: true, status: true } });
+      if (requestedSchoolYearId && !evaluationSchoolYear) return NextResponse.json({ error: 'Année scolaire introuvable dans cet établissement.' }, { status: 400 });
+      if (evaluationSchoolYear?.status === 'CLOSED') return NextResponse.json({ error: 'Cette année scolaire est clôturée.' }, { status: 423 });
+      await assertGradePeriodOpen({ schoolId, schoolYearId: evaluationSchoolYear?.id, date: evaluationDate, trimester: period || 'P1' });
     } catch (error: unknown) {
       return NextResponse.json({ error: error instanceof Error ? error.message : 'Période clôturée' }, { status: 423 });
     }
 
-    const evaluation = await db.cahierEvaluation.create({
-      data: {
+    const maxScoreValue = maxScore ? parseFloat(maxScore) : 20;
+    if (!Number.isFinite(maxScoreValue) || maxScoreValue <= 0) {
+      return NextResponse.json({ error: 'La note maximale est invalide.' }, { status: 400 });
+    }
+    const enrollmentIds = marks ? Object.keys(marks as Record<string, unknown>) : [];
+    if (enrollmentIds.length) {
+      const enrollments = await db.enrolledClass.findMany({
+        where: { classId, userId: { in: enrollmentIds } },
+        select: { userId: true },
+      });
+      const enrolledIds = new Set(enrollments.map((enrollment) => enrollment.userId));
+      if (enrollmentIds.some((studentId) => !enrolledIds.has(studentId))) {
+        return NextResponse.json({ error: 'Une note vise un élève qui n’est pas inscrit dans cette classe.' }, { status: 400 });
+      }
+      for (const [studentId, value] of Object.entries(marks as Record<string, unknown>)) {
+        const score = Number(value);
+        if (!studentId || !Number.isFinite(score) || score < 0 || score > maxScoreValue) {
+          return NextResponse.json({ error: `Chaque note doit être comprise entre 0 et ${maxScoreValue}.` }, { status: 400 });
+        }
+      }
+    }
+
+    const evaluation = await db.$transaction(async (tx) => {
+      const created = await tx.cahierEvaluation.create({
+        data: {
         schoolId,
+        schoolYearId: evaluationSchoolYear?.id || null,
         classId,
         courseId,
         title,
-        maxScore: maxScore ? parseFloat(maxScore) : 20,
+        maxScore: maxScoreValue,
         trimester: period,
         teacherId: auth.role === 'TEACHER' ? auth.userId : (teacherId || course.teacherId),
         date: evaluationDate,
+        ...(sourceDocumentPath ? {
+          sourceDocumentPath,
+          sourceDocumentName: typeof sourceDocumentName === 'string' ? sourceDocumentName.slice(0, 150) : '',
+          ocrSourceText: typeof ocrSourceText === 'string' ? ocrSourceText.slice(0, 30_000) : '',
+          ocrCorrections: Array.isArray(ocrCorrections) ? ocrCorrections.slice(0, 500).map((row: unknown) => {
+            const item = row && typeof row === 'object' ? row as Record<string, unknown> : {};
+            return {
+              studentId: typeof item.studentId === 'string' ? item.studentId.slice(0, 100) : '',
+              sourceName: typeof item.sourceName === 'string' ? item.sourceName.slice(0, 150) : '',
+              sourceLine: typeof item.sourceLine === 'string' ? item.sourceLine.slice(0, 500) : '',
+              score: typeof item.score === 'string' ? item.score.slice(0, 20) : '',
+              confirmed: item.confirmed === true,
+            };
+          }) : [],
+          ocrConfidence: ocrConfidence !== null && ocrConfidence !== undefined && Number.isFinite(Number(ocrConfidence)) ? Math.max(0, Math.min(100, Number(ocrConfidence))) : null,
+          ocrProvider: typeof ocrProvider === 'string' ? ocrProvider.slice(0, 40) : '',
+        } : {}),
       },
+      });
+      if (enrollmentIds.length) {
+        await tx.cahierMark.createMany({
+          data: enrollmentIds.map((studentId) => ({
+            evaluationId: created.id,
+            studentId,
+            score: Number((marks as Record<string, unknown>)[studentId]),
+          })),
+          skipDuplicates: true,
+        });
+      }
+      return created;
     });
+
+    for (const studentId of enrollmentIds) {
+      await recomputeStudentPeriodGrade({ schoolId, courseId, studentId, period, teacherId: evaluation.teacherId });
+    }
 
     return NextResponse.json({ evaluation }, { status: 201 });
   } catch (error: unknown) {
@@ -151,7 +244,10 @@ export async function POST(request: NextRequest) {
  */
 export async function PUT(request: NextRequest) {
   try {
-    const auth = authenticateRequest(request);
+    const auth = await authenticateRequestActive(request);
+    if (!['ADMIN', 'TEACHER'].includes(auth.role)) {
+      return NextResponse.json({ error: 'Accès réservé aux professeurs et administrateurs.' }, { status: 403 });
+    }
     const body = await request.json();
     const { evaluationId, marks } = body;
 
@@ -169,22 +265,27 @@ export async function PUT(request: NextRequest) {
     if (!evaluation) {
       return NextResponse.json({ error: 'Evaluation not found' }, { status: 404 });
     }
-
     if (auth.schoolId !== evaluation.schoolId) {
       return NextResponse.json({ error: 'Évaluation hors de votre établissement' }, { status: 403 });
     }
-    // Les enseignants saisissent les notes initiales depuis le module Notes.
-    // Toute modification d'une cotation déjà présente dans le cahier exige
-    // toutefois une validation administrative.
+
     if (auth.role !== 'ADMIN') {
+      const course = await db.course.findFirst({
+        where: { id: evaluation.courseId, schoolId: evaluation.schoolId, teacherId: auth.userId, deletedAt: null },
+        select: { id: true },
+      });
+      if (!course) {
       return NextResponse.json(
-        { error: 'La modification d’une cotation existante est réservée à l’administrateur.' },
+        { error: 'Vous devez être le professeur affecté à cette matière pour modifier ces notes.' },
         { status: 403 }
       );
+      }
+    }
+    if (!marks || typeof marks !== 'object' || Array.isArray(marks) || Object.keys(marks).length > 500) {
+      return NextResponse.json({ error: 'La liste des notes est invalide.' }, { status: 400 });
     }
     try {
-      const schoolYear = await db.schoolYear.findFirst({ where: { schoolId: evaluation.schoolId, status: { not: 'CLOSED' } }, orderBy: { createdAt: 'desc' }, select: { id: true } });
-      await assertGradePeriodOpen({ schoolId: evaluation.schoolId, schoolYearId: schoolYear?.id, date: evaluation.date, trimester: evaluation.trimester });
+      await assertGradePeriodOpen({ schoolId: evaluation.schoolId, schoolYearId: evaluation.schoolYearId || undefined, date: evaluation.date, trimester: evaluation.trimester });
     } catch (error: unknown) {
       return NextResponse.json({ error: error instanceof Error ? error.message : 'Période clôturée' }, { status: 423 });
     }
@@ -192,6 +293,22 @@ export async function PUT(request: NextRequest) {
     const { schoolId, courseId, trimester } = evaluation;
     // Update or create marks in transaction
     const studentIds = Object.keys(marks);
+    const enrollments = await db.enrolledClass.findMany({
+      where: { classId: evaluation.classId, userId: { in: studentIds } },
+      select: { userId: true },
+    });
+    const enrolledIds = new Set(enrollments.map((enrollment) => enrollment.userId));
+    if (studentIds.some((studentId) => !enrolledIds.has(studentId))) {
+      return NextResponse.json({ error: 'Une note vise un élève qui n’est pas inscrit dans cette classe.' }, { status: 400 });
+    }
+    const validatedMarks: Record<string, number> = {};
+    for (const [studentId, value] of Object.entries(marks as Record<string, unknown>)) {
+      const score = Number(value);
+      if (!Number.isFinite(score) || score < 0 || score > evaluation.maxScore) {
+        return NextResponse.json({ error: `Chaque note doit être comprise entre 0 et ${evaluation.maxScore}.` }, { status: 400 });
+      }
+      validatedMarks[studentId] = score;
+    }
     await db.$transaction(
       studentIds.map((studentId) =>
         db.cahierMark.upsert({
@@ -202,12 +319,12 @@ export async function PUT(request: NextRequest) {
             },
           },
           update: {
-            score: parseFloat(marks[studentId]) || 0,
+            score: validatedMarks[studentId],
           },
           create: {
             evaluationId,
             studentId,
-            score: parseFloat(marks[studentId]) || 0,
+            score: validatedMarks[studentId],
           },
         })
       )
@@ -236,7 +353,7 @@ export async function PUT(request: NextRequest) {
  */
 export async function PATCH(request: NextRequest) {
   try {
-    const auth = authenticateRequest(request);
+    const auth = await authenticateRequestActive(request);
     const body = await request.json();
     const { evaluationId, title, maxScore, date } = body;
 
@@ -254,13 +371,17 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ error: 'Evaluation not found' }, { status: 404 });
     }
 
+    if (auth.schoolId !== evaluation.schoolId || !['ADMIN', 'TEACHER'].includes(auth.role)) {
+      return NextResponse.json({ error: 'Évaluation hors de votre établissement ou rôle non autorisé.' }, { status: 403 });
+    }
+
     // Only the course teacher or an admin may edit the evaluation.
     if (auth.role !== 'ADMIN') {
       const course = await db.course.findUnique({
         where: { id: evaluation.courseId },
-        select: { teacherId: true },
+        select: { teacherId: true, schoolId: true },
       });
-      if (!course || course.teacherId !== auth.userId) {
+      if (!course || course.schoolId !== auth.schoolId || course.teacherId !== auth.userId) {
         return NextResponse.json(
           { error: 'Vous n\'êtes pas autorisé à modifier cette évaluation' },
           { status: 403 }
@@ -268,8 +389,7 @@ export async function PATCH(request: NextRequest) {
       }
     }
     try {
-      const schoolYear = await db.schoolYear.findFirst({ where: { schoolId: evaluation.schoolId, status: { not: 'CLOSED' } }, orderBy: { createdAt: 'desc' }, select: { id: true } });
-      await assertGradePeriodOpen({ schoolId: evaluation.schoolId, schoolYearId: schoolYear?.id, date: date ? new Date(date) : evaluation.date, trimester: evaluation.trimester });
+      await assertGradePeriodOpen({ schoolId: evaluation.schoolId, schoolYearId: evaluation.schoolYearId || undefined, date: date ? new Date(date) : evaluation.date, trimester: evaluation.trimester });
     } catch (error: unknown) {
       return NextResponse.json({ error: error instanceof Error ? error.message : 'Période clôturée' }, { status: 423 });
     }
@@ -313,7 +433,7 @@ export async function PATCH(request: NextRequest) {
  */
 export async function DELETE(request: NextRequest) {
   try {
-    const auth = authenticateRequest(request);
+    const auth = await authenticateRequestActive(request);
     const { searchParams } = new URL(request.url);
     const evaluationId = searchParams.get('evaluationId');
 

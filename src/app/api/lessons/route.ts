@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { authenticateRequestActive, AuthError } from '@/lib/auth/authenticate';
-import { requireAuth } from '@/lib/api/rbac';
+import { requireActiveAuth } from '@/lib/api/rbac';
 import { ApiError, handleApiError } from '@/lib/api/errors';
 import { notifyUser } from '@/services/notifications/notificationEngine';
 import { auditFromRequest } from '@/lib/api/audit';
@@ -96,7 +96,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     // Réservé aux professeurs et administrateurs (les élèves/parents ne publient pas de cours).
-    const auth = await requireAuth(request, ['TEACHER', 'ADMIN']);
+    const auth = await requireActiveAuth(request, ['TEACHER', 'ADMIN']);
     const body = await request.json();
     const { courseId, title, content, fileUrl, fileName, teacherId } = body;
     const isPublished = body.isPublished === true;
@@ -106,6 +106,19 @@ export async function POST(request: NextRequest) {
         { error: 'Champs requis : courseId, title' },
         { status: 400 }
       );
+    }
+    if (typeof title !== 'string' || title.trim().length > 200) {
+      return NextResponse.json({ error: 'Le titre est invalide (200 caractères maximum).' }, { status: 400 });
+    }
+    if (content !== undefined && (typeof content !== 'string' || content.length > 1000)) {
+      return NextResponse.json({ error: 'Le contenu est limité à 1 000 caractères.' }, { status: 400 });
+    }
+    if (fileUrl && typeof fileUrl === 'string' && !fileUrl.startsWith('/')) {
+      try {
+        if (new URL(fileUrl).protocol !== 'https:') throw new Error('HTTPS requis');
+      } catch {
+        return NextResponse.json({ error: 'Le lien du fichier doit être une adresse HTTPS valide.' }, { status: 400 });
+      }
     }
 
     // Le cours doit appartenir à l'école de la session.
@@ -148,7 +161,7 @@ export async function POST(request: NextRequest) {
       },
       include: {
         course: {
-          select: { id: true, name: true, classId: true },
+          select: { id: true, name: true, classId: true, class: { select: { id: true, name: true } } },
         },
         teacher: {
           select: { id: true, fullName: true, role: true },

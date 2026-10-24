@@ -100,6 +100,11 @@ function PageRouter({ page }: { page: PageView }) {
   if (user) {
     const prefix = user.role === 'ADMIN' ? 'admin-' : user.role === 'TEACHER' ? 'teacher-' : user.role === 'STUDENT' ? 'student-' : user.role === 'CAISSIER' ? 'caisse' : 'parent-';
     const shared = new Set<PageView>(['meetings', 'meeting-room', 'library', 'messages', 'calendar', 'profile', 'help', 'sync-center']);
+    if (user.role === 'STUDENT') {
+      shared.delete('meetings');
+      shared.delete('meeting-room');
+      shared.delete('messages');
+    }
     const roleShared = (user.role === 'ADMIN' || user.role === 'TEACHER') && new Set<PageView>(['cahier-cotation', 'auto-report-sync', 'admin-note-modifications']).has(page);
     if (user.role === 'ADMIN' && page === 'admin-grade-validation') return <AdminGradeValidation />;
     const allowed = page === 'auth' || page === 'register' || shared.has(page) || roleShared || (user.role === 'ADMIN' && page === 'admin-grade-validation') || page === `${prefix}dashboard` || page.startsWith(prefix);

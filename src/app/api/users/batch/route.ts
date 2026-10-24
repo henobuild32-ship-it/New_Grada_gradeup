@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { authenticateRequestActive, AuthError } from '@/lib/auth/authenticate';
+import { notifyUser } from '@/services/notifications/notificationEngine';
 
 export async function POST(request: NextRequest) {
   try {
@@ -28,7 +29,7 @@ export async function POST(request: NextRequest) {
         // Ne pas permettre de se désactiver/supprimer soi-même
         NOT: { id: auth.userId },
       },
-      select: { id: true },
+      select: { id: true, fullName: true, role: true, active: true },
     });
 
     const targetIds = validUsers.map((u) => u.id);
@@ -38,18 +39,38 @@ export async function POST(request: NextRequest) {
     }
 
     if (action === 'activate') {
+      const changedUsers = validUsers.filter((user) => user.active === false);
       await db.user.updateMany({
-        where: { id: { in: targetIds } },
-        data: { active: true },
+        where: { id: { in: changedUsers.map((user) => user.id) } },
+        data: { active: true, authVersion: { increment: 1 } },
       });
+      await Promise.allSettled(changedUsers.map((user) => notifyUser({
+        schoolId: auth.schoolId,
+        userId: user.id,
+        title: 'Compte activé',
+        message: 'Votre compte GradeUp a été activé par la direction.',
+        type: 'SYSTEM',
+        priority: 'HIGH',
+        metadata: { userId: user.id, active: true },
+      })));
       return NextResponse.json({ success: true, count: targetIds.length, message: `${targetIds.length} compte(s) activé(s).` });
     }
 
     if (action === 'deactivate') {
+      const changedUsers = validUsers.filter((user) => user.active !== false);
       await db.user.updateMany({
-        where: { id: { in: targetIds } },
-        data: { active: false },
+        where: { id: { in: changedUsers.map((user) => user.id) } },
+        data: { active: false, authVersion: { increment: 1 } },
       });
+      await Promise.allSettled(changedUsers.map((user) => notifyUser({
+        schoolId: auth.schoolId,
+        userId: user.id,
+        title: 'Compte désactivé',
+        message: 'Votre compte GradeUp a été désactivé par la direction.',
+        type: 'SYSTEM',
+        priority: 'HIGH',
+        metadata: { userId: user.id, active: false },
+      })));
       return NextResponse.json({ success: true, count: targetIds.length, message: `${targetIds.length} compte(s) désactivé(s).` });
     }
 

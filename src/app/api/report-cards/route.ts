@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { authenticateRequest, AuthError } from '@/lib/auth/authenticate';
+import { authenticateRequestActive, AuthError } from '@/lib/auth/authenticate';
 import { syncStudentReport } from '@/lib/grade-sync';
 
 const REPORT_CARD_STATUSES = ['auto_draft', 'draft', 'pending_admin', 'validated', 'published'] as const;
 
 export async function GET(request: NextRequest) {
   try {
-    const auth = authenticateRequest(request);
+    const auth = await authenticateRequestActive(request);
     const { searchParams } = new URL(request.url);
     const schoolId = searchParams.get('schoolId');
     const teacherId = searchParams.get('teacherId');
@@ -74,7 +74,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const auth = authenticateRequest(request);
+    const auth = await authenticateRequestActive(request);
     const body = await request.json();
     const { schoolId, studentId, trimester } = body;
 
@@ -113,7 +113,7 @@ export async function POST(request: NextRequest) {
 
 export async function PUT(request: NextRequest) {
   try {
-    const auth = authenticateRequest(request);
+    const auth = await authenticateRequestActive(request);
     const body = await request.json();
     const { id, status } = body ?? {};
 
@@ -232,7 +232,7 @@ export async function PUT(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   try {
-    const auth = authenticateRequest(request);
+    const auth = await authenticateRequestActive(request);
     const { searchParams } = new URL(request.url);
     const id = searchParams.get('id');
     if (!id) {

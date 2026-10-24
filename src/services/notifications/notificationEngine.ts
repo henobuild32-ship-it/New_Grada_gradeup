@@ -104,6 +104,8 @@ function getRouteForNotificationType(type: string): string {
       return '/admin-cards';
     case 'LESSON':
       return '/lessons';
+    case 'DOCUMENT':
+      return '/library';
     case 'HOMEWORK':
     case 'HOMEWORK_SUBMISSION':
       return '/homework';
@@ -115,6 +117,9 @@ function getRouteForNotificationType(type: string): string {
       return '/payments';
     case 'REPORT_CARD':
       return '/bulletins';
+    case 'COTATION':
+    case 'COTATION_RECEIVED':
+      return '/?module=cahier-cotation';
     default:
       return '/';
   }

@@ -105,6 +105,7 @@ model SchoolYear {
   school     School               @relation(fields: [schoolId], references: [id], onDelete: Cascade)
   calendrier CalendrierScolaire[]
   closures   AcademicClosure[]
+  evaluations CahierEvaluation[]
 
   @@unique([schoolId, year])
   @@index([schoolId, status])
@@ -1100,6 +1101,7 @@ model LiveLocation {
 model CahierEvaluation {
   id          String    @id @default(cuid())
   schoolId    String
+  schoolYearId String?
   classId     String
   courseId    String
   teacherId   String
@@ -1109,16 +1111,24 @@ model CahierEvaluation {
   coefficient Int       @default(1)
   date        DateTime  @default(now())
   trimester   String    @default("1")
+  sourceDocumentPath String @default("")
+  sourceDocumentName String @default("")
+  ocrSourceText       String @default("") @db.Text
+  ocrCorrections      Json   @default("[]")
+  ocrConfidence       Float?
+  ocrProvider         String @default("")
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   deletedAt   DateTime?
 
   class         SchoolClass            @relation(fields: [classId], references: [id], onDelete: Cascade)
+  schoolYear    SchoolYear?            @relation(fields: [schoolYearId], references: [id], onDelete: SetNull)
   course        Course                 @relation(fields: [courseId], references: [id], onDelete: Cascade)
   marks         CahierMark[]
   transmissions CotationTransmission[]
 
   @@index([schoolId, classId, courseId, trimester])
+  @@index([schoolId, schoolYearId, classId, courseId, trimester])
   @@index([teacherId, date])
 }
 
@@ -1177,6 +1187,7 @@ model TeacherDocument {
   subject     String    @default("")
   level       String    @default("")
   period      String    @default("")
+  targetClassId String  @default("")
   content     String    @default("")
   fileUrl     String    @default("")
   fileName    String    @default("")
@@ -1191,6 +1202,7 @@ model TeacherDocument {
 
   @@index([schoolId, teacherId])
   @@index([schoolId, teacherId, published])
+  @@index([schoolId, targetClassId, published])
 }
 
 model SchoolTimeSlot {

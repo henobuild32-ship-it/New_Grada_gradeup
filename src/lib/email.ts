@@ -16,8 +16,26 @@ const pass = process.env.SMTP_PASS || '';
 const fromName = 'GradeUp';
 const fromAddress = process.env.SMTP_FROM || user;
 
+export function emailConfigurationStatus() {
+  const hasHost = Boolean(host.trim());
+  const hasSender = /[^\s<>]+@[^\s<>]+\.[^\s<>]+/.test(fromAddress);
+  const hasUser = Boolean(user);
+  const hasPass = Boolean(pass);
+  const authPairIsValid = hasUser === hasPass;
+  const validPort = Number.isInteger(port) && port > 0 && port <= 65535;
+  return {
+    configured: hasHost && hasSender && authPairIsValid && validPort,
+    hasHost,
+    hasSender,
+    authPairIsValid,
+    validPort,
+    port,
+    secure: process.env.SMTP_SECURE === 'true' || (process.env.SMTP_SECURE !== 'false' && port === 465),
+  };
+}
+
 export function isEmailConfigured(): boolean {
-  return !!host && (!!user || !pass); // SMTP peut être open-relay (sans user)
+  return emailConfigurationStatus().configured; // SMTP peut être open-relay (sans identifiants)
 }
 
 let transporter: nodemailer.Transporter | null = null;
@@ -27,7 +45,7 @@ function getTransporter(): nodemailer.Transporter {
     transporter = nodemailer.createTransport({
       host,
       port,
-      secure: process.env.SMTP_SECURE === 'true',
+      secure: emailConfigurationStatus().secure,
       auth:
         user
           ? { user, pass }
@@ -59,7 +77,7 @@ export async function sendEmail(payload: MailPayload): Promise<boolean> {
   }
   try {
     await getTransporter().sendMail({
-      from: `"${fromName}" <${fromAddress}>`,
+      from: fromAddress.includes('<') ? fromAddress : `"${fromName}" <${fromAddress}>`,
       to: payload.to,
       subject: payload.subject,
       text: payload.text,
@@ -67,7 +85,12 @@ export async function sendEmail(payload: MailPayload): Promise<boolean> {
     });
     return true;
   } catch (error) {
-    console.error('[Email] Échec d\'envoi:', error);
+    const mailError = error as { code?: unknown; command?: unknown; responseCode?: unknown };
+    console.error('[Email] Échec d’envoi SMTP.', {
+      code: typeof mailError?.code === 'string' ? mailError.code : undefined,
+      command: typeof mailError?.command === 'string' ? mailError.command : undefined,
+      responseCode: typeof mailError?.responseCode === 'number' ? mailError.responseCode : undefined,
+    });
     throw error;
   }
 }

@@ -1,17 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { requireAuth } from '@/lib/api/rbac';
+import { requireActiveAuth } from '@/lib/api/rbac';
 import { handleApiError } from '@/lib/api/errors';
 
 export async function GET(request: NextRequest) {
   try {
-    const auth = await requireAuth(request, ['ADMIN', 'TEACHER']);
+    const auth = await requireActiveAuth(request, ['ADMIN', 'TEACHER']);
     const { searchParams } = new URL(request.url);
     // Tenant forcé à la session ; un titulaire ne voit que ses propres classes
     const schoolId = auth.schoolId;
     const titulaireId = auth.role === 'TEACHER' ? auth.userId : searchParams.get('titulaireId');
     const classId = searchParams.get('classId');
     const trimester = searchParams.get('trimester');
+    const requestedSchoolYearId = searchParams.get('schoolYearId');
 
     if (!titulaireId) {
       return NextResponse.json({ error: 'titulaireId et schoolId requis' }, { status: 400 });
@@ -20,10 +21,11 @@ export async function GET(request: NextRequest) {
     // Vérifier que l'utilisateur est bien titulaire de la classe
     const classInfo = classId
       ? await db.schoolClass.findFirst({
-          where: { id: classId, titulaireId, schoolId },
+          where: { id: classId, schoolId, ...(auth.role === 'TEACHER' ? { titulaireId: auth.userId } : {}) },
           select: { id: true, name: true },
         })
       : null;
+    if (classId && !classInfo) return NextResponse.json({ error: 'Classe non autorisée ou introuvable.' }, { status: 403 });
 
     // Récupérer les classes du titulaire
     const classes = await db.schoolClass.findMany({
@@ -39,6 +41,11 @@ export async function GET(request: NextRequest) {
     if (classes.length === 0) {
       return NextResponse.json({ students: [], courses: [] });
     }
+
+    const schoolYear = requestedSchoolYearId
+      ? await db.schoolYear.findFirst({ where: { id: requestedSchoolYearId, schoolId, deletedAt: null }, select: { id: true } })
+      : await db.schoolYear.findFirst({ where: { schoolId, status: 'OPEN', deletedAt: null }, orderBy: { createdAt: 'desc' }, select: { id: true } });
+    if (requestedSchoolYearId && !schoolYear) return NextResponse.json({ error: 'Année scolaire introuvable.' }, { status: 400 });
 
     const classIds = classes.map(c => c.id);
 
@@ -69,15 +76,16 @@ export async function GET(request: NextRequest) {
       select: { id: true, name: true, classId: true, teacherId: true },
     });
 
-    // Récupérer toutes les transmissions REÇUES (SENT, RECEIVED, RESENT) pour ces classes
+    // Seules les cotations validées alimentent les moyennes et les bulletins.
     const transmissionWhere: Record<string, unknown> = {
       classId: { in: classIds },
       schoolId,
-      status: { in: ['SENT', 'RECEIVED', 'RESENT'] },
+      status: 'RECEIVED',
     };
     if (trimester) {
       transmissionWhere.evaluation = { trimester };
     }
+    if (schoolYear) transmissionWhere.evaluation = { ...(transmissionWhere.evaluation as object || {}), schoolYearId: schoolYear.id };
 
     const transmissions = await db.cotationTransmission.findMany({
       where: transmissionWhere,
@@ -112,15 +120,15 @@ export async function GET(request: NextRequest) {
       for (const mark of evaluation.marks) {
         if (!studentNotes[mark.studentId]) studentNotes[mark.studentId] = {};
         if (!studentNotes[mark.studentId][courseId]) studentNotes[mark.studentId][courseId] = {};
-        // Prendre la meilleure note si plusieurs évaluations (on peut faire la moyenne plus tard)
-        const existing = studentNotes[mark.studentId][courseId][evaluationId] ?? 0;
-        studentNotes[mark.studentId][courseId][evaluationId] = Math.max(existing, mark.score);
+        // Normaliser chaque évaluation sur 20 avant le calcul centralisé.
+        const maxScore = evaluation.maxScore > 0 ? evaluation.maxScore : 20;
+        studentNotes[mark.studentId][courseId][evaluationId] = (mark.score / maxScore) * 20;
       }
     }
 
     // Construire la réponse consolidée par élève
     const consolidated = students.map(student => {
-      const notesByCourse: Record<string, { evaluations: Record<string, number>; average: number; count: number }> = {};
+      const notesByCourse: Record<string, { evaluations: Record<string, number>; average: number | null; count: number }> = {};
 
       const sNotes = studentNotes[student.id] || {};
 
@@ -128,14 +136,12 @@ export async function GET(request: NextRequest) {
         const courseId = course.id;
         const evals = sNotes[courseId] || {};
         const scores = Object.values(evals);
-        if (scores.length > 0) {
-          const avg = scores.reduce((a, b) => a + b, 0) / scores.length;
-          notesByCourse[course.name] = {
-            evaluations: evals,
-            average: Math.round(avg * 10) / 10,
-            count: scores.length,
-          };
-        }
+        const avg = scores.length ? scores.reduce((a, b) => a + b, 0) / scores.length : null;
+        notesByCourse[course.name] = {
+          evaluations: evals,
+          average: avg === null ? null : Math.round(avg * 10) / 10,
+          count: scores.length,
+        };
       }
 
       return {

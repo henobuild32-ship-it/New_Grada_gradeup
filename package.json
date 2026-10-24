@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev -p 3000",
     "build": "prisma generate && next build && node scripts/prepare-standalone.js",
+    "build:vercel": "node scripts/vercel-build.mjs",
     "start": "node .next/standalone/server.js",
     "lint": "eslint .",
     "postinstall": "prisma generate",
@@ -18,6 +19,7 @@
     "test:codes": "node --experimental-strip-types --test scripts/tests/code-format.test.mjs",
     "test:otp": "node --experimental-strip-types --test scripts/tests/otp-code.test.mjs",
     "test:public-routes": "node --experimental-strip-types --test scripts/tests/public-routes.test.mjs",
+    "verify:smtp": "node scripts/verify-smtp.mjs",
     "verify:grade-flow": "node scripts/verify-grade-promotion-flow.js"
   },
   "prisma": {

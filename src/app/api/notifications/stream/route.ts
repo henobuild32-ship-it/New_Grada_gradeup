@@ -109,9 +109,8 @@ export async function GET(request: NextRequest) {
         const isSchoolAdministrator = auth.role === 'ADMIN';
 
         // 2. Broadcast role target (e.g. STUDENT, PARENT, TEACHER)
-        const isRoleTarget = notification.targetRole && 
-                             notification.targetRole !== 'ALL' && 
-                             notification.targetRole === role;
+        const isRoleTarget = notification.targetRole === role &&
+          (!notification.targetClassId || notification.targetClassId === '' || classIds.has(notification.targetClassId));
 
         // 3. Broadcast class target (restricted to class memberships)
         const isClassTarget =

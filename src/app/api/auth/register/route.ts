@@ -7,6 +7,7 @@ import { clientIp, rateLimitResponse } from '@/lib/api/rate-limit';
 import { persistentRateLimit } from '@/lib/api/persistent-rate-limit';
 import { normalizeInviteCode, normalizeStudentCode } from '@/lib/code-format';
 import { generateReadableCode } from '@/lib/code-generation';
+import { notifyUser } from '@/services/notifications/notificationEngine';
 
 const registerSchema = z.object({
   gender: z.enum(['M', 'F'], { error: 'Le sexe est obligatoire (M ou F).' }),
@@ -15,6 +16,45 @@ const registerSchema = z.object({
   specialty: z.string().optional(),
   phone: z.string().optional(),
   qualification: z.string().optional(),
+});
+
+const joinSchoolSchema = z.object({
+  mode: z.literal('join-school'),
+  fullName: z.string().trim().min(3, 'Le nom complet doit contenir au moins 3 caractères.').max(120),
+  email: z.union([z.string().trim().email('Adresse e-mail invalide.'), z.literal('')]).optional(),
+  password: z.string().min(8).max(128),
+  inviteCode: z.string().trim().min(1),
+  role: z.enum(['STUDENT', 'TEACHER', 'PARENT', 'CAISSIER']),
+  classIds: z.array(z.string().trim().min(1)).optional(),
+  parentCode: z.string().optional(),
+  gender: z.enum(['M', 'F'], { error: 'Le sexe (M ou F) est obligatoire.' }),
+  dateOfBirth: z.string().optional(),
+  specialty: z.string().optional(),
+  phone: z.string().optional(),
+  qualification: z.string().optional(),
+}).superRefine((value, ctx) => {
+  if (value.role === 'CAISSIER' && !value.email) {
+    ctx.addIssue({ code: 'custom', path: ['email'], message: 'Une adresse e-mail est obligatoire pour la récupération du mot de passe.' });
+  }
+  if (value.role === 'STUDENT' && !value.classIds?.length) {
+    ctx.addIssue({ code: 'custom', path: ['classIds'], message: 'La classe est obligatoire pour un élève.' });
+  }
+  if (value.role === 'TEACHER') {
+    if (!value.dateOfBirth || Number.isNaN(new Date(value.dateOfBirth).getTime())) {
+      ctx.addIssue({ code: 'custom', path: ['dateOfBirth'], message: 'La date de naissance est obligatoire et doit être valide.' });
+    }
+    if (!value.classIds?.length) {
+      ctx.addIssue({ code: 'custom', path: ['classIds'], message: 'Sélectionnez au moins une classe enseignée.' });
+    }
+    if (!value.specialty?.trim()) ctx.addIssue({ code: 'custom', path: ['specialty'], message: 'La spécialité est obligatoire pour un professeur.' });
+    if (!value.phone?.trim()) ctx.addIssue({ code: 'custom', path: ['phone'], message: 'Le téléphone est obligatoire pour un professeur.' });
+  }
+  if (value.role === 'STUDENT' && (!value.dateOfBirth || Number.isNaN(new Date(value.dateOfBirth).getTime()))) {
+    ctx.addIssue({ code: 'custom', path: ['dateOfBirth'], message: 'La date de naissance est obligatoire et doit être valide.' });
+  }
+  if (value.role === 'PARENT' && !value.parentCode?.trim()) {
+    ctx.addIssue({ code: 'custom', path: ['parentCode'], message: 'Le code de l’élève est obligatoire.' });
+  }
 });
 
 async function generateUniqueInviteCode(): Promise<string> {
@@ -43,24 +83,27 @@ export async function POST(request: NextRequest) {
       });
     }
     const body = await request.json();
-    const { mode, schoolName, fullName, email, password, inviteCode, role, classIds, parentCode, gender, dateOfBirth, specialty, phone, qualification } = body;
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json({ error: 'Requête invalide.' }, { status: 400 });
+    }
+    const { mode, schoolName, fullName: requestFullName, email: requestEmail, password: requestPassword } = body;
 
     // === MODE: create-school (Admin creates a school) ===
     if (mode === 'create-school') {
-      if (!fullName || !schoolName || !email || !password) {
+      if (!requestFullName || !schoolName || !requestEmail || !requestPassword) {
         return NextResponse.json(
           { error: 'Veuillez remplir tous les champs.' },
           { status: 400 }
         );
       }
-      if (password.length < 8) {
+      if (requestPassword.length < 8) {
         return NextResponse.json(
           { error: 'Le mot de passe doit contenir au moins 8 caractères.' },
           { status: 400 }
         );
       }
 
-      const normalizedEmail = email.trim().toLowerCase();
+      const normalizedEmail = requestEmail.trim().toLowerCase();
       const existingSchool = await db.school.findUnique({ where: { email: normalizedEmail } });
       if (existingSchool) {
         return NextResponse.json(
@@ -75,7 +118,7 @@ export async function POST(request: NextRequest) {
         data: {
           name: schoolName,
           email: normalizedEmail,
-          password: await hashPassword(password),
+          password: await hashPassword(requestPassword),
           inviteCode: code,
         },
       });
@@ -85,9 +128,9 @@ export async function POST(request: NextRequest) {
       const user = await db.user.create({
         data: {
           schoolId: school.id,
-          fullName,
+          fullName: requestFullName,
           email: normalizedEmail,
-          password: await hashPassword(password),
+          password: await hashPassword(requestPassword),
           role: 'ADMIN',
           parentCode: parentCodeVal,
         },
@@ -107,6 +150,14 @@ export async function POST(request: NextRequest) {
 
     // === MODE: join-school (Non-admin joins an existing school) ===
     if (mode === 'join-school') {
+      const parsedJoin = joinSchoolSchema.safeParse(body);
+      if (!parsedJoin.success) {
+        return NextResponse.json(
+          { error: parsedJoin.error.issues[0]?.message || 'Données d’inscription invalides.', details: parsedJoin.error.flatten().fieldErrors },
+          { status: 400 }
+        );
+      }
+      const { fullName, email, password, inviteCode, role, classIds, parentCode, gender, dateOfBirth, specialty, phone, qualification } = parsedJoin.data;
       const cleanFullName = (fullName || '').trim();
       const cleanEmail = (email || '').trim().toLowerCase();
       const cleanInviteCode = normalizeInviteCode(inviteCode);
@@ -196,6 +247,19 @@ export async function POST(request: NextRequest) {
         );
       }
 
+      // Validate class membership before creating the account. Invalid or
+      // cross-school class IDs must never result in a partially enrolled user.
+      const requestedClassIds = [...new Set(classIds || [])];
+      if (requestedClassIds.length) {
+        const schoolClasses = await db.schoolClass.findMany({
+          where: { id: { in: requestedClassIds }, schoolId: school.id, deletedAt: null },
+          select: { id: true },
+        });
+        if (schoolClasses.length !== requestedClassIds.length) {
+          return NextResponse.json({ error: 'Une ou plusieurs classes ne sont pas disponibles dans cette école.' }, { status: 400 });
+        }
+      }
+
       // Check if user already exists (case-insensitive name comparison)
       const existingUsers = await db.user.findMany({
         where: { schoolId: school.id, role },
@@ -235,6 +299,9 @@ export async function POST(request: NextRequest) {
         parentCode: parentCodeVal,
         email: cleanEmail || '',
         gender: g,
+        // Cashier membership grants access to payment collection. The school
+        // invite code alone is not sufficient approval for that capability.
+        active: role === 'CAISSIER' ? false : true,
       };
       if (birthDateValue) userData.birthDate = birthDateValue;
       if (matriculeValue) userData.matricule = matriculeValue;
@@ -277,8 +344,8 @@ export async function POST(request: NextRequest) {
       });
 
       // If student, auto-enroll in selected class
-      if (role === 'STUDENT' && classIds && classIds.length > 0) {
-        for (const classId of classIds) {
+      if (role === 'STUDENT' && requestedClassIds.length > 0) {
+        for (const classId of requestedClassIds) {
           const schoolClass = await db.schoolClass.findFirst({
             where: { id: classId, schoolId: school.id },
           });
@@ -291,8 +358,8 @@ export async function POST(request: NextRequest) {
       }
 
       // If teacher, enroll in selected classes (same as students)
-      if (role === 'TEACHER' && classIds && classIds.length > 0) {
-        for (const classId of classIds) {
+      if (role === 'TEACHER' && requestedClassIds.length > 0) {
+        for (const classId of requestedClassIds) {
           const schoolClass = await db.schoolClass.findFirst({
             where: { id: classId, schoolId: school.id },
           });
@@ -327,6 +394,23 @@ export async function POST(request: NextRequest) {
       });
 
       const finalUserData = finalUser || user;
+      if (role === 'CAISSIER') {
+        notifyUser({
+          schoolId: school.id,
+          senderId: user.id,
+          targetRole: 'ADMIN',
+          title: 'Demande d’accès à la caisse',
+          message: `${cleanFullName} demande à rejoindre l’équipe de caisse. Vérifiez son profil puis activez son compte.`,
+          type: 'SYSTEM',
+          priority: 'HIGH',
+          metadata: { userId: user.id, role: 'CAISSIER' },
+        }).catch((error) => console.error('[Register] Notification de demande caissier impossible:', error));
+        return NextResponse.json({
+          user: formatUser(finalUser || user, school),
+          pendingApproval: true,
+          message: 'Votre demande a été envoyée à la direction. L’accès à la caisse sera activé après validation.',
+        }, { status: 201 });
+      }
       const response = NextResponse.json({
         user: finalUser ? formatUser(finalUser, school) : formatUser(user, school),
       }, { status: 201 });

@@ -57,7 +57,7 @@ export async function publishToLibrary(input: PublishToLibraryInput): Promise<Pu
         url: input.url,
         fileUrl: input.fileUrl,
         type: input.type,
-        visibility: 'CLASS',
+        visibility: input.targetClassId ? 'CLASS' : 'SCHOOL',
         targetRole: 'ALL',
         targetClassId: input.targetClassId || '',
       }),
