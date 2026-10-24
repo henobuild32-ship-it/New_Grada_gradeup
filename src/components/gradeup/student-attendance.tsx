@@ -1,11 +1,15 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useAppStore } from '@/lib/store';
 import type { AttendanceInfo } from '@/lib/types';
+import type { LocalRecord } from '@/lib/offline/types';
+import { useEntityListState } from '@/lib/offline/hooks';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
+import { ErrorState } from '@/components/ui/error-state';
+import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -14,26 +18,38 @@ import {
   CalendarCheck, CalendarX, Clock, Calendar, Filter, UserCheck, UserX, AlertTriangle,
 } from 'lucide-react';
 
+type LocalAttendance = AttendanceInfo & LocalRecord;
+
+function extractAttendance(data: unknown): Record<string, unknown>[] {
+  if (!data || typeof data !== 'object') return [];
+  const attendance = (data as { attendance?: unknown }).attendance;
+  return Array.isArray(attendance) ? attendance as Record<string, unknown>[] : [];
+}
+
 export default function StudentAttendance() {
   const user = useAppStore((s) => s.user);
-  const [attendance, setAttendance] = useState<AttendanceInfo[]>([]);
-  const [loading, setLoading] = useState(true);
   const [selectedMonth, setSelectedMonth] = useState<string>('all');
-
-  useEffect(() => {
-    if (!user?.schoolId || !user?.id) return;
-    const fetchAttendance = async () => {
-      setLoading(true);
-      try {
-        const res = await fetch(`/api/attendance?schoolId=${user.schoolId}&studentId=${user.id}`);
-        if (!res.ok) throw new Error();
-        const data = await res.json();
-        const sorted = (Array.isArray(data.attendance) ? data.attendance : []).sort((a: AttendanceInfo, b: AttendanceInfo) => new Date(b.date).getTime() - new Date(a.date).getTime());
-        setAttendance(sorted);
-      } catch { /* ignore */ } finally { setLoading(false); }
-    };
-    fetchAttendance();
-  }, [user?.schoolId, user?.id]);
+  const attendanceFilter = useCallback(
+    (record: LocalRecord) => (record as LocalAttendance).studentId === user?.id,
+    [user?.id]
+  );
+  const params = user?.schoolId && user?.id
+    ? new URLSearchParams({ schoolId: user.schoolId, studentId: user.id }).toString()
+    : null;
+  const { data: cachedAttendance, loading, refreshing, error, refresh } = useEntityListState<LocalAttendance>(
+    'attendance',
+    user?.schoolId,
+    {
+      remoteUrl: params ? `/api/attendance?${params}` : undefined,
+      extract: extractAttendance,
+      filter: attendanceFilter,
+    }
+  );
+  const attendance = useMemo(
+    () => [...cachedAttendance].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()),
+    [cachedAttendance]
+  );
+  const loadError = user?.id ? error : 'Votre session élève est indisponible. Reconnectez-vous puis réessayez.';
 
   const months = useMemo(() => {
     const monthSet = new Set<string>();
@@ -91,13 +107,31 @@ export default function StudentAttendance() {
     );
   }
 
+  if (loadError && attendance.length === 0) {
+    return <ErrorState title="Présences indisponibles" description={loadError} onRetry={() => void refresh()} />;
+  }
+
   return (
     <div className="space-y-6 animate-fade-in">
       {/* Page Header */}
       <div className="mb-6 rounded-xl bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/30 dark:to-indigo-950/30 p-6">
-        <h1 className="text-2xl font-bold">Ma présence</h1>
-        <p className="text-sm text-muted-foreground mt-1">Historique de vos présences et absences</p>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h1 className="text-2xl font-bold">Ma présence</h1>
+            <p className="text-sm text-muted-foreground mt-1">Historique de vos présences et absences</p>
+          </div>
+          <Button type="button" variant="outline" className="min-h-11 self-start gap-2" onClick={() => void refresh()} disabled={refreshing}>
+            <Calendar className={`h-4 w-4 ${refreshing ? 'animate-pulse' : ''}`} />
+            {refreshing ? 'Actualisation…' : 'Actualiser'}
+          </Button>
+        </div>
       </div>
+
+      {loadError && attendance.length > 0 && (
+        <div role="status" className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100">
+          Affichage des données enregistrées sur cet appareil. {loadError}
+        </div>
+      )}
 
       {/* Stats Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">

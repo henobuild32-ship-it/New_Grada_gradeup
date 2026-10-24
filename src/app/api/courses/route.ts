@@ -4,7 +4,7 @@ import { authenticateRequest, authenticateRequestActive, AuthError } from '@/lib
 
 export async function GET(request: NextRequest) {
   try {
-    const auth = authenticateRequest(request);
+    const auth = await authenticateRequestActive(request);
     const { searchParams } = new URL(request.url);
     const schoolId = searchParams.get('schoolId');
     const teacherId = searchParams.get('teacherId');
@@ -14,14 +14,42 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'schoolId invalide' }, { status: 400 });
     }
 
-    const where: Record<string, unknown> = { schoolId };
+    const where: Record<string, unknown> = { schoolId, deletedAt: null };
 
-    if (teacherId) {
-      where.teacherId = teacherId;
-    }
-
-    if (classId) {
-      where.classId = classId;
+    if (auth.role === 'ADMIN') {
+      if (teacherId) where.teacherId = teacherId;
+      if (classId) where.classId = classId;
+    } else if (auth.role === 'TEACHER') {
+      if (teacherId && teacherId !== auth.userId) {
+        return NextResponse.json({ error: 'Accès limité à vos cours.' }, { status: 403 });
+      }
+      where.teacherId = auth.userId;
+      if (classId) {
+        const assigned = await db.course.findFirst({
+          where: { schoolId, teacherId: auth.userId, classId, deletedAt: null },
+          select: { id: true },
+        });
+        if (!assigned) return NextResponse.json({ error: 'Accès non autorisé à cette classe.' }, { status: 403 });
+        where.classId = classId;
+      }
+    } else if (auth.role === 'STUDENT' || auth.role === 'PARENT') {
+      const children = auth.role === 'STUDENT'
+        ? [{ id: auth.userId }]
+        : await db.user.findMany({
+            where: { parentId: auth.userId, schoolId, role: 'STUDENT', active: true, deletedAt: null },
+            select: { id: true },
+          });
+      const enrollments = await db.enrolledClass.findMany({
+        where: { userId: { in: children.map((child) => child.id) }, class: { schoolId } },
+        select: { classId: true },
+      });
+      const classIds = [...new Set(enrollments.map((enrollment) => enrollment.classId))];
+      if (classId && !classIds.includes(classId)) {
+        return NextResponse.json({ error: 'Accès non autorisé à cette classe.' }, { status: 403 });
+      }
+      where.classId = { in: classId ? [classId] : classIds };
+    } else {
+      return NextResponse.json({ error: 'Accès non autorisé.' }, { status: 403 });
     }
 
     const courses = await db.course.findMany({

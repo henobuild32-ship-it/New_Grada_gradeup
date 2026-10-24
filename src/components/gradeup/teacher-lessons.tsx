@@ -13,9 +13,10 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Plus, FileText, Trash2, AlertTriangle, Upload, BookOpen, Download } from 'lucide-react';
+import { Plus, FileText, Trash2, AlertTriangle, Upload, BookOpen, Download, Eye, PencilLine } from 'lucide-react';
 import { toast } from 'sonner';
 import type { CourseInfo, LessonInfo } from '@/lib/types';
+import ReactMarkdown from 'react-markdown';
 
 export default function TeacherLessons() {
   const { user } = useAppStore();
@@ -24,6 +25,9 @@ export default function TeacherLessons() {
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [draftReady, setDraftReady] = useState(false);
+  const [draftSavedAt, setDraftSavedAt] = useState<number | null>(null);
+  const [preview, setPreview] = useState(false);
 
   const [formCourseId, setFormCourseId] = useState('');
   const [formTitle, setFormTitle] = useState('');
@@ -36,8 +40,43 @@ export default function TeacherLessons() {
 
   useEffect(() => {
     if (!user) return;
+    setDraftReady(false);
+    try {
+      const stored = localStorage.getItem(`gradeup:teacher-lesson-draft:${user.schoolId}:${user.id}`);
+      if (stored) {
+        const draft = JSON.parse(stored) as { courseId?: string; title?: string; content?: string; savedAt?: number };
+        setFormCourseId(typeof draft.courseId === 'string' ? draft.courseId : '');
+        setFormTitle(typeof draft.title === 'string' ? draft.title : '');
+        setFormContent(typeof draft.content === 'string' ? draft.content : '');
+        setDraftSavedAt(typeof draft.savedAt === 'number' ? draft.savedAt : null);
+      } else {
+        setFormCourseId('');
+        setFormTitle('');
+        setFormContent('');
+        setDraftSavedAt(null);
+      }
+    } catch {
+      localStorage.removeItem(`gradeup:teacher-lesson-draft:${user.schoolId}:${user.id}`);
+    }
+    setDraftReady(true);
     fetchData();
   }, [user]);
+
+  useEffect(() => {
+    if (!user || !draftReady) return;
+    const timer = window.setTimeout(() => {
+      if (!formTitle.trim() && !formContent.trim() && !formCourseId) return;
+      const savedAt = Date.now();
+      localStorage.setItem(`gradeup:teacher-lesson-draft:${user.schoolId}:${user.id}`, JSON.stringify({
+        courseId: formCourseId,
+        title: formTitle,
+        content: formContent,
+        savedAt,
+      }));
+      setDraftSavedAt(savedAt);
+    }, 400);
+    return () => window.clearTimeout(timer);
+  }, [user, draftReady, formCourseId, formTitle, formContent]);
 
   const fetchData = async () => {
     if (!user) return;
@@ -69,6 +108,7 @@ export default function TeacherLessons() {
     setFormFileName('');
     setFormFileUrl('');
     formFileRef.current = null;
+    setPreview(false);
   };
 
   const handleCreate = async () => {
@@ -79,6 +119,10 @@ export default function TeacherLessons() {
 
     setSubmitting(true);
     try {
+      if (!navigator.onLine) {
+        toast.error('La publication exige une connexion. Votre brouillon reste enregistré sur cet appareil.');
+        return;
+      }
       let fileUrl = formFileUrl;
       if (formFileRef.current) {
         const uploadFormData = new FormData();
@@ -105,6 +149,7 @@ export default function TeacherLessons() {
           content: formContent.trim(),
           fileUrl,
           fileName: formFileName.trim(),
+          isPublished: true,
         }),
       });
 
@@ -115,6 +160,8 @@ export default function TeacherLessons() {
       }
 
       toast.success('Leçon publiée avec succès');
+      localStorage.removeItem(`gradeup:teacher-lesson-draft:${user.schoolId}:${user.id}`);
+      setDraftSavedAt(null);
       setDialogOpen(false);
       resetForm();
       fetchData();
@@ -290,6 +337,14 @@ export default function TeacherLessons() {
           </DialogHeader>
 
           <div className="space-y-4">
+            {draftSavedAt && (
+              <Alert className="border-blue-200 bg-blue-50 text-blue-900 dark:bg-blue-950/30 dark:text-blue-100">
+                <FileText className="h-4 w-4" />
+                <AlertDescription>
+                  Brouillon enregistré sur cet appareil · {new Date(draftSavedAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}. Il sera conservé si vous perdez la connexion.
+                </AlertDescription>
+              </Alert>
+            )}
             <div className="space-y-2">
               <Label>Cours *</Label>
               <Select value={formCourseId} onValueChange={setFormCourseId}>
@@ -317,14 +372,27 @@ export default function TeacherLessons() {
             </div>
 
             <div className="space-y-2">
-              <Label>Contenu</Label>
-              <Textarea
-                placeholder="Rédigez le contenu de votre leçon..."
-                value={formContent}
-                onChange={(e) => setFormContent(e.target.value)}
-                rows={5}
-                className="focus-visible:ring-2 focus-visible:ring-blue-500/20 focus-visible:border-blue-500 transition-all"
-              />
+              <div className="flex items-center justify-between gap-2">
+                <Label htmlFor="lesson-markdown-content">Contenu Markdown</Label>
+                <Button type="button" variant="outline" size="sm" className="min-h-9" onClick={() => setPreview((value) => !value)}>
+                  {preview ? <><PencilLine className="mr-2 size-4" />Modifier</> : <><Eye className="mr-2 size-4" />Aperçu</>}
+                </Button>
+              </div>
+              {preview ? (
+                <div className="min-h-32 max-h-72 overflow-y-auto rounded-md border bg-muted/20 p-4 text-sm leading-6 [&_h1]:mb-3 [&_h1]:text-xl [&_h1]:font-bold [&_h2]:mb-2 [&_h2]:mt-4 [&_h2]:text-lg [&_h2]:font-semibold [&_p]:mb-3 [&_ul]:mb-3 [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:mb-3 [&_ol]:list-decimal [&_ol]:pl-6 [&_a]:text-primary [&_a]:underline">
+                  {formContent.trim() ? <ReactMarkdown>{formContent}</ReactMarkdown> : <span className="text-muted-foreground">L’aperçu apparaîtra ici.</span>}
+                </div>
+              ) : (
+                <Textarea
+                  id="lesson-markdown-content"
+                  placeholder={'Rédigez en Markdown : ## Titre, **important**, listes…'}
+                  value={formContent}
+                  onChange={(e) => setFormContent(e.target.value)}
+                  rows={7}
+                  className="min-h-36 focus-visible:ring-2 focus-visible:ring-blue-500/20 focus-visible:border-blue-500 transition-all"
+                />
+              )}
+              <p className="text-xs text-muted-foreground">Le brouillon texte est sauvegardé automatiquement sur cet appareil. La publication reste en ligne uniquement.</p>
             </div>
 
             <div className="space-y-2">

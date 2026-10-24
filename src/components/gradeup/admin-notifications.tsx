@@ -35,11 +35,13 @@ import {
   BellRing,
   CheckCheck,
   Clock,
+  DollarSign,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface NotificationItem {
   id: string;
+  userId?: string | null;
   senderId: string;
   targetRole: string;
   targetClassId: string;
@@ -52,13 +54,16 @@ interface ClassItem {
   id: string;
   name: string;
 }
+interface UserItem { id: string; fullName: string; role: string; active?: boolean }
 
 const targetLabels: Record<string, string> = {
   ALL: 'Tout le monde',
   STUDENT: 'Tous les élèves',
   TEACHER: 'Professeurs',
   PARENT: 'Parents',
+  CAISSIER: 'Équipe de caisse',
   CLASS: 'Une classe spécifique',
+  USER: 'Un utilisateur précis',
 };
 
 const targetIcons: Record<string, typeof Users> = {
@@ -66,7 +71,9 @@ const targetIcons: Record<string, typeof Users> = {
   STUDENT: UserCheck,
   TEACHER: GraduationCap,
   PARENT: Users,
+  CAISSIER: DollarSign,
   CLASS: Users,
+  USER: UserCheck,
 };
 
 const targetColors: Record<string, string> = {
@@ -74,7 +81,9 @@ const targetColors: Record<string, string> = {
   STUDENT: 'bg-blue-100 text-blue-700 border-blue-200',
   TEACHER: 'bg-emerald-100 text-emerald-700 border-emerald-200',
   PARENT: 'bg-purple-100 text-purple-700 border-purple-200',
+  CAISSIER: 'bg-emerald-100 text-emerald-700 border-emerald-200',
   CLASS: 'bg-amber-100 text-amber-700 border-amber-200',
+  USER: 'bg-indigo-100 text-indigo-700 border-indigo-200',
 };
 
 const targetBgColors: Record<string, string> = {
@@ -82,19 +91,23 @@ const targetBgColors: Record<string, string> = {
   STUDENT: 'bg-blue-100 text-blue-600',
   TEACHER: 'bg-emerald-100 text-emerald-600',
   PARENT: 'bg-purple-100 text-purple-600',
+  CAISSIER: 'bg-emerald-100 text-emerald-600',
   CLASS: 'bg-amber-100 text-amber-600',
+  USER: 'bg-indigo-100 text-indigo-600',
 };
 
 export default function AdminNotifications() {
   const { user } = useAppStore();
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [classes, setClasses] = useState<ClassItem[]>([]);
+  const [schoolUsers, setSchoolUsers] = useState<UserItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   const [formTarget, setFormTarget] = useState('ALL');
   const [formClassId, setFormClassId] = useState('');
+  const [formUserId, setFormUserId] = useState('');
   const [formMessage, setFormMessage] = useState('');
 
   const fetchNotifications = useCallback(async () => {
@@ -120,16 +133,28 @@ export default function AdminNotifications() {
     }
   }, [user?.schoolId]);
 
+  const fetchUsers = useCallback(async () => {
+    if (!user?.schoolId) return;
+    try {
+      const res = await fetch(`/api/users?schoolId=${encodeURIComponent(user.schoolId)}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      setSchoolUsers(Array.isArray(data.users) ? data.users.filter((item: UserItem) => item.id && item.fullName && item.active !== false) : []);
+    } catch { /* le ciblage précis est disponible dès que la liste charge */ }
+  }, [user?.schoolId]);
+
   useEffect(() => {
     if (user?.schoolId) {
       fetchNotifications();
       fetchClasses();
+      fetchUsers();
     }
-  }, [fetchNotifications, fetchClasses, user?.schoolId]);
+  }, [fetchNotifications, fetchClasses, fetchUsers, user?.schoolId]);
 
   const resetForm = () => {
     setFormTarget('ALL');
     setFormClassId('');
+    setFormUserId('');
     setFormMessage('');
   };
 
@@ -142,6 +167,7 @@ export default function AdminNotifications() {
       toast.error('Veuillez sélectionner une classe');
       return;
     }
+    if (formTarget === 'USER' && !formUserId) { toast.error('Veuillez choisir le destinataire.'); return; }
 
     setSubmitting(true);
     try {
@@ -150,9 +176,9 @@ export default function AdminNotifications() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           schoolId: user?.schoolId,
-          senderId: user?.id,
           targetRole: formTarget === 'CLASS' ? 'CLASS' : formTarget,
           targetClassId: formTarget === 'CLASS' ? formClassId : '',
+          targetUserId: formTarget === 'USER' ? formUserId : undefined,
           message: formMessage,
         }),
       });
@@ -231,7 +257,7 @@ export default function AdminNotifications() {
           <div className="space-y-4 py-4">
             <div className="space-y-2">
               <Label htmlFor="notif-target">Destinataire</Label>
-              <Select value={formTarget} onValueChange={(v) => { setFormTarget(v); setFormClassId(''); }}>
+              <Select value={formTarget} onValueChange={(v) => { setFormTarget(v); setFormClassId(''); setFormUserId(''); }}>
                 <SelectTrigger id="notif-target" className="focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all">
                   <SelectValue />
                 </SelectTrigger>
@@ -240,7 +266,9 @@ export default function AdminNotifications() {
                   <SelectItem value="STUDENT">Tous les élèves</SelectItem>
                   <SelectItem value="TEACHER">Professeurs</SelectItem>
                   <SelectItem value="PARENT">Parents</SelectItem>
+                  <SelectItem value="CAISSIER">Équipe de caisse</SelectItem>
                   <SelectItem value="CLASS">Une classe spécifique</SelectItem>
+                  <SelectItem value="USER">Un utilisateur précis</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -259,6 +287,16 @@ export default function AdminNotifications() {
                       </SelectItem>
                     ))}
                   </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            {formTarget === 'USER' && (
+              <div className="space-y-2">
+                <Label htmlFor="notif-user">Destinataire</Label>
+                <Select value={formUserId} onValueChange={setFormUserId}>
+                  <SelectTrigger id="notif-user" className="min-h-11"><SelectValue placeholder="Choisir un compte actif" /></SelectTrigger>
+                  <SelectContent>{schoolUsers.map((item) => <SelectItem key={item.id} value={item.id}>{item.fullName} · {item.role}</SelectItem>)}</SelectContent>
                 </Select>
               </div>
             )}
@@ -360,6 +398,9 @@ export default function AdminNotifications() {
                               <Badge variant="secondary" className="text-xs">
                                 {classes.find((c) => c.id === n.targetClassId)?.name || 'Classe'}
                               </Badge>
+                            )}
+                            {n.userId && n.targetRole === 'USER' && (
+                              <Badge variant="secondary" className="text-xs">{schoolUsers.find((item) => item.id === n.userId)?.fullName || 'Utilisateur ciblé'}</Badge>
                             )}
                           </div>
                           <p className="text-sm whitespace-pre-wrap mb-2">{n.message}</p>

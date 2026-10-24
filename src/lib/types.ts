@@ -1,5 +1,5 @@
 export type UserRole = 'ADMIN' | 'TEACHER' | 'STUDENT' | 'PARENT' | 'CAISSIER';
-export type PaymentStatus = 'paid' | 'pending' | 'overdue';
+export type PaymentStatus = 'paid' | 'pending' | 'overdue' | 'late' | 'cancelled';
 export type AttendanceStatus = 'present' | 'absent' | 'late' | 'justified';
 export type ClassLevel = 'Maternelle' | 'Primaire' | 'Secondaire';
 
@@ -169,10 +169,12 @@ export interface PaymentInfo {
   schoolId: string;
   studentId: string;
   amount: number;
+  currency?: string;
   status: PaymentStatus;
   month: string;
   method: string;
   createdAt: string;
+  receiptNumber?: string | null;
   student?: UserInfo;
 }
 
@@ -309,6 +311,7 @@ export type PageView =
   | 'admin-tuition'
   | 'admin-end-of-year'
   | 'caisse'
+  | 'caisse-notifications'
   | 'teacher-reports'
   | 'teacher-end-of-year'
   | 'teacher-dashboard'
@@ -349,6 +352,7 @@ export type PageView =
   | 'auto-report-sync'
   | 'cahier-cotation'
   | 'admin-cotation-rules'
+  | 'admin-bulletins'
   | 'profile'
   | 'messages'
   | 'calendar'

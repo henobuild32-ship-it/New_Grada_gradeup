@@ -20,6 +20,8 @@ export interface UserRecord extends LocalRecord {
   matricule?: string | null;
   isTitulaire?: boolean;
   active?: boolean;
+  classEnrollments?: Array<{ classId: string; class: { id: string; name: string; level?: string } }>;
+  school?: { id: string; name?: string; logoUrl?: string; academicYear?: string };
 }
 
 export interface SchoolClassRecord extends LocalRecord {
@@ -56,7 +58,7 @@ export interface GradeRecord extends LocalRecord {
   teacherId: string;
   score: number;
   maxScore: number;
-  trimester?: number | null;
+  trimester?: string | number | null;
   semester?: string | null;
   period?: string | null;
   typeEvaluation?: string | null;
@@ -64,6 +66,8 @@ export interface GradeRecord extends LocalRecord {
   status?: string;
   validatedAt?: number | null;
   comment?: string | null;
+  effectiveCoefficient?: number;
+  course?: { id?: string; name?: string; classId?: string; coefficient?: number };
 }
 
 export interface GradeSnapshotRecord extends LocalRecord {
@@ -105,6 +109,10 @@ export interface AttendanceRecord extends LocalRecord {
 
 export interface ScheduleRecord extends LocalRecord {
   courseId: string;
+  classId: string;
+  courseName: string;
+  teacherName: string;
+  className?: string;
   dayOfWeek: number;
   startTime: string;
   endTime: string;
@@ -140,9 +148,12 @@ export interface BulletinRecord extends LocalRecord {
 export interface PaymentRecord extends LocalRecord {
   studentId: string;
   amount: number;
+  currency?: string | null;
   status?: string;
   month?: string | null;
   method?: string | null;
+  receiptNumber?: string | null;
+  createdAt?: string;
 }
 
 export interface MessageRecord extends LocalRecord {
@@ -245,6 +256,30 @@ class GradeUpLocalDB extends Dexie {
       syncMeta: 'key',
       offlineFiles: 'url, schoolId, downloadedAt',
     });
+    // Add a class index so schedules can be cached once and filtered locally
+    // when a student or teacher switches between their assigned classes.
+    this.version(2)
+      .stores({
+        schedules: 'id, schoolId, classId, courseId, dayOfWeek, updatedAt, syncStatus',
+      })
+      .upgrade(async (transaction) => {
+        const schedules = await transaction.table('schedules').toArray();
+        const courses = await transaction.table('courses').toArray();
+        const users = await transaction.table('users').toArray();
+        const courseById = new Map(courses.map((course) => [String(course.id), course]));
+        const userById = new Map(users.map((user) => [String(user.id), String(user.fullName ?? '')]));
+
+        for (const schedule of schedules) {
+          const course = courseById.get(String(schedule.courseId));
+          if (!course?.classId) continue;
+          await transaction.table('schedules').update(schedule.id, {
+            classId: course.classId,
+            courseName: String(course.name ?? 'Cours'),
+            teacherName: userById.get(String(course.teacherId)) || 'Professeur',
+            className: String(course.className ?? ''),
+          });
+        }
+      });
   }
 }
 
@@ -259,6 +294,14 @@ export function getLocalDB(): GradeUpLocalDB {
     dbInstance = new GradeUpLocalDB();
   }
   return dbInstance;
+}
+
+/** Ferme et supprime la base locale puis invalide le singleton. */
+export async function deleteLocalDB(): Promise<void> {
+  const instance = dbInstance;
+  if (!instance) return;
+  await instance.delete();
+  if (dbInstance === instance) dbInstance = null;
 }
 
 /** Retourne la table Dexie correspondant à une entité (par nom canonique). */

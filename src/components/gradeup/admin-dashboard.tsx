@@ -27,8 +27,6 @@ import {
   Copy,
   Check,
   RefreshCw,
-  TrendingDown,
-  Sparkles,
   Download,
   AlertOctagon,
   CheckCircle,
@@ -52,6 +50,9 @@ interface Stats {
   totalPayments: number;
   totalRevenue: number;
   pendingRevenue: number;
+  revenueByCurrency?: Record<string, number>;
+  pendingRevenueByCurrency?: Record<string, number>;
+  currency?: string;
   attendanceToday: {
     present: number;
     absent: number;
@@ -70,7 +71,6 @@ interface StudentResult {
 export default function AdminDashboard() {
   const { user, setCurrentPage } = useAppStore();
   const [stats, setStats] = useState<Stats | null>(null);
-  const [progression, setProgression] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [pendingPayments, setPendingPayments] = useState<any[]>([]);
@@ -186,7 +186,6 @@ export default function AdminDashboard() {
         if (cached) {
           const parsed = JSON.parse(cached);
           if (parsed.stats) setStats(parsed.stats);
-          if (parsed.progression) setProgression(parsed.progression);
           if (parsed.pendingPayments) setPendingPayments(parsed.pendingPayments);
           if (parsed.overduePayments) setOverduePayments(parsed.overduePayments);
           if (parsed.updatedAt) setLastSnapshotTime(parsed.updatedAt);
@@ -199,10 +198,9 @@ export default function AdminDashboard() {
 
     fetchStats();
     fetchAlerts();
-    fetchProgression();
   }, [user?.schoolId]);
 
-  const saveSnapshot = (newStats: Stats, extra?: { progression?: any; pending?: any[]; overdue?: any[] }) => {
+  const saveSnapshot = (newStats: Stats, extra?: { pending?: any[]; overdue?: any[] }) => {
     if (!user?.schoolId || typeof window === 'undefined') return;
     const now = Date.now();
     setLastSnapshotTime(now);
@@ -210,7 +208,6 @@ export default function AdminDashboard() {
       const cacheKey = `gradeup-admin-stats-${user.schoolId}`;
       const payload = {
         stats: newStats,
-        progression: extra?.progression ?? progression,
         pendingPayments: extra?.pending ?? pendingPayments,
         overduePayments: extra?.overdue ?? overduePayments,
         updatedAt: now,
@@ -271,18 +268,6 @@ export default function AdminDashboard() {
       if (!stats) await computeDexieFallbackStats();
     } finally {
       setLoading(false);
-    }
-  };
-
-  const fetchProgression = async () => {
-    try {
-      const res = await fetch(`/api/stats/progression?schoolId=${user?.schoolId}`);
-      if (res.ok) {
-        const data = await res.json();
-        setProgression(data);
-      }
-    } catch {
-      // progression non bloquante
     }
   };
 
@@ -354,8 +339,8 @@ export default function AdminDashboard() {
         ['Total classes', String(stats?.totalClasses ?? 0)],
         ['Total cours', String(stats?.totalCourses ?? 0)],
         ['Total paiements', String(stats?.totalPayments ?? 0)],
-        ['Revenus totaux', String(stats?.totalRevenue ?? 0)],
-        ['Revenus en attente', String(stats?.pendingRevenue ?? 0)],
+        ['Revenus totaux par devise', JSON.stringify(stats?.revenueByCurrency ?? { [stats?.currency || 'USD']: stats?.totalRevenue ?? 0 })],
+        ['Revenus en attente par devise', JSON.stringify(stats?.pendingRevenueByCurrency ?? { [stats?.currency || 'USD']: stats?.pendingRevenue ?? 0 })],
       ];
 
       if (pendingPayments.length > 0) {
@@ -404,8 +389,6 @@ export default function AdminDashboard() {
       color: 'text-blue-600',
       bg: 'bg-blue-50',
       border: 'border-blue-200',
-      badge: `${stats?.totalClasses ?? 0} classes`,
-      badgeClass: 'bg-blue-50 text-blue-600',
     },
     {
       title: 'Total Professeurs',
@@ -414,18 +397,14 @@ export default function AdminDashboard() {
       color: 'text-green-600',
       bg: 'bg-green-50',
       border: 'border-green-200',
-      badge: `${stats?.totalCourses ?? 0} cours`,
-      badgeClass: 'bg-green-50 text-green-600',
     },
     {
       title: 'Revenus',
-      value: `${(stats?.totalRevenue ?? 0).toLocaleString()} ${user?.school?.currency || 'USD'}`,
+      value: `${(stats?.totalRevenue ?? 0).toLocaleString()} ${stats?.currency || user?.school?.currency || 'USD'}`,
       icon: DollarSign,
       color: 'text-emerald-600',
       bg: 'bg-emerald-50',
       border: 'border-emerald-200',
-      badge: `${(stats?.pendingRevenue ?? 0).toLocaleString()} en attente`,
-      badgeClass: 'bg-emerald-50 text-emerald-600',
     },
     {
       title: 'Total Parents',
@@ -434,10 +413,6 @@ export default function AdminDashboard() {
       color: 'text-purple-600',
       bg: 'bg-purple-50',
       border: 'border-purple-200',
-      badge: stats?.attendanceToday
-        ? `${stats.attendanceToday.present} présents aujourd'hui`
-        : 'Aucune présence aujourd\'hui',
-      badgeClass: 'bg-purple-50 text-purple-600',
     },
   ];
 
@@ -478,7 +453,7 @@ export default function AdminDashboard() {
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => { setLoading(true); fetchStats(); fetchAlerts(); fetchProgression(); }}
+            onClick={() => { setLoading(true); fetchStats(); fetchAlerts(); }}
             className="h-8 px-2 text-xs text-blue-600 hover:text-blue-700 hover:bg-blue-50"
             disabled={loading}
           >
@@ -568,76 +543,15 @@ export default function AdminDashboard() {
         </CardContent>
       </Card>
 
-      {/* Annual Progression Gauge (Moyenne & Complétion) */}
-      <Card className="overflow-hidden shadow-md border rounded-2xl relative">
-        <CardContent className="p-6">
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-            <div>
-              <h3 className="font-extrabold text-base flex items-center gap-2">
-                <Sparkles className="w-4 h-4 text-amber-500" />
-                Progression annuelle globale
-              </h3>
-              <p className="text-xs text-muted-foreground mt-0.5">Calculé sur la complétion des notations et la performance académique de l'école</p>
-            </div>
-            <Badge className="bg-blue-100 text-blue-700 hover:bg-blue-100">Année en cours</Badge>
-          </div>
-
-          {progression === null ? (
-            <div className="py-8 text-center text-muted-foreground">Calcul de la progression…</div>
-          ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 mt-6 items-center">
-            {/* Round Gauge */}
-            <div className="flex flex-col items-center justify-center shrink-0">
-              <div className="relative w-28 h-28">
-                <svg className="w-28 h-28 -rotate-90" viewBox="0 0 100 100">
-                  <circle cx="50" cy="50" r="42" fill="none" strokeWidth="8" className="stroke-blue-100" />
-                  <circle 
-                    cx="50" cy="50" r="42" 
-                    fill="none" strokeWidth="8" strokeLinecap="round" 
-                    className="stroke-blue-600" 
-                    strokeDasharray={263.8} 
-                    strokeDashoffset={263.8 * (1 - progression.progression / 100)} 
-                  />
-                </svg>
-                <div className="absolute inset-0 flex flex-col items-center justify-center">
-                  <span className="text-2xl font-extrabold text-blue-600">{progression.progression}%</span>
-                  <span className="text-[9px] text-muted-foreground uppercase font-bold tracking-wider">Complété</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Metrics */}
-            <div className="sm:col-span-2 space-y-3">
-              <div className="space-y-1">
-                <div className="flex justify-between text-xs">
-                  <span className="text-muted-foreground font-semibold">Taux de saisie des notes</span>
-                  <span className="font-bold">{progression.components.coverageNotes}%</span>
-                </div>
-                <div className="w-full bg-muted h-2 rounded-full overflow-hidden">
-                  <div className="bg-emerald-500 h-full rounded-full" style={{ width: `${progression.components.coverageNotes}%` }} />
-                </div>
-              </div>
-
-              <div className="space-y-1">
-                <div className="flex justify-between text-xs">
-                  <span className="text-muted-foreground font-semibold">Performance générale moyenne</span>
-                  <span className="font-bold">{progression.raw.totalGrades > 0 ? 'En cours' : '—'}</span>
-                </div>
-                <div className="w-full bg-muted h-2 rounded-full overflow-hidden">
-                  <div className="bg-blue-500 h-full rounded-full" style={{ width: `${progression.components.coverageCours}%` }} />
-                </div>
-              </div>
-
-              <p className="text-[10px] text-muted-foreground italic">
-                {progression.raw.totalStudents > 0 
-                  ? `Dernière mise à jour : ${progression.raw.totalStudents} élèves, ${progression.raw.totalCourses} cours`
-                  : 'Aucune donnée — ajoutez des élèves et des cours pour voir la progression.'}
-              </p>
-            </div>
-          </div>
-          )}
+      {/* Recettes par devise — montants réels, sans additionner des devises différentes. */}
+      {!loading && stats && <Card className="rounded-2xl">
+        <CardHeader className="pb-3"><CardTitle className="text-base">Paiements enregistrés par devise</CardTitle><CardDescription>Les montants restent séparés selon la devise du reçu.</CardDescription></CardHeader>
+        <CardContent className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {Object.entries(stats.revenueByCurrency ?? { [stats.currency || user?.school?.currency || 'USD']: stats.totalRevenue }).length === 0
+            ? <p className="text-sm text-muted-foreground">Aucun paiement confirmé.</p>
+            : Object.entries(stats.revenueByCurrency ?? { [stats.currency || user?.school?.currency || 'USD']: stats.totalRevenue }).map(([currency, amount]) => <div key={currency} className="rounded-lg border p-3"><p className="text-xs text-muted-foreground">Encaissé · {currency}</p><p className="text-xl font-bold">{Number(amount).toLocaleString('fr-FR')} {currency}</p></div>)}
         </CardContent>
-      </Card>
+      </Card>}
 
       {/* Priority actions & transition button */}
       <Card className="overflow-hidden shadow-md border rounded-2xl relative">
@@ -767,9 +681,6 @@ export default function AdminDashboard() {
                     <div className={`p-3 rounded-xl ${card.bg} group-hover:scale-110 transition-transform duration-300`}>
                       <card.icon className={`h-6 w-6 ${card.color}`} />
                     </div>
-                    <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${card.badgeClass}`}>
-                      {card.badge}
-                    </span>
                   </div>
                   <div>
                     <p className="text-sm text-muted-foreground mb-1">{card.title}</p>
@@ -801,7 +712,7 @@ export default function AdminDashboard() {
               </div>
               <div className="flex-1">
                 <p className="text-sm text-muted-foreground">Revenus en attente</p>
-                <p className="text-xl font-bold">{stats.pendingRevenue.toLocaleString()} USD</p>
+                <p className="text-xl font-bold">{stats.pendingRevenue.toLocaleString()} {stats.currency || user?.school?.currency || 'USD'}</p>
               </div>
             </CardContent>
           </Card>
@@ -813,9 +724,7 @@ export default function AdminDashboard() {
               <div className="flex-1">
                 <p className="text-sm text-muted-foreground">Présence aujourd'hui</p>
                 <p className="text-xl font-bold">
-                  {stats.attendanceToday.total > 0
-                    ? `${Math.round((stats.attendanceToday.present / stats.attendanceToday.total) * 100)}%`
-                    : 'N/A'}
+                  {stats.attendanceToday.present} / {stats.attendanceToday.total}
                 </p>
               </div>
             </CardContent>
@@ -849,7 +758,7 @@ export default function AdminDashboard() {
       {/* Charts Section */}
       {user?.schoolId && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <MonthlyRevenueChart schoolId={user.schoolId} />
+          <MonthlyRevenueChart schoolId={user.schoolId} currency={stats?.currency || user?.school?.currency || 'USD'} />
           <GradeDistributionChart schoolId={user.schoolId} />
         </div>
       )}
@@ -877,7 +786,7 @@ export default function AdminDashboard() {
                   <div key={p.id} className="flex justify-between items-center p-3 bg-yellow-50/50 border border-yellow-100 rounded-xl text-xs">
                     <div>
                       <p className="font-semibold">{p.student?.fullName}</p>
-                      <p className="text-muted-foreground mt-0.5">{p.month} · {parseFloat(p.amount).toLocaleString()} USD</p>
+                      <p className="text-muted-foreground mt-0.5">{p.month} · {parseFloat(p.amount).toLocaleString()} {p.currency || stats?.currency || 'USD'}</p>
                     </div>
                     <Badge variant="outline" className="bg-yellow-100 text-yellow-700 border-yellow-200">En attente</Badge>
                   </div>
@@ -905,7 +814,7 @@ export default function AdminDashboard() {
                   <div key={p.id} className="flex justify-between items-center p-3 bg-red-50/50 border border-red-100 rounded-xl text-xs">
                     <div>
                       <p className="font-semibold">{p.student?.fullName}</p>
-                      <p className="text-muted-foreground mt-0.5">{p.month} · {parseFloat(p.amount).toLocaleString()} USD</p>
+                      <p className="text-muted-foreground mt-0.5">{p.month} · {parseFloat(p.amount).toLocaleString()} {p.currency || stats?.currency || 'USD'}</p>
                     </div>
                     <Badge variant="outline" className="bg-red-100 text-red-700 border-red-200">En retard</Badge>
                   </div>

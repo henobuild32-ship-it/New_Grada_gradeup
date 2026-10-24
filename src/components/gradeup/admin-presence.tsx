@@ -37,6 +37,7 @@ import {
   FileDown,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import PresenceQrScanner from '@/components/gradeup/presence-qr-scanner';
 
 interface PresenceRecord {
   id: string;
@@ -433,6 +434,8 @@ export default function AdminPresence() {
     }
   }, [user?.schoolId]);
 
+  const handleQrRecorded = useCallback(() => { void fetchData(); }, [fetchData]);
+
   useEffect(() => {
     fetchData();
     const interval = setInterval(fetchData, 60000);
@@ -571,6 +574,8 @@ export default function AdminPresence() {
           </Button>
         </div>
       </div>
+
+      {user?.schoolId && <PresenceQrScanner schoolId={user.schoolId} onRecorded={handleQrRecorded} />}
 
       {/* GPS Configuration */}
       <Card className="border-2 border-blue-100 dark:border-blue-900/30 bg-gradient-to-r from-blue-50/50 to-indigo-50/50 dark:from-blue-950/20 dark:to-indigo-950/20">

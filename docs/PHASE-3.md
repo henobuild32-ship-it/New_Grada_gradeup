@@ -1,9 +1,21 @@
 # PHASE 3 — Backend complet et sécurisé
 
-> Statut : **Livrée** (gates verts : `tsc 0`, `lint 0`, `build 0`).
+> Statut : **socle livré, vérification/raccordement encore ouvert**. Une base PostgreSQL de développement isolée est maintenant joignable localement; cela ne certifie pas la base distante ni la production.
 > Base : la migration + le seed s'appliquent sur une base joignable
 > (`npx prisma migrate deploy && npm run db:seed`) — la base de démo
 > distante n'est pas accessible depuis le poste de développement hors VPN.
+
+## Mise à jour sécurité/runtime — 2026-10-23
+
+- `POST /api/parent-code` vérifie le rôle ADMIN, l’appartenance de l’élève au même `schoolId`, le rôle STUDENT et la suppression logique. Les codes utilisent `crypto.randomInt` et retentent les collisions uniques.
+- `GET /api/report-cards` n’expose aux élèves et parents que les bulletins `published`, limite les professeurs à leurs classes et refuse les autres rôles. Les filtres de statut sont validés.
+- `PUT /api/report-cards` impose l’ordre `draft/auto_draft → pending_admin → validated → published`, exige le titulaire pour la transmission, réserve validation/publication à ADMIN et fait un update conditionnel sur le statut précédent. L’écran de synchronisation présente désormais les étapes séparément.
+- `GET /api/payments` ne modifie plus les paiements ni ne déclenche de notifications en lecture; les retards sont calculés depuis la date, et le listing global est refusé aux enseignants.
+- Les notifications ont été resserrées : diffusion par `POST /api/notifications` réservée à ADMIN, payload validé Zod, expéditeur forcé depuis la session, cible de classe vérifiée dans l'école. Le GET filtre désormais aussi les annonces de classe pour les classes réellement liées au profil.
+- Le flux temps réel navigateur passe par le SSE authentifié (`authenticateRequestActive`) et les règles de destinataire du serveur ; le client ne s'abonne plus aux lignes brutes `Notification` avec une clé anon. Les diffusions de classe sont distribuées aux élèves, professeurs, titulaires et parents rattachés à la classe.
+- `npm run test:rbac` : **79/79** contrôles réussis sur le serveur local et la base isolée; les tests couvrent l’IDOR du code parent, les bulletins publiés, le refus de publication sans validation, les scopes sync, les filtres de notifications, les refus d'écriture pour les non-administrateurs, l'accès classe-scopé aux horaires, aux cours, aux leçons, aux notes et aux listes utilisateurs. Le test génère un bulletin `ReportCard` depuis les cotations seedées.
+- `scripts/verify-grade-promotion-flow.js` : historique de promotion lisible, 12 élèves/inscriptions et 22 notes présentes.
+- Limite importante : le seed contient le modèle canonique `Bulletin`, tandis que les pages et l’API legacy lisent `ReportCard`. Aucun endpoint `/api/bulletins` ne les unifie; cette phase n’est donc pas terminée.
 
 ## Périmètre livré
 
@@ -54,7 +66,7 @@ Validation zod partagée client/serveur : `src/lib/validation/entities.ts` (user
 
 - `docs/API.md` : référence complète (enveloppes, codes erreur, pagination, rôles par route, § sécurité connue).
 - `docs/ENV.md` + `.env.example` complété : toutes les variables par catégorie (App, DB, Auth, Storage, Push, Paiements, Email, IA, Admin), JWT obligatoires en prod.
-- `scripts/rbac-check.mjs` (`npm run test:rbac`) : ~25 contrôles d'autorisation contre le serveur vivant (401/403 par rôle, ownership notes/paiements/justifications, escalade, isolation 2 écoles, allowlist sync push, rate limit login 429).
+- `scripts/rbac-check.mjs` (`npm run test:rbac`) : 58 contrôles contre le serveur vivant (401/403 par rôle, ownership, isolation multi-écoles, bulletins publiés, workflow, notifications, sync push/pull et rate limit login 429).
 
 ## Checklist de fin de phase
 
@@ -71,7 +83,9 @@ Validation zod partagée client/serveur : `src/lib/validation/entities.ts` (user
 - [x] Rate limiting, erreurs uniformes, variables d'environnement documentées
 - [x] Gates : `tsc 0`, `lint 0`, `build 0`, dev relancé (`/api/health` → 200)
 - [x] Seed permettant de tester les 4 rôles avec données liées (`npm run db:seed`)
-- [ ] `npm run db:seed` + `npm run test:rbac` **exécutés sur une base joignable** (SASL bloquant hors VPN sur le poste dev — le seed échoue proprement, le script RBAC quitte en code 2 avec message explicite)
+- [x] `npm run db:seed` + `npm run test:rbac` exécutés sur une base PostgreSQL locale de développement isolée ; 79/79 contrôles passent sur le serveur standalone construit avec `.env.local`.
+- [ ] Validation à répéter contre la base distante/production autorisée, après déploiement des migrations.
+- [ ] Unifier les modèles `Bulletin` et `ReportCard`, ajouter `/api/bulletins` ou remplacer les consommateurs, puis connecter le workflow canonique et le PDF officiel.
 
 ## Comptes de démonstration (seed)
 

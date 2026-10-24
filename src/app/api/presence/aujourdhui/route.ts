@@ -13,26 +13,33 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'schoolId invalide' }, { status: 400 });
     }
 
-    if (auth.role === 'PARENT' && userId) {
-      const student = await db.user.findUnique({
-        where: { id: userId },
-        select: { parentId: true, schoolId: true },
+    let scopedUserIds: string[] | null = null;
+    if (auth.role === 'PARENT') {
+      const children = await db.user.findMany({
+        where: { schoolId, parentId: auth.userId, role: 'STUDENT', active: true, deletedAt: null },
+        select: { id: true },
       });
-      if (!student || student.parentId !== auth.userId || student.schoolId !== schoolId) {
-        return NextResponse.json({ error: 'Vous ne pouvez consulter que la présence de vos enfants' }, { status: 403 });
-      }
+      scopedUserIds = children.map((child) => child.id);
+      if (userId && !scopedUserIds.includes(userId)) return NextResponse.json({ error: 'Vous ne pouvez consulter que la présence de vos enfants' }, { status: 403 });
+    } else if (auth.role === 'STUDENT' || auth.role === 'TEACHER') {
+      if (userId && userId !== auth.userId) return NextResponse.json({ error: 'Accès non autorisé' }, { status: 403 });
+      scopedUserIds = [auth.userId];
+    } else if (auth.role !== 'ADMIN') {
+      return NextResponse.json({ error: 'Accès non autorisé' }, { status: 403 });
     }
 
     const now = new Date();
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const tomorrow = new Date(today.getTime() + 86400000);
 
+    const effectiveUserIds = userId ? [userId] : scopedUserIds;
     if (userId) {
       const presence = await db.presence.findFirst({
         where: {
           schoolId,
           userId,
           date: { gte: today, lt: tomorrow },
+          deletedAt: null,
         },
         include: {
           user: { select: { fullName: true, role: true, photoUrl: true } },
@@ -46,6 +53,8 @@ export async function GET(request: NextRequest) {
       where: {
         schoolId,
         date: { gte: today, lt: tomorrow },
+        deletedAt: null,
+        ...(effectiveUserIds ? { userId: { in: effectiveUserIds.length ? effectiveUserIds : ['__no-linked-child__'] } } : {}),
       },
       include: {
         user: {
@@ -63,6 +72,8 @@ export async function GET(request: NextRequest) {
       },
       orderBy: { heureArrivee: 'asc' },
     });
+
+    if (auth.role !== 'ADMIN') return NextResponse.json({ presences });
 
     const [totalStudents, totalTeachers] = await Promise.all([
       db.user.count({ where: { schoolId, role: 'STUDENT', active: true } }),

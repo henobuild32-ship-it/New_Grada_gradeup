@@ -7,8 +7,8 @@
 ## 1. Vue d'ensemble
 
 ```
-┌──────────── Composant ────────────┐
-│  hooks useXxx (useLiveQuery Dexie)│  ← lecture locale d'abord, UI réactive
+┌──────────── Écrans migrés ────────┐
+│ useEntityListState (useLiveQuery) │  ← cache local réactif, puis réseau
 └──────────────┬────────────────────┘
                │ mutate / read
 ┌──────────────▼────────────────────┐
@@ -109,7 +109,10 @@ Routes rejouables (allowlist `src/app/api/sync/push/route.ts`) :
 
 ### `GET /api/sync/pull?since=<ISO|epoch>` (delta)
 - Retourne `{ cursor, entities, counts }` : enregistrements modifiés depuis
-  `since`, **par entité**, bornés à 500 lignes/entité.
+  `since`, **par entité**, bornés à 500 lignes/entité. Le curseur est global;
+  il n'existe pas encore de continuation par entité. Une entité dépassant cette
+  limite peut donc perdre des lignes dans un delta. Cette pagination est un
+  bloqueur avant la validation du scénario offline complet.
 - **Filtrage par rôle et établissement** :
   - `ADMIN` : toute l'école.
   - `TEACHER` : ses classes/cours/notes devoirs, users STUDENT/TEACHER.
@@ -120,7 +123,7 @@ Routes rejouables (allowlist `src/app/api/sync/push/route.ts`) :
 
 ## 5. Résolution de conflits
 
-Définies dans `src/lib/sync/conflicts.ts`, appliquées à l'écriture/pull :
+Déclarées dans `src/lib/sync/conflicts.ts` comme politiques cibles :
 
 | Entité | Règle | Comportement |
 |---|---|---|
@@ -129,18 +132,22 @@ Définies dans `src/lib/sync/conflicts.ts`, appliquées à l'écriture/pull :
 | **Messages, soumissions, notifications** | `append-only` | Aucun conflit : on ajoute, on n'écrase jamais. |
 | **Brouillons de leçons** (`lessons`) | `latest-with-backup` | La version la plus récente gagne ; une copie de sauvegarde de l'autre version est conservée. |
 
-Le serveur renvoie **409** quand il refuse une mutation pour conflit ; l'action
-passe en `conflict` dans l'outbox et apparaît dans le centre de sync.
+Aujourd'hui, `applyRemoteList` conserve les records locaux `pending`/`error`/
+`conflict`, et le push classe un HTTP 409 en `conflict`. En revanche,
+`resolveConflict()` n'est appelé ni par le pull ni par le dépôt : LWW par séance,
+append-only applicatif et sauvegarde de brouillon ne sont pas encore réellement
+réconciliés. Ne pas considérer ces règles comme validées avant leur câblage et
+un scénario de test dédié.
 
 ## 6. Opérations sensibles = ONLINE-ONLY
 
-Interdites hors ligne (rejetées par le serveur **et** refusées par le client
-avec « **Connexion requise** »), cf. `ONLINE_ONLY_OPERATIONS` :
+Interdites via le chemin outbox :
 
 - **Paiements** : création (`payments:create`).
 - **Publication officielle de bulletins** : `bulletins:update`,
   `reportCards:update` (validation/publication).
-- **Clôture d'année** : (module `admin-end-of-year`, jamais dans l'outbox).
+- **Clôture d'année** : absente de l'allowlist push; le client doit encore
+  appliquer explicitement le garde « Connexion requise » avant de la soumettre.
 - **Suppression d'utilisateurs** : `users:delete`.
 - **Modification de rôles** : `users:update`.
 
@@ -151,7 +158,7 @@ ligne ; il est stocké en **« brouillon local à confirmer »** (statut local
 synchronisation. La numérotation n'est jamais générée côté client.
 
 > Pour l'instant, la création de paiements n'est pas dans l'allowlist push :
-> toute tentative hors ligne échoue en 403 avec le message clair, ce qui force
+> la tentative est bloquée par le garde online-only du push, ce qui force
 > la saisie en ligne. Le brouillon de reçu sera câblé dans la Phase 6
 > (paiements) sur cette même base.
 
@@ -193,11 +200,14 @@ offline via `downloadFileForOffline(url, schoolId)` (`offlineFiles` table).
 - **Déconnexion** : `wipeAllLocalData()` supprime **toute** la base Dexie
   (données + outbox + fichiers) — rien ne subsiste d'un autre utilisateur.
 - **Verrouillage par rôle** : le `pull` ne renvoie que les données autorisées
-  au rôle ; les tables locales sont remplies uniquement via ce flux filtré.
+  au rôle. Les pages élève Paiements, Bulletins, Présences, Cours, Leçons et
+  Notes utilisent aussi un GET local-first filtré par élève/classe. Les bulletins
+  parent lisent également le cache local filtré sur les enfants du parent et
+  l'enfant sélectionné. Les autres pages ne sont pas encore branchées aux repositories.
 - **Expiration** : purge automatique des records `synced` de plus de 7 jours
   (rétention configurable) + purge des fichiers de plus de 30 jours.
 
-## 10. Tests offline (rappel de recette)
+## 10. Tests offline (checklist manuelle non validée de bout en bout)
 
 1. Mode avion → ouvrir l'app installée, naviguer, lire les données déjà chargées.
 2. Créer une action (pointage) hors ligne → badge « En attente ».

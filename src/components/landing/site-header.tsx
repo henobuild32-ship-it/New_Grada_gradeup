@@ -198,7 +198,9 @@ export function SiteHeader({
             className="flex items-center gap-2.5 rounded-md"
             aria-label={`${site.name}, retour en haut de page`}
           >
-            <Image src="/logo-mark.svg" alt="" width={32} height={32} className="size-8" priority />
+            <span className="shrink-0 overflow-hidden rounded-xl bg-[#111820] ring-1 ring-black/10 dark:ring-white/10">
+              <Image src="/logo-gradeup.png" alt="Logo officiel GradeUp" width={48} height={48} className="size-11 object-contain" priority />
+            </span>
             <span className="text-[17px] font-semibold tracking-tight text-foreground">{site.name}</span>
           </a>
 
@@ -272,7 +274,9 @@ export function SiteHeader({
           >
             <div className="flex h-16 shrink-0 items-center justify-between border-b border-line px-5">
               <div className="flex items-center gap-2.5">
-                <Image src="/logo-mark.svg" alt="" width={32} height={32} className="size-8" />
+                <span className="shrink-0 overflow-hidden rounded-xl bg-[#111820] ring-1 ring-black/10 dark:ring-white/10">
+                  <Image src="/logo-gradeup.png" alt="Logo officiel GradeUp" width={48} height={48} className="size-11 object-contain" />
+                </span>
                 <span className="text-[17px] font-semibold tracking-tight text-foreground">{site.name}</span>
               </div>
               <button

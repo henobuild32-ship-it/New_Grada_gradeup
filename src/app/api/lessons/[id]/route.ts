@@ -3,6 +3,8 @@ import { db } from '@/lib/db';
 import { authenticateRequest, type AuthUser } from '@/lib/auth/authenticate';
 import { assertSchool } from '@/lib/api/rbac';
 import { ApiError, handleApiError } from '@/lib/api/errors';
+import { notifyUser } from '@/services/notifications/notificationEngine';
+import { auditFromRequest } from '@/lib/api/audit';
 
 type LessonCourseRef = { classId: string; teacherId: string; isPublished: boolean };
 
@@ -16,10 +18,11 @@ async function getLessonCourse(lesson: { courseId: string }): Promise<LessonCour
 /** Élève/parent : seulement si le cours est publié ET l'élève (ou son enfant) inscrit à la classe. */
 async function assertLessonReadableForStudent(
   auth: AuthUser,
-  course: LessonCourseRef
+  course: LessonCourseRef,
+  lessonIsPublished: boolean
 ): Promise<void> {
-  if (!course.isPublished) {
-    throw new ApiError('Accès refusé : ce cours n’est pas publié.', 403, 'FORBIDDEN');
+  if (!lessonIsPublished || !course.isPublished) {
+    throw new ApiError('Accès refusé : cette leçon n’est pas publiée.', 403, 'FORBIDDEN');
   }
   if (auth.role === 'STUDENT') {
     const enrollment = await db.enrolledClass.findFirst({
@@ -50,7 +53,7 @@ export async function GET(
       where: { id },
       include: {
         course: {
-          select: { id: true, name: true, classId: true },
+          select: { id: true, name: true, classId: true, isPublished: true },
         },
         teacher: {
           select: { id: true, fullName: true, role: true },
@@ -85,7 +88,7 @@ export async function GET(
       if (!course) {
         throw new ApiError('Accès refusé : cours introuvable.', 403, 'FORBIDDEN');
       }
-      await assertLessonReadableForStudent(auth, course);
+      await assertLessonReadableForStudent(auth, course, lesson.isPublished);
     }
 
     return NextResponse.json({ lesson });
@@ -103,6 +106,10 @@ export async function PUT(
     const { id } = await params;
     const body = await request.json();
     const { title, content, fileUrl, fileName } = body;
+    const isPublished = body.isPublished;
+    if (isPublished !== undefined && typeof isPublished !== 'boolean') {
+      return NextResponse.json({ error: 'isPublished doit être un booléen.' }, { status: 400 });
+    }
 
     const existing = await db.lesson.findUnique({ where: { id } });
     if (!existing) {
@@ -126,15 +133,43 @@ export async function PUT(
         ...(content !== undefined && { content }),
         ...(fileUrl !== undefined && { fileUrl }),
         ...(fileName !== undefined && { fileName }),
+        ...(isPublished !== undefined && {
+          isPublished,
+          publishedAt: isPublished ? existing.publishedAt ?? new Date() : null,
+        }),
       },
       include: {
         course: {
-          select: { id: true, name: true, classId: true },
+          select: { id: true, name: true, classId: true, isPublished: true },
         },
         teacher: {
           select: { id: true, fullName: true, role: true },
         },
       },
+    });
+
+    if (!existing.isPublished && lesson.isPublished && lesson.course?.isPublished && lesson.course?.classId) {
+      notifyUser({
+        schoolId: lesson.schoolId,
+        targetRole: 'STUDENT',
+        targetClassId: lesson.course.classId,
+        senderId: lesson.teacherId,
+        title: `📚 Nouveau cours : ${lesson.title}`,
+        message: `Votre professeur a publié la leçon « ${lesson.title} » pour le cours de ${lesson.course.name}.`,
+        type: 'LESSON',
+        priority: 'NORMAL',
+        metadata: { lessonId: lesson.id, courseId: lesson.courseId },
+      }).catch((err) => console.error('[Lessons] Notification trigger error:', err));
+    }
+
+    await auditFromRequest(request, {
+      schoolId: auth.schoolId,
+      userId: auth.userId,
+      action: isPublished !== undefined && existing.isPublished !== isPublished ? (isPublished ? 'LESSON_PUBLISH' : 'LESSON_UNPUBLISH') : 'LESSON_UPDATE',
+      entity: 'Lesson',
+      entityId: lesson.id,
+      before: { id: existing.id, title: existing.title, isPublished: existing.isPublished },
+      after: { id: lesson.id, title: lesson.title, isPublished: lesson.isPublished },
     });
 
     return NextResponse.json({ lesson });
@@ -167,6 +202,14 @@ export async function DELETE(
     }
 
     await db.lesson.delete({ where: { id } });
+    await auditFromRequest(request, {
+      schoolId: auth.schoolId,
+      userId: auth.userId,
+      action: 'LESSON_DELETE',
+      entity: 'Lesson',
+      entityId: id,
+      before: { id: existing.id, title: existing.title, courseId: existing.courseId },
+    });
 
     return NextResponse.json({ message: 'Lesson deleted successfully' });
   } catch (error: unknown) {

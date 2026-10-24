@@ -133,7 +133,7 @@ Légende rôles : **Public** (liste blanche middleware) · **Toute session** (JW
 
 | Route | Rôles | Description | Réponse principale |
 | --- | --- | --- | --- |
-| `GET /api/users` | Toute session (portée par rôle : parent→enfants, prof→ses classes) | Liste des comptes de l'école + recherche/filtres | `{ users }` |
+| `GET /api/users` | ADMIN (école), TEACHER (élèves de ses cours), STUDENT (son profil), PARENT (ses enfants), CAISSIER (élèves) | Liste bornée par rôle; les rôles non-admin ne reçoivent ni mot de passe ni code parent | `{ users }` |
 | `POST /api/users` | ADMIN | Création d'un compte (validation Zod, carte gratuite) | `{ user }` 201 |
 | `PATCH /api/users` | ADMIN | Active/désactive ou modifie un compte de son école | `{ user }` |
 | `DELETE /api/users` | ADMIN | Suppression (refusée si liens parent/enfant) | `{ success }` |
@@ -148,7 +148,7 @@ Légende rôles : **Public** (liste blanche middleware) · **Toute session** (JW
 | `POST /api/ecole/logo` | ADMIN | Upload du logo école (48 Mo, images) | `{ logoUrl, provider }` |
 | `DELETE /api/ecole/logo` | ADMIN | Supprime le logo école | `{ success }` |
 | `GET /api/school-years` | Toute session | Années scolaires de l'école (tenant = session) | `{ years }` |
-| `POST /api/parent-code` | ADMIN | (Re)génère le code parent d'un élève | `{ parentCode }` |
+| `POST /api/parent-code` | ADMIN du même établissement | Génère ou régénère un code pour un élève actif de son école ; codes aléatoires cryptographiques et unicité retentée | `{ parentCode }` |
 | `POST /api/parent-link` | PARENT | Lien parent↔enfant via code parent | `{ success, student }` |
 | `GET /api/parent-link/validate` | PARENT (10/min/IP) | Valide un code parent, renvoie l'élève | `{ valid, studentName?, schoolName? }` |
 | `GET /api/parent/children` | PARENT | Liste des enfants rattachés | `{ children }` |
@@ -187,7 +187,7 @@ Légende rôles : **Public** (liste blanche middleware) · **Toute session** (JW
 
 | Route | Rôles | Description | Réponse principale |
 | --- | --- | --- | --- |
-| `GET /api/courses` | Toute session (portée : prof→ses cours, élève→ses classes) | Cours de l'école | `{ courses }` |
+| `GET /api/courses` | ADMIN (école), TEACHER (ses cours), STUDENT (classes inscrites), PARENT (classes de ses enfants) | Cours bornés par école, rôle et inscriptions; refuse un filtre `teacherId`/`classId` hors portée | `{ courses }` |
 | `POST /api/courses` | ADMIN | Création d'un cours | `{ course }` 201 |
 | `PUT /api/courses` | ADMIN | Mise à jour d'un cours par `id` | `{ course }` |
 | `GET /api/courses/[id]` | Toute session (portée par rôle) | Détail d'un cours | `{ course }` |
@@ -197,7 +197,7 @@ Légende rôles : **Public** (liste blanche middleware) · **Toute session** (JW
 | `POST /api/courses-with-points` | ADMIN | Création d'un cours coté | `{ course }` 201 |
 | `PUT /api/courses-with-points/[id]` | ADMIN | Modification | `{ course }` |
 | `DELETE /api/courses-with-points/[id]` | ADMIN | Suppression | `{ success }` |
-| `GET /api/schedules` | Toute session (école) | Grille horaire de l'école | `{ schedules }` |
+| `GET /api/schedules` | ADMIN (école), TEACHER (classes de ses cours), STUDENT (classes inscrites), PARENT (classes de ses enfants) | Grille horaire bornée aux classes autorisées; filtre `classId` validé côté serveur | `schedules[]` |
 | `POST /api/schedules` | ADMIN | Ajout d'un créneau de cours | `{ schedule }` 201 |
 | `PUT /api/schedules` | ADMIN | Modification d'un créneau | `{ schedule }` |
 | `DELETE /api/schedules` | ADMIN | Suppression d'un créneau | `{ success }` |
@@ -212,7 +212,7 @@ Légende rôles : **Public** (liste blanche middleware) · **Toute session** (JW
 
 | Route | Rôles | Description | Réponse principale |
 | --- | --- | --- | --- |
-| `GET /api/grades` | Toute session (parent→enfants, élève→lui, prof→ses cours) | Notes filtrées (`classId`, `courseId`, `studentId`, `trimester`…) | `{ grades }` |
+| `GET /api/grades` | ADMIN (école), TEACHER (ses cours uniquement), STUDENT (lui), PARENT (ses enfants) | Notes filtrées (`courseId`, `studentId`, `trimester`…); refuse le cours et `teacherId` usurpés par un professeur | `{ grades }` |
 | `POST /api/grades` | Professeur du cours / ADMIN (clé `operationId` idempotente) | Saisie d'une note (verrou période → 423) | `{ grade }` 201 |
 | `GET /api/grades/[id]` | Self (élève) / parent (enfant) / staff école | Détail d'une note | `{ grade }` |
 | `PUT /api/grades/[id]` | Professeur du cours / ADMIN | Correction d'une note (period lock 423, sinon demande de modification) | `{ grade }` |
@@ -249,11 +249,24 @@ Légende rôles : **Public** (liste blanche middleware) · **Toute session** (JW
 
 ### 6.8 Bulletins & délibérations
 
+Le flux canonique Phase 4 vit dans `Bulletin` et n'est pas interchangeable avec l'ancien `ReportCard`. Les écrans élève/parent utilisent maintenant ce flux et n'exposent que `PUBLISHED`.
+
 | Route | Rôles | Description | Réponse principale |
 | --- | --- | --- | --- |
-| `GET /api/report-cards` | Toute session (élève/parent→les leurs, prof→ses classes) | Bulletins | `{ reportCards }` |
+| `GET /api/bulletins` | ADMIN, TEACHER titulaire, STUDENT, PARENT | Liste école-scopée; élèves/parents ne voient que leurs bulletins publiés | `{ bulletins }` |
+| `POST /api/bulletins/generate` | ADMIN, TEACHER titulaire | Calcule les brouillons et rangs depuis les notes réelles; refuse les élèves sans notes | `{ generated, unchanged }` |
+| `PUT /api/bulletins/[id]/validate-titulaire` | ADMIN, TEACHER titulaire | Valide les notes et appréciations de classe | `{ bulletin }` |
+| `PUT /api/bulletins/[id]/validate-admin` | ADMIN | Appréciation de la direction et validation administrative | `{ bulletin }` |
+| `PUT /api/bulletins/[id]/publish` | ADMIN | Publication en ligne et notifications élève/parent | `{ bulletin }` |
+| `GET /api/bulletins/[id]/pdf` | ADMIN, TEACHER titulaire, propriétaire élève/parent | PDF officiel; élève/parent seulement après publication | `application/pdf` |
+
+L'ancien `ReportCard` reste présent pour compatibilité et les usages qui n'ont pas encore migré. La consolidation des anciennes données et la suppression de l'ancien workflow restent nécessaires avant de déclarer l'unification terminée.
+
+| Route | Rôles | Description | Réponse principale |
+| --- | --- | --- | --- |
+| `GET /api/report-cards` | ADMIN, TEACHER (ses classes), STUDENT/PARENT (publiés seulement) | Bulletins du même établissement ; les rôles non autorisés sont refusés | `{ reportCards }` |
 | `POST /api/report-cards` | ADMIN, TEACHER (ses classes) | Génération d'un bulletin (cotation réelle requise) | `{ reportCard, synchronized }` |
-| `PUT /api/report-cards` | ADMIN (statuts), TEACHER (transmission de ses classes) | Mise à jour / workflow du bulletin | `{ reportCard }` |
+| `PUT /api/report-cards` | ADMIN, TEACHER titulaire de la classe | Transitions strictes : `draft/auto_draft → pending_admin → validated → published` ; mise à jour conditionnelle pour refuser les courses concurrentes | `{ reportCard }` |
 | `DELETE /api/report-cards` | ADMIN | Suppression d'un bulletin | `{ success }` |
 | `GET /api/report-cards/archive` | ADMIN, TEACHER | Bulletins archivés | `{ reportCards }` |
 | `POST /api/report-cards/counter` | ADMIN, TEACHER | Compteur de générations par classe/trimestre | `{ canGenerate, counter }` |
@@ -264,6 +277,8 @@ Légende rôles : **Public** (liste blanche middleware) · **Toute session** (JW
 | `POST /api/end-of-year` | ADMIN | Verrouillage d'année, promotion de classes, transition | `{ success, message }` |
 
 ### 6.9 Présences & justifications
+
+| `POST /api/presence/scan` | ADMIN | Pointage par code QR (matricule, identifiant ou QR `/carte/...`); doublon journalier refusé | `{ user, presence }` 201; doublon 409 |
 
 | Route | Rôles | Description | Réponse principale |
 | --- | --- | --- | --- |
@@ -323,7 +338,7 @@ Légende rôles : **Public** (liste blanche middleware) · **Toute session** (JW
 
 | Route | Rôles | Description | Réponse principale |
 | --- | --- | --- | --- |
-| `GET /api/lessons` | Toute session (élève→ses classes) | Leçons | `{ lessons }` |
+| `GET /api/lessons` | ADMIN (école), TEACHER (ses cours), STUDENT (classes inscrites), PARENT (classes de ses enfants) | Leçons limitées par école, rôle et classes accessibles | `{ lessons }` |
 | `POST /api/lessons` | TEACHER, ADMIN | Création d'une leçon (prof limité à ses cours, tenant forcé) | `{ lesson }` 201 |
 | `GET /api/lessons/[id]` | Toute session (porté par rôle) | Détail d'une leçon | `{ lesson }` |
 | `PUT /api/lessons/[id]` | ADMIN | Modification d'une leçon | `{ lesson }` |
@@ -360,8 +375,8 @@ Légende rôles : **Public** (liste blanche middleware) · **Toute session** (JW
 
 | Route | Rôles | Description | Réponse principale |
 | --- | --- | --- | --- |
-| `GET /api/notifications` | Toute session (filtrage par rôle) | Notifications de l'utilisateur | `{ notifications }` |
-| `POST /api/notifications` | ADMIN, TEACHER, STUDENT (PARENT interdit) | Création d'une notification ciblée (même école) | `{ notification }` 201 |
+| `GET /api/notifications` | Toute session (filtrage par rôle, school forcée depuis le JWT) | Notifications personnelles, ciblées à un rôle, une classe, un utilisateur précis ou toute l'école | `{ notifications }` (ou liste pour les clients rôle ciblé) |
+| `POST /api/notifications` | ADMIN uniquement | Création validée Zod, destinataire confirmé dans la même école, auditée; diffusion in-app/realtime | `{ notification }` 201 |
 | `GET /api/notifications/[id]` | Destinataire / rôle ciblé / ADMIN | Détail d'une notification | `{ notification }` |
 | `PUT /api/notifications/[id]` | Destinataire (marquage lu) ; ADMIN (contenu) | Mise à jour du statut ou du contenu | `{ notification }` |
 | `DELETE /api/notifications/[id]` | Destinataire ou ADMIN | Suppression | `{ message }` |
@@ -422,13 +437,13 @@ Légende rôles : **Public** (liste blanche middleware) · **Toute session** (JW
 | `DELETE /api/fees/[id]` | ADMIN | Suppression | `{ success }` |
 | `GET /api/fees/[id]/installments` | ADMIN, TEACHER | Échéancier d'un frais | `{ installments }` |
 | `POST /api/fees/[id]/installments` | ADMIN | Création d'une échéance | `{ installment }` 201 |
-| `GET /api/payments` | Toute session (parent→enfants, élève→lui) | Paiements | `{ payments }` |
+| `GET /api/payments` | ADMIN/CAISSIER (école), PARENT (enfants), STUDENT (lui-même); TEACHER refusé | Lecture seule; retard dérivé après 30 jours, filtres validés, lignes supprimées exclues | `{ payments }` |
 | `POST /api/payments` | ADMIN | Création d'un paiement | `{ payment }` 201 |
 | `GET /api/payments/[id]` | Toute session (porté) | Détail d'un paiement | `{ payment }` |
 | `PUT /api/payments/[id]` | ADMIN | Mise à jour d'un paiement | `{ payment }` |
 | `DELETE /api/payments/[id]` | ADMIN | Suppression d'un paiement | `{ message }` |
-| `GET /api/tuition` | ADMIN | Suivi des frais par élève/classes | `{ students, classes }` |
-| `POST /api/tuition` | ADMIN | Action sur un élève (`mark-paid`, `block`…) | `{ success }` |
+| `GET /api/tuition` | ADMIN; PARENT (enfants liés seulement, `studentId` vérifié) | Solde par devise, échéances et couverture des frais | `{ students, fees, installments, balances }` par élève |
+| `POST /api/tuition` | ADMIN | Relance d'un parent (`remind-parent`), auditée | `{ success }` |
 | `POST /api/payments/pawapay` | Public (callback — signature vérifiée) | Initiation de checkout (carte école) | `{ redirectUrl }` |
 | `GET /api/payments/pawapay/success` | Public (callback) | Retour succès de la passerelle | redirection/confirmation |
 | `GET /api/payments/pawapay/cancel` | Public (callback) | Retour annulation | redirection |
@@ -441,8 +456,8 @@ Légende rôles : **Public** (liste blanche middleware) · **Toute session** (JW
 | Route | Rôles | Description | Réponse principale |
 | --- | --- | --- | --- |
 | `POST /api/sync` | Toute session | Rejeu d'une opération offline (whitelist : `grades`, `attendance/batch`, `homework`, `notifications/[id]`) | réponse de la cible |
-| `POST /api/sync/push` | Toute session (30/min/utilisateur) | Poussée de lot de mutations (max 50) | `{ results }` (200 ou 207) |
-| `GET /api/sync/pull` | Toute session (portée par rôle/école) | Delta par entité depuis `?since=` (max 500 lignes/entité) | `{ cursor, entities, counts }` |
+| `POST /api/sync/push` | Toute session (30/min/utilisateur) | Poussée max 50; origine, méthode, chemin autorisé et `schoolId` de session vérifiés; résultats par mutation (le client doit lire `results`, même en HTTP 207) | `{ results }` (200 ou 207) |
+| `GET /api/sync/pull` | Toute session (portée par rôle/école) | Delta par entité depuis `?since=`; élèves/parents reçoivent seulement leurs bulletins publiés, parents tous leurs enfants, enseignants leurs classes/cours | `{ cursor, entities, counts }` (limite actuelle 500 lignes/entité; pagination à faire) |
 
 ### 6.19 Upload, géolocalisation & divers
 

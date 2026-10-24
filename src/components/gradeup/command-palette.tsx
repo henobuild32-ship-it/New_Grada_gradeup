@@ -2,109 +2,14 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useAppStore } from '@/lib/store';
-import type { PageView, UserRole } from '@/lib/types';
+import type { PageView } from '@/lib/types';
+import { getNavItems } from '@/lib/navigation.config';
 import {
   Dialog,
   DialogContent,
   DialogTitle,
 } from '@/components/ui/dialog';
-import {
-  LayoutDashboard,
-  Users,
-  School,
-  CreditCard,
-  Settings,
-  BarChart3,
-  Bell,
-  BookOpen,
-  FileText,
-  ClipboardList,
-  ClipboardCheck,
-  Calendar,
-  Bot,
-  Video,
-  GraduationCap,
-  DollarSign,
-  MessageSquare,
-  CalendarDays,
-  User,
-  Lightbulb,
-  Search,
-} from 'lucide-react';
-
-interface PaletteItem {
-  label: string;
-  page: PageView;
-  icon: React.ElementType;
-}
-
-const navItemsByRole: Record<UserRole, PaletteItem[]> = {
-  ADMIN: [
-    { label: 'Tableau de bord', page: 'admin-dashboard', icon: LayoutDashboard },
-    { label: 'Utilisateurs', page: 'admin-users', icon: Users },
-    { label: 'Classes', page: 'admin-classes', icon: School },
-    { label: 'Paiements', page: 'admin-payments', icon: CreditCard },
-    { label: 'Configuration', page: 'admin-config', icon: Settings },
-    { label: 'Rapports', page: 'admin-reports', icon: BarChart3 },
-    { label: 'Notifications', page: 'admin-notifications', icon: Bell },
-    { label: 'Visioconférences', page: 'admin-conferences', icon: Video },
-    { label: 'Cartes Élèves', page: 'admin-cards', icon: GraduationCap },
-    { label: 'Frais scolaires', page: 'admin-tuition', icon: DollarSign },
-    { label: 'Présence', page: 'admin-presence', icon: ClipboardCheck },
-    { label: 'Cours', page: 'admin-courses', icon: BookOpen },
-    { label: 'Emploi du temps', page: 'admin-schedules', icon: Calendar },
-    { label: 'IA Gradie', page: 'admin-ai', icon: Bot },
-    { label: 'Fin du cursus', page: 'admin-end-of-year', icon: FileText },
-    { label: 'Messagerie', page: 'messages', icon: MessageSquare },
-    { label: 'Calendrier', page: 'calendar', icon: CalendarDays },
-    { label: 'Profil', page: 'profile', icon: User },
-    { label: 'Aide', page: 'help', icon: Search },
-  ],
-  TEACHER: [
-    { label: 'Tableau de bord', page: 'teacher-dashboard', icon: LayoutDashboard },
-    { label: 'Cours', page: 'teacher-courses', icon: BookOpen },
-    { label: 'Emploi du temps', page: 'teacher-schedules', icon: Calendar },
-    { label: 'Leçons', page: 'teacher-lessons', icon: FileText },
-    { label: 'Notes', page: 'teacher-grades', icon: ClipboardList },
-    { label: 'Devoirs', page: 'teacher-homework', icon: ClipboardCheck },
-    { label: 'Documents', page: 'teacher-documents', icon: FileText },
-    { label: 'Absences', page: 'teacher-attendance', icon: Calendar },
-    { label: 'IA Gradie', page: 'teacher-ai', icon: Bot },
-    { label: 'Messagerie', page: 'messages', icon: MessageSquare },
-    { label: 'Calendrier', page: 'calendar', icon: CalendarDays },
-    { label: 'Profil', page: 'profile', icon: User },
-    { label: 'Aide', page: 'help', icon: Search },
-  ],
-  STUDENT: [
-    { label: 'Tableau de bord', page: 'student-dashboard', icon: LayoutDashboard },
-    { label: 'Cours', page: 'student-courses', icon: BookOpen },
-    { label: 'Emploi du temps', page: 'student-schedules', icon: Calendar },
-    { label: 'Leçons', page: 'student-lessons', icon: FileText },
-    { label: 'Notes', page: 'student-grades', icon: ClipboardList },
-    { label: 'Devoirs', page: 'student-homework', icon: ClipboardCheck },
-    { label: 'Absences', page: 'student-attendance', icon: Calendar },
-    { label: 'IA Gradie', page: 'student-ai', icon: Bot },
-    { label: 'Notifications', page: 'student-notifications', icon: Bell },
-    { label: 'Messagerie', page: 'messages', icon: MessageSquare },
-    { label: 'Calendrier', page: 'calendar', icon: CalendarDays },
-    { label: 'Profil', page: 'profile', icon: User },
-    { label: 'Aide', page: 'help', icon: Search },
-  ],
-  PARENT: [
-    { label: 'Tableau de bord', page: 'parent-dashboard', icon: LayoutDashboard },
-    { label: 'Suivi scolaire', page: 'parent-grades', icon: BarChart3 },
-    { label: 'Paiements', page: 'parent-payments', icon: CreditCard },
-    { label: 'Notifications', page: 'parent-notifications', icon: Bell },
-    { label: 'Messagerie', page: 'messages', icon: MessageSquare },
-    { label: 'Profil', page: 'profile', icon: User },
-    { label: 'Aide', page: 'help', icon: Lightbulb },
-  ],
-  CAISSIER: [
-    { label: 'Caisse', page: 'caisse', icon: DollarSign },
-    { label: 'Profil', page: 'profile', icon: User },
-    { label: 'Aide', page: 'help', icon: Lightbulb },
-  ],
-};
+import { Search } from 'lucide-react';
 
 function fuzzyMatch(query: string, text: string): boolean {
   const lowerQuery = query.toLowerCase().replace(/\s+/g, '');
@@ -127,7 +32,7 @@ export default function CommandPalette() {
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
-  const items = user ? navItemsByRole[user.role] : [];
+  const items = user ? getNavItems(user.role, user.isTitulaire) : [];
 
   const filteredItems = query.trim() === ''
     ? items
@@ -223,7 +128,7 @@ export default function CommandPalette() {
             }}
             onKeyDown={handleKeyDown}
             placeholder="Rechercher..."
-            className="flex-1 h-12 bg-transparent px-3 text-sm text-foreground placeholder:text-muted-foreground/50 outline-none"
+            className="flex-1 h-12 bg-transparent px-3 text-base sm:text-sm text-foreground placeholder:text-muted-foreground/50 outline-none"
           />
           <kbd className="hidden sm:inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground/50 bg-muted/60 rounded border border-border/50">
             ESC
@@ -257,7 +162,7 @@ export default function CommandPalette() {
                   onClick={() => handleNavigate(item.page)}
                   onMouseEnter={() => setSelectedIndex(index)}
                   className={`
-                    flex items-center gap-3 w-full px-4 py-2.5 text-left text-sm transition-all duration-100
+                    flex min-h-11 items-center gap-3 w-full px-4 py-2.5 text-left text-sm transition-all duration-100
                     ${isActive
                       ? 'bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300'
                       : 'text-foreground/80 hover:bg-muted/50'

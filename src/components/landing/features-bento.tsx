@@ -5,34 +5,29 @@ import { CahierScreen } from './device-frames';
 
 /** Mini-interface « finances » : état des minervals par élève. */
 function FinanceScreen() {
-  const rows: [string, string, string, string][] = [
-    ['Nadège Mbuyi', '300 USD', '300 USD', 'Soldé'],
-    ['Patrick Ilunga', '300 USD', '200 USD', '100 USD'],
-    ['Grâce Tshibangu', '300 USD', '150 USD', '150 USD'],
-    ['Emmanuel Kanku', '300 USD', '300 USD', 'Soldé'],
-  ];
+  const rows = ['Élève', 'Élève', 'Élève', 'Élève'];
   return (
     <div className="p-3 sm:p-4">
       <div className="mb-3 flex items-center justify-between">
         <div>
-          <p className="text-[13px] font-semibold leading-tight text-foreground">Minerval — 2e trimestre</p>
-          <p className="text-[9.5px] text-muted-foreground">486 élèves · échéance du 15</p>
+          <p className="text-[13px] font-semibold leading-tight text-foreground">Frais scolaires</p>
+          <p className="text-[9.5px] text-muted-foreground">Classe et période sélectionnées</p>
         </div>
-        <span className="rounded-md border border-line px-2 py-0.5 text-[9px] text-muted-foreground">Exporter</span>
+        <span className="rounded-md border border-line px-2 py-0.5 text-[9px] text-muted-foreground">USD · CDF</span>
       </div>
 
       <div className="grid grid-cols-3 gap-2">
         <div className="rounded-lg border border-line p-2.5">
           <p className="text-[9.5px] text-muted-foreground">Attendu</p>
-          <p className="text-[14px] font-semibold leading-none text-foreground">145 800</p>
+          <p className="text-[14px] font-semibold leading-none text-foreground">—</p>
         </div>
         <div className="rounded-lg border border-line p-2.5">
           <p className="text-[9.5px] text-muted-foreground">Encaissé</p>
-          <p className="text-[14px] font-semibold leading-none text-foreground">104 970</p>
+          <p className="text-[14px] font-semibold leading-none text-foreground">—</p>
         </div>
         <div className="rounded-lg border border-line p-2.5">
           <p className="text-[9.5px] text-muted-foreground">Reste dû</p>
-          <p className="text-[14px] font-semibold leading-none text-foreground">40 830</p>
+          <p className="text-[14px] font-semibold leading-none text-foreground">—</p>
         </div>
       </div>
 
@@ -47,32 +42,19 @@ function FinanceScreen() {
             </tr>
           </thead>
           <tbody>
-            {rows.map(([name, due, paid, balance]) => (
-              <tr key={name} className="border-b border-line/70 last:border-0">
-                <td className="px-2.5 py-1.5 font-medium text-foreground">{name}</td>
-                <td className="px-2 py-1.5 text-right text-muted-foreground">{due}</td>
-                <td className="px-2 py-1.5 text-right text-muted-foreground">{paid}</td>
-                <td
-                  className={`px-2.5 py-1.5 text-right font-semibold ${
-                    balance === 'Soldé' ? 'text-signal' : 'text-foreground'
-                  }`}
-                >
-                  {balance}
-                </td>
+            {rows.map((student, index) => (
+              <tr key={index} className="border-b border-line/70 last:border-0">
+                <td className="px-2.5 py-1.5 font-medium text-foreground">{student}</td>
+                <td className="px-2 py-1.5 text-right text-muted-foreground">—</td>
+                <td className="px-2 py-1.5 text-right text-muted-foreground">—</td>
+                <td className="px-2.5 py-1.5 text-right font-semibold text-foreground">—</td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
 
-      <div className="mt-3 flex gap-2">
-        <span className="rounded-lg bg-brand px-2.5 py-1.5 text-[9.5px] font-semibold text-brand-foreground">
-          Enregistrer un paiement
-        </span>
-        <span className="rounded-lg border border-line px-2.5 py-1.5 text-[9.5px] font-medium text-foreground">
-          Imprimer les reçus
-        </span>
-      </div>
+      <p className="mt-3 text-[9.5px] text-muted-foreground">Les reçus et les soldes sont associés à chaque élève.</p>
     </div>
   );
 }

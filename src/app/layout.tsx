@@ -3,9 +3,9 @@ import { ThemeProvider } from "next-themes";
 import "./globals.css";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as SonnerToaster } from "@/components/ui/sonner";
-import Script from "next/script";
 import PWAUpdateManager from "@/components/gradeup/pwa-update-manager";
 import OfflineSyncManager from "@/components/gradeup/offline-sync-manager";
+import ServiceWorkerRegistration from "@/components/gradeup/service-worker-registration";
 
 // Local fallback variables to guarantee 100% offline build capability without network dependencies
 const geistSans = {
@@ -70,30 +70,9 @@ export default function RootLayout({
           {children}
           <PWAUpdateManager />
           <OfflineSyncManager />
+          <ServiceWorkerRegistration />
           <Toaster />
           <SonnerToaster />
-          <Script
-            id="sw-register"
-            strategy="afterInteractive"
-            dangerouslySetInnerHTML={{
-              __html: `
-                if ('serviceWorker' in navigator) {
-                  var registerSW = function() {
-                    navigator.serviceWorker.register('/sw.js').then(function(reg) {
-                      console.log('[PWA] Service Worker registered successfully:', reg.scope);
-                    }).catch(function(err) {
-                      console.warn('[PWA] Service Worker registration failed:', err);
-                    });
-                  };
-                  if (document.readyState === 'complete') {
-                    registerSW();
-                  } else {
-                    window.addEventListener('load', registerSW, { once: true });
-                  }
-                }
-              `
-            }}
-          />
         </ThemeProvider>
       </body>
     </html>

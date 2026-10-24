@@ -7,6 +7,13 @@ const projectRoot = path.resolve(__dirname, "..");
 const standaloneDir = path.join(projectRoot, ".next", "standalone");
 const staticDir = path.join(projectRoot, ".next", "static");
 const standaloneStaticDir = path.join(standaloneDir, ".next", "static");
+const targetPlatform = process.env.GRADEUP_STANDALONE_TARGET || process.platform;
+
+if (!["linux", "win32", "darwin"].includes(targetPlatform)) {
+  throw new Error(
+    `Plateforme standalone non prise en charge : ${targetPlatform}. Utilisez linux, win32 ou darwin.`,
+  );
+}
 
 if (!fs.existsSync(path.join(standaloneDir, "server.js"))) {
   throw new Error("Le build standalone est absent. Exécutez `npm run build`.");
@@ -25,7 +32,10 @@ fs.writeFileSync(
   `${JSON.stringify(standalonePackage, null, 2)}\n`,
 );
 
-if (process.platform !== "linux") {
+// A local build should stay runnable on its host platform. Cross-pack Linux
+// Sharp only when a Linux artifact was explicitly requested from another OS;
+// Linux CI already has its native optional dependencies installed by npm.
+if (targetPlatform === "linux" && process.platform !== "linux") {
   const sharpPackage = require(
     path.join(projectRoot, "node_modules", "sharp", "package.json"),
   );

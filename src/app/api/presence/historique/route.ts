@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { authenticateRequest, AuthError } from '@/lib/auth/authenticate';
+import { auditFromRequest } from '@/lib/api/audit';
 
 export async function GET(request: NextRequest) {
   try {
@@ -16,25 +17,29 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'schoolId invalide' }, { status: 400 });
     }
 
-    if (auth.role === 'PARENT' && userId) {
-      const student = await db.user.findUnique({
-        where: { id: userId },
-        select: { parentId: true, schoolId: true },
+    const where: Record<string, unknown> = { schoolId, deletedAt: null };
+    if (auth.role === 'ADMIN') {
+      if (userId) where.userId = userId;
+    } else if (auth.role === 'PARENT') {
+      const children = await db.user.findMany({
+        where: { schoolId, parentId: auth.userId, role: 'STUDENT', active: true, deletedAt: null },
+        select: { id: true },
       });
-      if (!student || student.parentId !== auth.userId || student.schoolId !== schoolId) {
-        return NextResponse.json({ error: 'Accès non autorisé' }, { status: 403 });
-      }
+      const ids = children.map((child) => child.id);
+      if (userId && !ids.includes(userId)) return NextResponse.json({ error: 'Accès non autorisé' }, { status: 403 });
+      where.userId = userId || { in: ids.length ? ids : ['__no-linked-child__'] };
+    } else if (auth.role === 'STUDENT' || auth.role === 'TEACHER') {
+      if (userId && userId !== auth.userId) return NextResponse.json({ error: 'Accès non autorisé' }, { status: 403 });
+      where.userId = auth.userId;
+    } else {
+      return NextResponse.json({ error: 'Accès non autorisé' }, { status: 403 });
     }
 
     const since = new Date();
     since.setDate(since.getDate() - days);
     since.setHours(0, 0, 0, 0);
 
-    const where: Record<string, unknown> = {
-      schoolId,
-      date: { gte: since },
-    };
-    if (userId) where.userId = userId;
+    where.date = { gte: since };
     if (role) where.user = { role };
 
     const presences = await db.presence.findMany({
@@ -93,13 +98,37 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ error: 'presenceId requis' }, { status: 400 });
     }
 
+    const existing = await db.presence.findFirst({
+      where: { id: presenceId, schoolId: auth.schoolId, deletedAt: null },
+      select: { id: true, statut: true, userId: true, user: { select: { fullName: true, parentId: true } } },
+    });
+    if (!existing) return NextResponse.json({ error: 'Présence introuvable dans votre établissement' }, { status: 404 });
+
     const updated = await db.presence.update({
-      where: { id: presenceId },
+      where: { id: existing.id },
       data: {
         statut: 'JUSTIFIE',
         validePar: auth.userId,
       },
     });
+
+    await auditFromRequest(request, {
+      schoolId: auth.schoolId,
+      userId: auth.userId,
+      action: 'PRESENCE_JUSTIFICATION_APPROVE',
+      entity: 'Presence',
+      entityId: existing.id,
+      before: { status: existing.statut },
+      after: { status: 'JUSTIFIE', studentId: existing.userId },
+    });
+    if (existing.statut !== 'JUSTIFIE') {
+      const { notifyUser } = await import('@/services/notifications/notificationEngine');
+      const message = `La justification de présence de ${existing.user.fullName} a été validée.`;
+      await Promise.all([
+        notifyUser({ schoolId: auth.schoolId, userId: existing.userId, senderId: auth.userId, title: 'Justification validée', message, type: 'ATTENDANCE', priority: 'NORMAL', metadata: { presenceId: existing.id } }),
+        ...(existing.user.parentId ? [notifyUser({ schoolId: auth.schoolId, userId: existing.user.parentId, senderId: auth.userId, title: 'Justification validée', message, type: 'ATTENDANCE', priority: 'NORMAL', metadata: { presenceId: existing.id, studentId: existing.userId } })] : []),
+      ]);
+    }
 
     return NextResponse.json({ presence: updated });
   } catch (err: unknown) {

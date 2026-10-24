@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { generateGLMCompletion } from '@/lib/ai/glm-completion';
-import { requireAuth } from '@/lib/api/rbac';
+import { childrenIds, requireAuth } from '@/lib/api/rbac';
 import { handleApiError } from '@/lib/api/errors';
 import type { AuthUser } from '@/lib/auth/authenticate';
 
@@ -17,16 +17,17 @@ async function isVisibleToUser(
   if (r.visibility === 'PRIVATE') return r.createdById === auth.userId;
   if (r.visibility === 'ROLE') return r.targetRole === 'ALL' || r.targetRole === auth.role;
   if (r.visibility === 'CLASS') {
-    if (!r.targetClassId) return true;
+    if (!r.targetClassId) return false;
+    const memberIds = auth.role === 'PARENT' ? await childrenIds(auth.userId) : [auth.userId];
     const enr = await db.enrolledClass.findFirst({
-      where: { userId: auth.userId, classId: r.targetClassId },
+      where: { userId: { in: memberIds }, classId: r.targetClassId, class: { schoolId: auth.schoolId, deletedAt: null } },
     });
     if (enr) return true;
     const klass = await db.schoolClass.findUnique({
       where: { id: r.targetClassId },
-      select: { titulaireId: true },
+      select: { titulaireId: true, schoolId: true, deletedAt: true },
     });
-    return !!klass && klass.titulaireId === auth.userId;
+    return !!klass && klass.schoolId === auth.schoolId && !klass.deletedAt && klass.titulaireId === auth.userId;
   }
   return false;
 }

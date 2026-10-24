@@ -1,7 +1,10 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import { useAppStore } from '@/lib/store';
+import { useEntityListState } from '@/lib/offline/hooks';
+import type { CourseRecord, GradeRecord, LessonRecord, ScheduleRecord, UserRecord } from '@/lib/offline/db';
+import type { LocalRecord } from '@/lib/offline/types';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -26,11 +29,12 @@ import {
   FileDown,
   ExternalLink,
   Loader2,
+  RefreshCw,
   Upload,
   Library,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import type { CourseInfo, UserInfo, GradeInfo } from '@/lib/types';
+import type { CourseInfo } from '@/lib/types';
 import { publishToLibrary, lessonResourceType } from '@/lib/publishToLibrary';
 
 interface LessonInfo {
@@ -42,18 +46,92 @@ interface LessonInfo {
   createdAt: string;
 }
 
+type LocalCourse = CourseRecord & CourseInfo & LocalRecord;
+type CourseScheduleDisplay = ScheduleRecord & { startTime: string; endTime: string };
+
+function extractList(data: unknown, key: string): Record<string, unknown>[] {
+  if (!data || typeof data !== 'object') return [];
+  const list = (data as Record<string, unknown>)[key];
+  return Array.isArray(list) ? list.filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null) : [];
+}
+
+function extractSchedules(data: unknown): Record<string, unknown>[] {
+  if (!Array.isArray(data)) return [];
+  return data.filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null).map((schedule) => {
+    const course = schedule.course as { id?: string; name?: string; classId?: string; class?: { name?: string }; teacher?: { fullName?: string } } | undefined;
+    return {
+      ...schedule,
+      courseId: schedule.courseId ?? course?.id,
+      classId: course?.classId ?? '',
+      courseName: course?.name ?? '',
+      className: course?.class?.name ?? '',
+      teacherName: course?.teacher?.fullName ?? '',
+    };
+  });
+}
+
 export default function TeacherCourses() {
   const { user } = useAppStore();
-  const [courses, setCourses] = useState<CourseInfo[]>([]);
-  const [loading, setLoading] = useState(true);
-  
   // Selected course details
   const [selectedCourse, setSelectedCourse] = useState<CourseInfo | null>(null);
-  const [students, setStudents] = useState<UserInfo[]>([]);
-  const [grades, setGrades] = useState<GradeInfo[]>([]);
-  const [schedules, setSchedules] = useState<any[]>([]);
-  const [lessons, setLessons] = useState<LessonInfo[]>([]);
-  const [detailLoading, setDetailLoading] = useState(false);
+  const selectedCourseId = selectedCourse?.id;
+  const selectedClassId = selectedCourse?.classId;
+  const courseFilter = useCallback((record: LocalRecord) => (record as LocalCourse).teacherId === user?.id, [user?.id]);
+  const courseState = useEntityListState<LocalCourse>('courses', user?.schoolId, {
+    remoteUrl: user ? `/api/courses?${new URLSearchParams({ schoolId: user.schoolId, teacherId: user.id })}` : undefined,
+    extract: (data) => extractList(data, 'courses'),
+    filter: courseFilter,
+  });
+  const studentFilter = useCallback((record: LocalRecord) => {
+    const student = record as UserRecord;
+    return Boolean(selectedClassId && student.role === 'STUDENT' && student.classEnrollments?.some((enrollment) => enrollment.classId === selectedClassId));
+  }, [selectedClassId]);
+  const studentsState = useEntityListState<UserRecord>('users', user?.schoolId, {
+    remoteUrl: user && selectedClassId
+      ? `/api/users?${new URLSearchParams({ schoolId: user.schoolId, role: 'STUDENT', classId: selectedClassId })}`
+      : undefined,
+    extract: (data) => extractList(data, 'users'),
+    filter: studentFilter,
+  });
+  const gradeFilter = useCallback((record: LocalRecord) => {
+    const grade = record as GradeRecord;
+    return Boolean(selectedCourseId && grade.courseId === selectedCourseId && grade.teacherId === user?.id);
+  }, [selectedCourseId, user?.id]);
+  const gradesState = useEntityListState<GradeRecord>('grades', user?.schoolId, {
+    remoteUrl: user && selectedCourseId
+      ? `/api/grades?${new URLSearchParams({ schoolId: user.schoolId, courseId: selectedCourseId })}`
+      : undefined,
+    extract: (data) => extractList(data, 'grades'),
+    filter: gradeFilter,
+  });
+  const scheduleFilter = useCallback((record: LocalRecord) => (record as ScheduleRecord).courseId === selectedCourseId, [selectedCourseId]);
+  const schedulesState = useEntityListState<ScheduleRecord>('schedules', user?.schoolId, {
+    remoteUrl: user && selectedCourseId
+      ? `/api/schedules?${new URLSearchParams({ schoolId: user.schoolId, courseId: selectedCourseId })}`
+      : undefined,
+    extract: extractSchedules,
+    filter: scheduleFilter,
+  });
+  const lessonFilter = useCallback((record: LocalRecord) => {
+    const lesson = record as LessonRecord;
+    return Boolean(selectedCourseId && lesson.courseId === selectedCourseId && lesson.teacherId === user?.id);
+  }, [selectedCourseId, user?.id]);
+  const lessonsState = useEntityListState<LessonRecord>('lessons', user?.schoolId, {
+    remoteUrl: user && selectedCourseId
+      ? `/api/lessons?${new URLSearchParams({ schoolId: user.schoolId, courseId: selectedCourseId })}`
+      : undefined,
+    extract: (data) => extractList(data, 'lessons'),
+    filter: lessonFilter,
+  });
+  const courses = courseState.data;
+  const loading = courseState.loading;
+  const students = studentsState.data;
+  const grades = gradesState.data;
+  const schedules = schedulesState.data as CourseScheduleDisplay[];
+  const lessons = lessonsState.data as unknown as LessonInfo[];
+  const detailLoading = Boolean(selectedCourse && (studentsState.loading || gradesState.loading || schedulesState.loading || lessonsState.loading));
+  const detailError = studentsState.error || gradesState.error || schedulesState.error || lessonsState.error;
+  const refreshDetails = () => Promise.all([studentsState.refresh(), gradesState.refresh(), schedulesState.refresh(), lessonsState.refresh()]);
 
   // New Lesson form state
   const [showAddLesson, setShowAddLesson] = useState(false);
@@ -68,50 +146,7 @@ export default function TeacherCourses() {
   // Preview PDF state
   const [previewPdfUrl, setPreviewPdfUrl] = useState<string | null>(null);
 
-  const fetchCourses = useCallback(async () => {
-    if (!user) return;
-    setLoading(true);
-    try {
-      const res = await fetch(`/api/courses?schoolId=${user.schoolId}&teacherId=${user.id}`);
-      const data = await res.json();
-      setCourses(Array.isArray(data.courses) ? data.courses : []);
-    } catch {
-      toast.error('Erreur lors du chargement des cours');
-    } finally {
-      setLoading(false);
-    }
-  }, [user]);
-
-  useEffect(() => {
-    fetchCourses();
-  }, [fetchCourses]);
-
-  const openCourseDetail = async (course: CourseInfo) => {
-    setSelectedCourse(course);
-    setDetailLoading(true);
-    try {
-      const [studentsRes, gradesRes, schedRes, lessonsRes] = await Promise.all([
-        fetch(`/api/users?schoolId=${user?.schoolId}&role=STUDENT&classId=${course.classId}`),
-        fetch(`/api/grades?schoolId=${user?.schoolId}&courseId=${course.id}`),
-        fetch(`/api/schedules?schoolId=${user?.schoolId}&courseId=${course.id}`),
-        fetch(`/api/lessons?schoolId=${user?.schoolId}&courseId=${course.id}`),
-      ]);
-      
-      const studentsData = await studentsRes.json();
-      const gradesData = await gradesRes.json();
-      const schedData = await schedRes.json();
-      const lessonsData = await lessonsRes.json();
-
-      setStudents(Array.isArray(studentsData.users) ? studentsData.users : Array.isArray(studentsData) ? studentsData : []);
-      setGrades(Array.isArray(gradesData.grades) ? gradesData.grades : Array.isArray(gradesData) ? gradesData : []);
-      setSchedules(Array.isArray(schedData) ? schedData : []);
-      setLessons(Array.isArray(lessonsData.lessons) ? lessonsData.lessons : []);
-    } catch {
-      toast.error('Erreur lors du chargement des détails');
-    } finally {
-      setDetailLoading(false);
-    }
-  };
+  const openCourseDetail = (course: CourseInfo) => setSelectedCourse(course);
 
   const handlePublishLesson = async () => {
     if (!selectedCourse || !user) return;
@@ -157,6 +192,7 @@ export default function TeacherCourses() {
         content: lessonContent.trim(),
         fileUrl: finalFileUrl,
         fileName: finalFileName,
+        isPublished: true,
       };
 
       const res = await fetch('/api/lessons', {
@@ -193,12 +229,7 @@ export default function TeacherCourses() {
         setLessonUrl('');
         setShowAddLesson(false);
         
-        // Refresh lessons
-        const reloadRes = await fetch(`/api/lessons?schoolId=${user.schoolId}&courseId=${selectedCourse.id}`);
-        if (reloadRes.ok) {
-          const lData = await reloadRes.json();
-          setLessons(Array.isArray(lData.lessons) ? lData.lessons : []);
-        }
+        await Promise.all([lessonsState.refresh(), courseState.refresh()]);
       } else {
         const err = await res.json();
         toast.error(err.error || 'Erreur lors de la publication');
@@ -280,6 +311,14 @@ export default function TeacherCourses() {
             <Skeleton key={i} className="h-52 rounded-xl" />
           ))}
         </div>
+      ) : courseState.error && courses.length === 0 ? (
+        <div role="alert" className="rounded-xl border border-amber-300 bg-amber-50 p-5 text-amber-950 dark:border-amber-900 dark:bg-amber-950/20 dark:text-amber-100">
+          <p className="font-medium">Les cours ne sont pas disponibles.</p>
+          <p className="mt-1 text-sm">{courseState.error}</p>
+          <Button variant="outline" className="mt-3 min-h-11" onClick={() => void courseState.refresh()}>
+            <RefreshCw className="mr-2 h-4 w-4" />Réessayer
+          </Button>
+        </div>
       ) : courses.length === 0 ? (
         <div className="text-center py-20">
           <div className="mx-auto w-24 h-24 rounded-full bg-muted/50 flex items-center justify-center mb-4">
@@ -353,6 +392,13 @@ export default function TeacherCourses() {
               {selectedCourse?.description || 'Aucune description'}
             </DialogDescription>
           </DialogHeader>
+
+          {detailError && (
+            <div role="alert" className="flex flex-col gap-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950 dark:border-amber-900 dark:bg-amber-950/20 dark:text-amber-100 sm:flex-row sm:items-center sm:justify-between">
+              <span>{detailError}</span>
+              <Button variant="outline" className="min-h-11 shrink-0" onClick={() => void refreshDetails()}>Réessayer</Button>
+            </div>
+          )}
 
           <Tabs defaultValue="lessons" className="flex-1 flex flex-col overflow-hidden">
             <TabsList className="grid grid-cols-3 shrink-0">

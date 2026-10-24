@@ -60,22 +60,29 @@ export const adminUserFormSchema = z
     /** Requis à la création, optionnel à l'édition (vide = ne pas modifier). */
     password: z.string(),
     role: z.enum(['ADMIN', 'TEACHER', 'STUDENT', 'PARENT']),
-    gender: z.enum(['M', 'F'], { error: 'Le sexe (M ou F) est obligatoire.' }),
+    gender: z.enum(['M', 'F']).or(z.literal('')),
     birthDate: z.string().optional(),
     specialty: z.string().optional(),
     phone: z.string().optional(),
     className: z.string().optional(),
+    classId: z.string(),
     parentId: z.string().optional(),
     isTitulaire: z.boolean(),
     titulaireClassIds: z.array(z.string()),
   })
   .superRefine((val, ctx) => {
+    if (!val.gender) {
+      ctx.addIssue({ code: 'custom', path: ['gender'], message: 'Le sexe (M ou F) est obligatoire.' });
+    }
     if ((val.role === 'STUDENT' || val.role === 'TEACHER') && !val.birthDate?.trim()) {
       ctx.addIssue({
         code: 'custom',
         path: ['birthDate'],
         message: 'La date de naissance est obligatoire pour ce rôle.',
       });
+    }
+    if (val.role === 'STUDENT' && !val.classId) {
+      ctx.addIssue({ code: 'custom', path: ['classId'], message: 'La classe est obligatoire pour un élève.' });
     }
     if (val.role === 'TEACHER') {
       if (!val.specialty?.trim()) {

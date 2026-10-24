@@ -1,13 +1,16 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAppStore } from '@/lib/store';
 import type { GradeInfo } from '@/lib/types';
+import type { LocalRecord } from '@/lib/offline/types';
+import { useEntityListState } from '@/lib/offline/hooks';
 import { Card, CardContent, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
+import { ErrorState } from '@/components/ui/error-state';
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
@@ -20,56 +23,68 @@ import { Input } from '@/components/ui/input';
 import { Loader2 } from 'lucide-react';
 
 type GradeWithMod = GradeInfo & { modStatus?: string };
+type LocalGrade = GradeInfo & LocalRecord;
+
+function extractGrades(data: unknown): Record<string, unknown>[] {
+  if (!data || typeof data !== 'object') return [];
+  const grades = (data as { grades?: unknown }).grades;
+  return Array.isArray(grades) ? grades as Record<string, unknown>[] : [];
+}
 
 export default function StudentGrades() {
   const user = useAppStore((s) => s.user);
-  const [grades, setGrades] = useState<GradeInfo[]>([]);
-  const [loading, setLoading] = useState(true);
   const [trimester, setTrimester] = useState('1');
-  const [refreshing, setRefreshing] = useState(false);
   const [modTarget, setModTarget] = useState<GradeWithMod | null>(null);
   const [modReason, setModReason] = useState('');
   const [modNewScore, setModNewScore] = useState('');
   const [modSending, setModSending] = useState(false);
   const [modStatusMap, setModStatusMap] = useState<Record<string, string>>({});
-
-  const fetchGrades = async (showLoading = true) => {
-    if (!user?.schoolId || !user?.id) return;
-    if (showLoading) setLoading(true);
-    try {
-      const res = await fetch(`/api/grades?schoolId=${user.schoolId}&studentId=${user.id}&trimester=${trimester}`);
-      if (!res.ok) throw new Error();
-      const data = await res.json();
-      setGrades(Array.isArray(data.grades) ? data.grades : []);
-      // statut des demandes en cours pour ces notes
-      try {
-        const modRes = await fetch(`/api/note-modifications?schoolId=${user.schoolId}&studentId=${user.id}`);
-        const modData = await modRes.json();
-        const map: Record<string, string> = {};
-        const mods = Array.isArray(modData.noteModifications) ? modData.noteModifications : [];
-        for (const m of mods) {
-          if (!map[m.noteId] || m.requestStatus === 'PENDING') map[m.noteId] = m.requestStatus;
-        }
-        setModStatusMap(map);
-      } catch { /* silencieux */ }
-    } catch {
-      if (!showLoading) {
-        toast.error('Erreur lors de l\'actualisation des notes');
-      }
-    } finally {
-      if (showLoading) setLoading(false);
+  const gradeFilter = useCallback(
+    (record: LocalRecord) => {
+      const grade = record as LocalGrade;
+      return grade.studentId === user?.id && grade.trimester === trimester;
+    },
+    [trimester, user?.id]
+  );
+  const gradeQuery = user?.schoolId && user?.id
+    ? new URLSearchParams({ schoolId: user.schoolId, studentId: user.id, trimester }).toString()
+    : null;
+  const { data: grades, loading, refreshing, error, refresh } = useEntityListState<LocalGrade>(
+    'grades',
+    user?.schoolId,
+    {
+      remoteUrl: gradeQuery ? `/api/grades?${gradeQuery}` : undefined,
+      extract: extractGrades,
+      filter: gradeFilter,
     }
-  };
+  );
 
-  useEffect(() => {
-    fetchGrades();
-  }, [user?.schoolId, user?.id, trimester]);
+  const fetchModStatuses = useCallback(async () => {
+    if (!user?.schoolId || !user?.id) return;
+    try {
+      const params = new URLSearchParams({ schoolId: user.schoolId, studentId: user.id });
+      const res = await fetch(`/api/note-modifications?${params}`);
+      if (!res.ok) return;
+      const modData = await res.json();
+      const map: Record<string, string> = {};
+      const mods = Array.isArray(modData.noteModifications) ? modData.noteModifications : [];
+      for (const modification of mods) {
+        if (!map[modification.noteId] || modification.requestStatus === 'PENDING') {
+          map[modification.noteId] = modification.requestStatus;
+        }
+      }
+      setModStatusMap(map);
+    } catch {
+      // Les notes restent lisibles hors ligne; seul le statut des demandes est différé.
+    }
+  }, [user?.id, user?.schoolId]);
+
+  useEffect(() => { void fetchModStatuses(); }, [fetchModStatuses]);
 
   const handleRefresh = async () => {
-    setRefreshing(true);
-    await fetchGrades(false);
-    setRefreshing(false);
+    await Promise.all([refresh(), fetchModStatuses()]);
   };
+  const loadError = user?.id ? error : 'Votre session élève est indisponible. Reconnectez-vous puis réessayez.';
 
   const sendModification = async () => {
     if (!modTarget) return;
@@ -229,10 +244,14 @@ export default function StudentGrades() {
     );
   }
 
+  if (loadError && grades.length === 0) {
+    return <ErrorState title="Notes indisponibles" description={loadError} onRetry={() => void handleRefresh()} />;
+  }
+
   return (
     <div className="space-y-6 animate-fade-in">
       {/* Page Header */}
-      <div className="mb-6 rounded-xl bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/30 dark:to-indigo-950/30 p-6 flex justify-between items-center">
+      <div className="mb-6 rounded-xl bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/30 dark:to-indigo-950/30 p-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold">Mes notes</h1>
           <p className="text-sm text-muted-foreground mt-1">Suivez vos performances académiques par trimestre</p>
@@ -241,13 +260,19 @@ export default function StudentGrades() {
           variant="outline" 
           size="sm" 
           onClick={handleRefresh}
-          className="rounded-full shadow-sm"
+          className="min-h-11 self-start rounded-full shadow-sm"
           disabled={refreshing}
         >
           <RefreshCw className={`w-4 h-4 mr-1.5 ${refreshing ? 'animate-spin' : ''}`} />
           {refreshing ? 'Actualisation...' : 'Actualiser'}
         </Button>
       </div>
+
+      {loadError && grades.length > 0 && (
+        <div role="status" className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100">
+          Affichage des notes enregistrées sur cet appareil. {loadError}
+        </div>
+      )}
 
       {/* Average Card */}
       <Card className="bg-gradient-to-r from-blue-50 via-blue-50 to-indigo-50 border-blue-200 shadow-sm relative overflow-hidden">

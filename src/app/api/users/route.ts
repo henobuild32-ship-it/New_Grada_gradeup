@@ -4,6 +4,34 @@ import { db } from '@/lib/db';
 import { authenticateRequest, authenticateRequestActive, AuthError } from '@/lib/auth/authenticate';
 import { notifyUser } from '@/services/notifications/notificationEngine';
 import { hashPassword } from '@/lib/password';
+import { auditFromRequest } from '@/lib/api/audit';
+
+const adminUserCreateSchema = z.object({
+  schoolId: z.string().trim().min(1),
+  fullName: z.string().trim().min(3, 'Nom trop court (3 caractères minimum).'),
+  email: z.string().trim().email('Adresse e-mail invalide.'),
+  password: z.string().min(8, 'Le mot de passe doit contenir au moins 8 caractères.'),
+  role: z.enum(['ADMIN', 'TEACHER', 'STUDENT', 'PARENT', 'CAISSIER']),
+  gender: z.enum(['M', 'F'], { error: 'Le sexe (M ou F) est obligatoire.' }),
+  dateOfBirth: z.coerce.date().optional(),
+  birthDate: z.coerce.date().optional(),
+  classId: z.string().trim().min(1).optional(),
+  specialty: z.string().trim().optional(),
+  phone: z.string().trim().optional(),
+}).passthrough().superRefine((value, ctx) => {
+  if ((value.role === 'STUDENT' || value.role === 'TEACHER') && !value.dateOfBirth && !value.birthDate) {
+    ctx.addIssue({ code: 'custom', path: ['dateOfBirth'], message: 'La date de naissance est obligatoire pour un élève ou un professeur.' });
+  }
+  if (value.role === 'STUDENT' && !value.classId) {
+    ctx.addIssue({ code: 'custom', path: ['classId'], message: 'La classe est obligatoire pour un élève.' });
+  }
+  if (value.role === 'TEACHER' && !value.specialty) {
+    ctx.addIssue({ code: 'custom', path: ['specialty'], message: 'La spécialité est obligatoire pour un professeur.' });
+  }
+  if (value.role === 'TEACHER' && !value.phone) {
+    ctx.addIssue({ code: 'custom', path: ['phone'], message: 'Le téléphone est obligatoire pour un professeur.' });
+  }
+});
 
 function generateParentCode(): string {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -14,47 +42,22 @@ function generateParentCode(): string {
   return code;
 }
 
+/** Re-enrôle un élève dans une classe existante; les noms ne créent jamais une classe implicite. */
 async function syncStudentClassEnrollment(userId: string, schoolId: string, classId?: string, className?: string) {
-  if (!classId && !className) {
-    return null;
-  }
-
-  let assignedClassId = classId;
-
-  if (!assignedClassId && className) {
-    let existingClass = await db.schoolClass.findFirst({
-      where: { schoolId, name: className },
-    });
-
-    if (!existingClass) {
-      existingClass = await db.schoolClass.create({
-        data: {
-          schoolId,
-          name: className,
-          level: 'N/A',
-        },
-      });
-    }
-
-    assignedClassId = existingClass.id;
-  }
-
-  if (assignedClassId) {
-    await db.enrolledClass.deleteMany({ where: { userId } });
-    await db.enrolledClass.create({
-      data: {
-        userId,
-        classId: assignedClassId,
-      },
-    });
-  }
-
-  return assignedClassId;
+  const schoolClass = classId
+    ? await db.schoolClass.findFirst({ where: { id: classId, schoolId, deletedAt: null }, select: { id: true } })
+    : className
+      ? await db.schoolClass.findFirst({ where: { schoolId, name: className, deletedAt: null }, select: { id: true } })
+      : null;
+  if (!schoolClass) return null;
+  await db.enrolledClass.deleteMany({ where: { userId } });
+  await db.enrolledClass.create({ data: { userId, classId: schoolClass.id } });
+  return schoolClass.id;
 }
 
 export async function GET(request: NextRequest) {
   try {
-    const auth = authenticateRequest(request);
+    const auth = await authenticateRequestActive(request);
     const { searchParams } = new URL(request.url);
     const schoolId = searchParams.get('schoolId');
     const role = searchParams.get('role');
@@ -67,21 +70,14 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'schoolId invalide' }, { status: 400 });
     }
 
-    if (auth.role === 'CAISSIER' && role !== 'STUDENT') {
-      return NextResponse.json({ error: 'La caisse ne peut consulter que les élèves.' }, { status: 403 });
-    }
-
-    // Parent can only filter by their own parentId
-    if (auth.role === 'PARENT' && parentId !== auth.userId) {
-      return NextResponse.json({ error: 'Accès non autorisé' }, { status: 403 });
-    }
-
     const status = searchParams.get('status');
     const includeDeleted = searchParams.get('includeDeleted') === 'true';
 
     const where: Record<string, unknown> = { schoolId };
 
-    if (!includeDeleted) {
+    if (auth.role === 'ADMIN' && includeDeleted) {
+      // Only an administrator may include soft-deleted users.
+    } else {
       where.deletedAt = null;
     }
 
@@ -91,55 +87,100 @@ export async function GET(request: NextRequest) {
       where.active = false;
     }
 
-    if (role) {
-      where.role = role;
-    }
-
-    if (classId) {
-      where.classEnrollments = {
-        some: { classId },
-      };
-    }
-
-    // A teacher only sees students enrolled in their own courses's classes
-    if (teacherId && auth.userId === teacherId && role === 'STUDENT') {
+    if (auth.role === 'TEACHER') {
+      if (role !== 'STUDENT' || (teacherId && teacherId !== auth.userId) || parentId) {
+        return NextResponse.json({ error: 'Accès réservé aux élèves de vos classes.' }, { status: 403 });
+      }
       const teacherClasses = await db.course.findMany({
-        where: { teacherId: auth.userId, deletedAt: null },
+        where: { schoolId, teacherId: auth.userId, deletedAt: null },
         select: { classId: true },
         distinct: ['classId'],
       });
       const tClassIds = teacherClasses.map((c) => c.classId);
-      if (tClassIds.length > 0) {
-        where.classEnrollments = { some: { classId: { in: tClassIds } } };
-      } else {
-        // Aucune classe assignée
-        where.id = 'none';
+      if (classId && !tClassIds.includes(classId)) {
+        return NextResponse.json({ error: 'Accès non autorisé à cette classe.' }, { status: 403 });
       }
+      where.role = 'STUDENT';
+      where.classEnrollments = { some: { classId: classId ? classId : { in: tClassIds } } };
+      if (tClassIds.length === 0) where.id = 'none';
+    } else if (auth.role === 'PARENT') {
+      if ((role && role !== 'STUDENT') || (parentId && parentId !== auth.userId) || teacherId) {
+        return NextResponse.json({ error: 'Accès non autorisé' }, { status: 403 });
+      }
+      where.role = 'STUDENT';
+      where.parentId = auth.userId;
+    } else if (auth.role === 'CAISSIER') {
+      if (role !== 'STUDENT' || parentId || teacherId) {
+        return NextResponse.json({ error: 'La caisse ne peut consulter que les élèves.' }, { status: 403 });
+      }
+      where.role = 'STUDENT';
+      if (classId) where.classEnrollments = { some: { classId } };
+    } else if (auth.role === 'STUDENT') {
+      if ((role && role !== 'STUDENT') || classId || parentId || teacherId) {
+        return NextResponse.json({ error: 'Accès limité à votre profil.' }, { status: 403 });
+      }
+      where.id = auth.userId;
+      where.role = 'STUDENT';
+    } else if (auth.role === 'ADMIN') {
+      if (role) where.role = role;
+      if (classId) where.classEnrollments = { some: { classId } };
+      if (parentId) where.parentId = parentId;
+    } else {
+      return NextResponse.json({ error: 'Accès non autorisé' }, { status: 403 });
     }
 
-    // Security: filter children by parentId so parents only see their own children
-    if (parentId) {
-      where.parentId = parentId;
-    }
+    if (auth.role !== 'ADMIN') where.active = true;
 
-    // Full-text search on fullName, email, matricule, parentCode
+    // Full-text search. Parent codes are deliberately searchable only by admins.
     if (search) {
       where.OR = [
         { fullName: { contains: search, mode: 'insensitive' } },
         { email: { contains: search, mode: 'insensitive' } },
         { matricule: { contains: search, mode: 'insensitive' } },
-        { parentCode: { contains: search, mode: 'insensitive' } },
+        ...(auth.role === 'ADMIN' ? [{ parentCode: { contains: search, mode: 'insensitive' } }] : []),
       ];
+    }
+
+    if (auth.role === 'ADMIN') {
+      const users = await db.user.findMany({
+        where,
+        omit: { password: true },
+        include: {
+          school: true,
+          classEnrollments: { include: { class: true } },
+          children: {
+            select: {
+              id: true,
+              fullName: true,
+              role: true,
+              parentCode: true,
+              photoUrl: true,
+              matricule: true,
+              active: true,
+            },
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+      return NextResponse.json({ users });
     }
 
     const users = await db.user.findMany({
       where,
-      include: {
-        school: true,
+      select: {
+        id: true,
+        schoolId: true,
+        fullName: true,
+        email: auth.role === 'PARENT' ? false : true,
+        role: true,
+        photoUrl: true,
+        matricule: true,
+        active: true,
+        ...(auth.role === 'PARENT' ? {} : { phone: true, gender: true, birthDate: true, isTitulaire: true }),
+        school: { select: { id: true, name: true, logoUrl: true, academicYear: true } },
         classEnrollments: {
-          include: { class: true },
+          select: { classId: true, class: { select: { id: true, name: true, level: true } } },
         },
-        children: true,
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -161,6 +202,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Accès non autorisé. Action réservée aux administrateurs.' }, { status: 403 });
     }
     const body = await request.json();
+    const userValidation = adminUserCreateSchema.safeParse({
+      ...body,
+      dateOfBirth: body?.dateOfBirth ?? body?.birthDate,
+    });
+    if (!userValidation.success) {
+      return NextResponse.json({ error: 'Informations utilisateur invalides.', details: userValidation.error.flatten().fieldErrors }, { status: 400 });
+    }
     const {
       schoolId,
       fullName,
@@ -199,13 +247,6 @@ export async function POST(request: NextRequest) {
       paymentAuthorized,
     } = body;
 
-    if (!schoolId || !fullName || !password || !role) {
-      return NextResponse.json(
-        { error: 'Missing required fields: schoolId, fullName, password, role' },
-        { status: 400 }
-      );
-    }
-
     // Admin uniquement, et admin de la même école
     if (auth.schoolId !== schoolId) {
       return NextResponse.json({ error: 'Accès non autorisé. Action réservée aux administrateurs.' }, { status: 403 });
@@ -231,12 +272,12 @@ export async function POST(request: NextRequest) {
     }
 
     const existing = await db.user.findFirst({
-      where: { schoolId, fullName, role },
+      where: { schoolId, OR: [{ email }, { fullName, role }] },
     });
 
     if (existing) {
       return NextResponse.json(
-        { error: `A user with name "${fullName}" and role "${role}" already exists in this school` },
+        { error: `Un compte avec cette adresse e-mail ou ce nom/rôle existe déjà dans cet établissement.` },
         { status: 409 }
       );
     }
@@ -253,7 +294,7 @@ export async function POST(request: NextRequest) {
     const g = genderVal.data;
 
     // dateOfBirth obligatoire pour STUDENT/TEACHER
-    let birthDateVal = birthDate || '';
+    let birthDateVal = body.dateOfBirth || birthDate || '';
     if (role === 'STUDENT' || role === 'TEACHER') {
       if (!birthDateVal) {
         return NextResponse.json(
@@ -278,6 +319,16 @@ export async function POST(request: NextRequest) {
       while (await db.user.findFirst({ where: { matricule: matriculeVal } })) {
         matriculeVal = `MAT-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
       }
+    }
+
+    if (role === 'STUDENT') {
+      const targetClass = await db.schoolClass.findFirst({ where: { id: classId, schoolId, deletedAt: null }, select: { id: true } });
+      if (!targetClass) return NextResponse.json({ error: 'Classe introuvable dans cet établissement.' }, { status: 400 });
+    }
+
+    if (parentId) {
+      const parent = await db.user.findFirst({ where: { id: parentId, schoolId, role: 'PARENT', deletedAt: null }, select: { id: true } });
+      if (!parent) return NextResponse.json({ error: 'Le parent sélectionné n’appartient pas à cet établissement.' }, { status: 400 });
     }
 
     // TEACHER : specialty + phone obligatoires
@@ -349,8 +400,8 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    if ((classId || className) && role === 'STUDENT') {
-      await syncStudentClassEnrollment(user.id, schoolId, classId, className);
+    if (classId && role === 'STUDENT') {
+      await db.enrolledClass.create({ data: { userId: user.id, classId } });
     }
 
     // Synchroniser le titulariat (SchoolClass.titulaireId)
@@ -376,6 +427,15 @@ export async function POST(request: NextRequest) {
           include: { class: true },
         },
       },
+    });
+
+    await auditFromRequest(request, {
+      schoolId,
+      userId: auth.userId,
+      action: 'USER_CREATE',
+      entity: 'User',
+      entityId: user.id,
+      after: { role, email: user.email, gender: user.gender, classId: classId || null },
     });
 
     return NextResponse.json({ user: userWithEnrollments }, { status: 201 });

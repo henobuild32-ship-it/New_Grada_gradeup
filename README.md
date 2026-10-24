@@ -308,3 +308,9 @@ Si un seul point fail, corrige.
 Fin Cahier V3 FINAL. Code maintenant. Pas d'excuse. Pas de démo. Pas de pourcentage fake. Bulletin parfait.
 
 # New_Grada_gradeup
+
+## Documentation et état des phases
+
+Les guides opérationnels et la matrice QA sont regroupés dans [`DOCUMENTATION.md`](DOCUMENTATION.md). Le déploiement et les variables sont détaillés dans [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) et [`docs/ENV.md`](docs/ENV.md). Les phases 4 à 10 sont partiellement raccordées; ne pas considérer le produit comme certifié production avant les parcours E2E, la QA mobile et la fermeture des écarts décrits dans [`docs/QA-FINAL.md`](docs/QA-FINAL.md).
+
+Contrôles locaux : `npx tsc --noEmit`, `npm run lint -- --quiet`, `npm run test:business`, puis `npm run build`. Les scripts de test RBAC nécessitent un serveur et une base isolée; ne pas exécuter le seed sur une base partagée ou distante.

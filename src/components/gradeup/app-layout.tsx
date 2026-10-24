@@ -15,6 +15,7 @@ import {
   ROLE_BADGE_COLORS,
   PAGE_TITLES,
   PAGE_HELP,
+  getNotificationPage,
 } from '@/lib/navigation.config';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
@@ -61,7 +62,6 @@ import {
   Sun,
   Moon,
   Lightbulb,
-  Check,
   LayoutGrid,
 } from 'lucide-react';
 
@@ -117,8 +117,9 @@ function SidebarContent({
                   <TooltipTrigger asChild>
                     <button
                       onClick={() => onNavigate(item.page)}
+                      aria-label={item.label}
                       className={`
-                        flex items-center justify-center w-9 h-9 rounded-lg transition-all duration-200 focus-visible:ring-2 focus-visible:ring-blue-500/30 focus-visible:ring-offset-2
+                        flex items-center justify-center w-11 h-11 rounded-lg transition-all duration-200 focus-visible:ring-2 focus-visible:ring-blue-500/30 focus-visible:ring-offset-2
                         ${isActive
                           ? 'bg-gradient-to-br from-sidebar-primary/20 to-sidebar-primary/10 text-sidebar-accent-foreground shadow-sm ring-1 ring-sidebar-primary/30'
                           : 'text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground hover:scale-105 hover:brightness-110'
@@ -145,7 +146,8 @@ function SidebarContent({
             <TooltipTrigger asChild>
               <button
                 onClick={onLogout}
-                className="flex items-center justify-center w-9 h-9 rounded-lg text-sidebar-foreground/70 hover:bg-red-500/10 hover:text-red-400 transition-all duration-200 hover:scale-105"
+                aria-label="Déconnexion"
+                className="flex items-center justify-center w-11 h-11 rounded-lg text-sidebar-foreground/70 hover:bg-red-500/10 hover:text-red-400 transition-all duration-200 hover:scale-105"
               >
                 <LogOut className="w-4 h-4" />
               </button>
@@ -169,14 +171,6 @@ function SidebarContent({
               {user.role === 'ADMIN' ? 'Administration' : ROLE_LABELS[user.role]}
             </span>
           </div>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="w-7 h-7 text-sidebar-foreground/40 hover:text-sidebar-foreground hover:bg-sidebar-accent/50 shrink-0 transition-all duration-200"
-            onClick={() => onNavigate('auth' as PageView)}
-          >
-            <ChevronDown className="w-4 h-4" />
-          </Button>
         </div>
         <div className="gradient-accent-line w-full" />
       </div>
@@ -193,7 +187,7 @@ function SidebarContent({
                 key={item.page}
                 onClick={() => onNavigate(item.page)}
                 className={`
-                  flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 focus-visible:ring-2 focus-visible:ring-blue-500/30 focus-visible:ring-offset-2
+                  flex min-h-11 items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 focus-visible:ring-2 focus-visible:ring-blue-500/30 focus-visible:ring-offset-2
                   ${isActive
                     ? 'bg-gradient-to-r from-sidebar-primary/20 to-sidebar-primary/10 text-sidebar-accent-foreground shadow-sm ring-1 ring-sidebar-primary/20'
                     : 'text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground hover:brightness-110'
@@ -237,7 +231,7 @@ function SidebarContent({
         <Button
           variant="ghost"
           size="sm"
-          className="w-full mt-2 text-sidebar-foreground/70 hover:text-red-400 hover:bg-red-500/10 justify-start gap-2 transition-all duration-200"
+          className="w-full min-h-11 mt-2 text-sidebar-foreground/70 hover:text-red-400 hover:bg-red-500/10 justify-start gap-2 transition-all duration-200"
           onClick={onLogout}
         >
           <LogOut className="w-4 h-4" />
@@ -467,8 +461,11 @@ export default function AppLayout({ children }: AppLayoutProps) {
       {/* Main Content Container - Flex column pour structure verticale */}
       <div className="flex-1 flex flex-col min-w-0 min-h-0">
         <header 
-          className="h-14 border-b bg-card/80 backdrop-blur-xl shrink-0 flex items-center justify-between px-4 lg:px-6 sticky top-0 z-30"
-          style={{ paddingTop: 'env(safe-area-inset-top)' }}
+          className="min-h-14 border-b bg-card/80 backdrop-blur-xl shrink-0 flex items-center justify-between px-4 lg:px-6 sticky top-0 z-30"
+          style={{
+            paddingTop: 'env(safe-area-inset-top)',
+            minHeight: 'calc(3.5rem + env(safe-area-inset-top))',
+          }}
         >
           {isMobile ? (
             <div className="flex items-center justify-between w-full relative h-full">
@@ -487,10 +484,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
                   size="icon"
                   aria-label={unreadNotificationsCount > 0 ? `Notifications (${unreadNotificationsCount} non lues)` : 'Notifications'}
                   className="relative h-11 w-11 hover:bg-blue-50 hover:text-blue-600 transition-all duration-200"
-                  onClick={() => {
-                    const notifPage = `${user.role.toLowerCase()}-notifications` as PageView;
-                    setCurrentPage(notifPage);
-                  }}
+                  onClick={() => handleNavigate(getNotificationPage(user.role))}
                 >
                   <Bell className="w-5 h-5" />
                   {unreadNotificationsCount > 0 && (
@@ -550,7 +544,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
                     <Button
                       variant="ghost"
                       size="icon"
-                      className="hidden md:flex hover:bg-blue-50 hover:text-blue-600 transition-colors"
+                      className="hidden md:flex min-h-11 min-w-11 hover:bg-blue-50 hover:text-blue-600 transition-colors"
                       onClick={() => setSidebarOpen(!sidebarOpen)}
                       aria-label={sidebarOpen ? 'Réduire le menu' : 'Ouvrir le menu'}
                     >
@@ -570,7 +564,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
                   {PAGE_HELP[currentPage] && (
                     <Tooltip>
                       <TooltipTrigger asChild>
-                        <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0 text-amber-500 hover:text-amber-600" aria-label="Aide de cet onglet">
+                        <Button variant="ghost" size="icon" className="h-11 w-11 shrink-0 text-amber-500 hover:text-amber-600" aria-label="Aide de cet onglet">
                           <Lightbulb className="h-4 w-4" />
                         </Button>
                       </TooltipTrigger>
@@ -590,11 +584,9 @@ export default function AppLayout({ children }: AppLayoutProps) {
                     <Button
                       variant="ghost"
                       size="icon"
-                      className="relative shrink-0 hover:bg-blue-50 hover:text-blue-600 transition-all duration-200 hover:brightness-110 active:scale-[0.97]"
-                      onClick={() => {
-                        const notifPage = `${user.role.toLowerCase()}-notifications` as PageView;
-                        setCurrentPage(notifPage);
-                      }}
+                      className="relative min-h-11 min-w-11 shrink-0 hover:bg-blue-50 hover:text-blue-600 transition-all duration-200 hover:brightness-110 active:scale-[0.97]"
+                      aria-label={unreadNotificationsCount > 0 ? `Notifications (${unreadNotificationsCount} non lues)` : 'Notifications'}
+                      onClick={() => handleNavigate(getNotificationPage(user.role))}
                     >
                       <Bell className="w-4 h-4" />
                       {/* Real-time notifications count badge */}
@@ -614,7 +606,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
                     <Button
                       variant="ghost"
                       size="icon"
-                      className="relative hover:bg-blue-50 dark:hover:bg-blue-950/50 hover:text-blue-600 transition-all duration-200 active:scale-[0.97]"
+                      className="relative min-h-11 min-w-11 hover:bg-blue-50 dark:hover:bg-blue-950/50 hover:text-blue-600 transition-all duration-200 active:scale-[0.97]"
                       onClick={() => handleNavigate('messages')}
                     >
                       <MessageSquare className="w-4 h-4" />
@@ -635,13 +627,13 @@ export default function AppLayout({ children }: AppLayoutProps) {
                       <Button
                         variant="ghost"
                         size="icon"
-                        className="hover:bg-blue-50 dark:hover:bg-blue-950/50 hover:text-blue-600 dark:hover:text-yellow-400 transition-all duration-200 active:scale-[0.97]"
+                        className="min-h-11 min-w-11 hover:bg-blue-50 dark:hover:bg-blue-950/50 hover:text-blue-600 dark:hover:text-yellow-400 transition-all duration-200 active:scale-[0.97]"
                         onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
                       >
                         {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
                       </Button>
                     ) : (
-                      <div className="w-8 h-8" />
+                      <div className="w-11 h-11" />
                     )}
                   </TooltipTrigger>
                   <TooltipContent>{theme === 'dark' ? 'Mode clair' : 'Mode sombre'}</TooltipContent>
@@ -650,7 +642,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
                 {/* User dropdown menu */}
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" className="flex items-center gap-2 h-8 px-2 rounded-full hover:bg-muted transition-all duration-200">
+                    <Button variant="ghost" className="flex min-h-11 items-center gap-2 px-2 rounded-full hover:bg-muted transition-all duration-200">
                       <Avatar className="h-7 w-7 ring-2 ring-blue-100 transition-all duration-200">
                         {user.photoUrl && <AvatarImage src={user.photoUrl} alt={user.fullName} />}
                         <AvatarFallback className="text-[10px] bg-primary text-primary-foreground">
@@ -677,33 +669,6 @@ export default function AppLayout({ children }: AppLayoutProps) {
                         </div>
                       </div>
                     </DropdownMenuLabel>
-                    
-                    {/* Interface Switcher */}
-                    <DropdownMenuSeparator />
-                    <DropdownMenuLabel className="text-xs font-medium text-muted-foreground px-1">
-                      Changer d'interface
-                    </DropdownMenuLabel>
-                    {Object.entries(ROLE_LABELS).map(([roleKey, roleLabel]) => {
-                      const role = roleKey as UserRole;
-                      const isCurrent = user.role === role;
-                      const defaultPage = getNavItems(role)?.[0]?.page;
-                      return (
-                        <DropdownMenuItem
-                          key={roleKey}
-                          onClick={() => defaultPage && handleNavigate(defaultPage)}
-                          className={`cursor-pointer flex items-center gap-2 ${isCurrent ? 'bg-primary/10 text-primary' : ''}`}
-                          disabled={isCurrent}
-                        >
-                          {isCurrent && <Check className="w-3.5 h-3.5 text-primary shrink-0" />}
-                          <span className="capitalize text-sm">{roleLabel.toLowerCase()}</span>
-                          {!isCurrent && defaultPage && (
-                            <span className="text-[10px] text-muted-foreground ml-auto font-mono">
-                              → {defaultPage}
-                            </span>
-                          )}
-                        </DropdownMenuItem>
-                      );
-                    })}
                     
                     <DropdownMenuSeparator />
                     <DropdownMenuItem onClick={() => handleNavigate('profile')} className="cursor-pointer">
@@ -832,7 +797,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
                 key={tab.page}
                 onClick={() => handleNavigate(tab.page)}
                 aria-current={isActive ? 'page' : undefined}
-                className={`flex flex-col items-center justify-center flex-1 py-2 px-1 min-h-[3.5rem] gap-0.5 transition-all duration-200 touch-manipulation select-none active:opacity-70 ${
+                className={`relative flex flex-col items-center justify-center flex-1 py-2 px-1 min-h-[3.5rem] gap-0.5 transition-all duration-200 touch-manipulation select-none active:opacity-70 ${
                   isActive ? 'text-blue-600 dark:text-blue-400' : 'text-muted-foreground'
                 }`}
               >

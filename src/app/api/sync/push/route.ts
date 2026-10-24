@@ -76,7 +76,24 @@ export async function POST(request: NextRequest) {
     const results: Array<{ clientMutationId: string; ok: boolean; status: number; id?: string; error?: string }> = [];
 
     for (const mutation of mutations) {
+      if (!mutation || typeof mutation !== 'object') {
+        results.push({ clientMutationId: '', ok: false, status: 400, error: 'Mutation invalide' });
+        continue;
+      }
+
       const { clientMutationId, entity, operation, endpoint, method } = mutation;
+      if (
+        typeof clientMutationId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(clientMutationId) ||
+        typeof entity !== 'string' || !entity ||
+        !['create', 'update', 'delete'].includes(operation) ||
+        !['POST', 'PUT', 'DELETE'].includes(method) ||
+        typeof endpoint !== 'string' ||
+        typeof mutation.schoolId !== 'string' || mutation.schoolId !== auth.schoolId ||
+        !mutation.payload || typeof mutation.payload !== 'object' || Array.isArray(mutation.payload)
+      ) {
+        results.push({ clientMutationId: typeof clientMutationId === 'string' ? clientMutationId : '', ok: false, status: 400, error: 'Mutation invalide ou établissement non autorisé' });
+        continue;
+      }
 
       // 1) Idempotence : si déjà traité, renvoyer le résultat enregistré.
       const previous = await db.syncOperation.findUnique({ where: { operationId: clientMutationId } });
@@ -107,14 +124,15 @@ export async function POST(request: NextRequest) {
       }
 
       // 3) Allowlist endpoint + méthode.
-      let pathname: string;
+      let target: URL;
       try {
-        pathname = new URL(endpoint, request.url).pathname;
+        target = new URL(endpoint, request.url);
       } catch {
         results.push({ clientMutationId, ok: false, status: 400, error: 'Endpoint invalide' });
         continue;
       }
-      if (!isAllowed(pathname, method)) {
+      const pathname = target.pathname;
+      if (target.origin !== request.nextUrl.origin || !isAllowed(pathname, method)) {
         results.push({ clientMutationId, ok: false, status: 400, error: `Opération offline non autorisée (${method} ${pathname})` });
         continue;
       }
@@ -126,7 +144,6 @@ export async function POST(request: NextRequest) {
         headers.set('content-type', 'application/json');
         headers.set('x-idempotency-key', clientMutationId);
 
-        const target = new URL(endpoint, request.url);
         const response = await fetch(target, {
           method,
           headers,

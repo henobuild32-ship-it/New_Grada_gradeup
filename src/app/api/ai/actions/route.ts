@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { notifyUser } from '@/services/notifications/notificationEngine';
-import { authenticateRequest, AuthError } from '@/lib/auth/authenticate';
+import { authenticateRequestActive, AuthError } from '@/lib/auth/authenticate';
+import { rateLimit, rateLimitResponse } from '@/lib/api/rate-limit';
+import { auditFromRequest } from '@/lib/api/audit';
+import { detectScheduleConflicts } from '@/lib/business/rules';
 
 export const runtime = 'nodejs';
 
@@ -9,8 +12,10 @@ export const runtime = 'nodejs';
 // Body: { action: string, params: object, userId: string, schoolId: string }
 export async function POST(request: NextRequest) {
   try {
-    const auth = authenticateRequest(request);
+    const auth = await authenticateRequestActive(request);
     if (auth.role !== 'ADMIN') return NextResponse.json({ error: 'Actions IA réservées à l’administration.' }, { status: 403 });
+    const rate = rateLimit(`ai-action:${auth.userId}`, 20, 60_000);
+    if (!rate.ok) return NextResponse.json(rateLimitResponse(rate.retryAfterSeconds), { status: 429, headers: { 'Retry-After': String(rate.retryAfterSeconds) } });
     const { action, params } = await request.json();
     const userId = auth.userId;
     const schoolId = auth.schoolId;
@@ -88,6 +93,14 @@ export async function POST(request: NextRequest) {
           return NextResponse.json({ error: 'Classe non trouvée' }, { status: 404 });
         }
 
+        const [enrollmentCount, courseCount] = await Promise.all([
+          db.enrolledClass.count({ where: { classId } }),
+          db.course.count({ where: { classId, deletedAt: null } }),
+        ]);
+        if (enrollmentCount || courseCount) {
+          return NextResponse.json({ error: 'Cette classe contient des élèves ou des cours. Supprimez ou transférez-les depuis l’écran Classes.' }, { status: 409 });
+        }
+
         await db.schoolClass.delete({ where: { id: classId } });
         result = { deleted: { id: cls.id, name: cls.name } };
         break;
@@ -140,11 +153,18 @@ export async function POST(request: NextRequest) {
           return NextResponse.json({ error: 'Cours introuvable' }, { status: 404 });
         }
 
+        const day = Number(dayOfWeek);
+        if (!Number.isInteger(day) || day < 1 || day > 7 || startTime >= endTime) {
+          return NextResponse.json({ error: 'Jour ou plage horaire invalide.' }, { status: 400 });
+        }
+        const conflicts = await detectScheduleConflicts(schoolId, { courseId, dayOfWeek: day, startTime, endTime, room: room || '' });
+        if (conflicts.length) return NextResponse.json({ error: 'Conflit d’horaire détecté.', conflicts }, { status: 409 });
+
         const schedule = await db.courseSchedule.create({
           data: {
             courseId,
             schoolId,
-            dayOfWeek: parseInt(String(dayOfWeek)),
+            dayOfWeek: day,
             startTime,
             endTime,
             room: room || '',
@@ -184,11 +204,21 @@ export async function POST(request: NextRequest) {
               errors.push({ slot: `${slot.courseId}@${slot.dayOfWeek}`, error: 'Cours introuvable' });
               continue;
             }
+            const day = Number(slot.dayOfWeek);
+            if (!Number.isInteger(day) || day < 1 || day > 7 || !slot.startTime || !slot.endTime || slot.startTime >= slot.endTime) {
+              errors.push({ slot: `${slot.courseId}@${slot.dayOfWeek}`, error: 'Jour ou plage horaire invalide.' });
+              continue;
+            }
+            const conflicts = await detectScheduleConflicts(schoolId, { courseId: slot.courseId, dayOfWeek: day, startTime: slot.startTime, endTime: slot.endTime, room: slot.room || '' });
+            if (conflicts.length) {
+              errors.push({ slot: `${slot.courseId}@${slot.dayOfWeek}`, error: 'Conflit d’horaire.' });
+              continue;
+            }
             const s = await db.courseSchedule.create({
               data: {
                 courseId: slot.courseId,
                 schoolId,
-                dayOfWeek: parseInt(String(slot.dayOfWeek)),
+                dayOfWeek: day,
                 startTime: slot.startTime,
                 endTime: slot.endTime,
                 room: slot.room || '',
@@ -219,7 +249,9 @@ export async function POST(request: NextRequest) {
         if (!scheduleId) {
           return NextResponse.json({ error: 'scheduleId requis' }, { status: 400 });
         }
-        await db.courseSchedule.delete({ where: { id: scheduleId } });
+        const existing = await db.courseSchedule.findFirst({ where: { id: scheduleId, schoolId, deletedAt: null }, select: { id: true } });
+        if (!existing) return NextResponse.json({ error: 'Créneau introuvable dans votre établissement.' }, { status: 404 });
+        await db.courseSchedule.delete({ where: { id: existing.id } });
         result = { deleted: scheduleId };
         break;
       }
@@ -232,13 +264,24 @@ export async function POST(request: NextRequest) {
         if (!scheduleId) {
           return NextResponse.json({ error: 'scheduleId requis' }, { status: 400 });
         }
+        const existing = await db.courseSchedule.findFirst({ where: { id: scheduleId, schoolId, deletedAt: null } });
+        if (!existing) return NextResponse.json({ error: 'Créneau introuvable dans votre établissement.' }, { status: 404 });
+        const nextDay = dayOfWeek === undefined ? existing.dayOfWeek : Number(dayOfWeek);
+        const nextStart = startTime ?? existing.startTime;
+        const nextEnd = endTime ?? existing.endTime;
+        const nextRoom = room ?? existing.room;
+        if (!Number.isInteger(nextDay) || nextDay < 1 || nextDay > 7 || nextStart >= nextEnd) {
+          return NextResponse.json({ error: 'Jour ou plage horaire invalide.' }, { status: 400 });
+        }
+        const conflicts = await detectScheduleConflicts(schoolId, { courseId: existing.courseId, dayOfWeek: nextDay, startTime: nextStart, endTime: nextEnd, room: nextRoom || '' }, scheduleId);
+        if (conflicts.length) return NextResponse.json({ error: 'Conflit d’horaire détecté.', conflicts }, { status: 409 });
         const schedule = await db.courseSchedule.update({
-          where: { id: scheduleId },
+          where: { id: existing.id },
           data: {
             ...(startTime !== undefined && { startTime }),
             ...(endTime !== undefined && { endTime }),
             ...(room !== undefined && { room }),
-            ...(dayOfWeek !== undefined && { dayOfWeek: parseInt(String(dayOfWeek)) }),
+            ...(dayOfWeek !== undefined && { dayOfWeek: nextDay }),
           },
           include: {
             course: {
@@ -257,6 +300,14 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: `Action inconnue: ${action}` }, { status: 400 });
     }
 
+    await auditFromRequest(request, {
+      schoolId,
+      userId,
+      action: 'AI_ACTION',
+      entity: 'AIAction',
+      entityId: action,
+      after: { action },
+    });
     return NextResponse.json({ success: true, result });
   } catch (error) {
     if (error instanceof AuthError) return NextResponse.json({ error: error.message }, { status: error.status });

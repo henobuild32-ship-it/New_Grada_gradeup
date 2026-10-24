@@ -190,7 +190,7 @@ export default function AdminSchedules() {
           title: `📅 Emploi du temps officiel publié — ${className}`,
           message: `L'emploi du temps de la classe ${className} est disponible. Enseignants, élèves et parents peuvent consulter les horaires mis à jour.`,
           type: 'SCHEDULE_UPDATED',
-          targetRole: 'ALL',
+          targetRole: 'CLASS',
           targetClassId: selectedClassId,
         }),
       });
@@ -494,6 +494,34 @@ export default function AdminSchedules() {
     finally { setSavingSlot(false); }
   };
 
+  const moveSlotTo = async (slotId: string, dayOfWeek: number, startTime: string, endTime: string) => {
+    const slot = schedules.find((item) => item.id === slotId);
+    if (!slot || !user?.schoolId) return;
+    if (isOffline) { toast.error('Le déplacement d’un horaire requiert une connexion.'); return; }
+    if (slot.dayOfWeek === dayOfWeek && slot.startTime === startTime && slot.endTime === endTime) return;
+    setSavingSlot(true);
+    try {
+      const response = await fetch('/api/schedules', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: slot.id, dayOfWeek, startTime, endTime }),
+      });
+      const data = await response.json();
+      if (response.status === 409) {
+        setConflictsList(Array.isArray(data.conflicts) ? data.conflicts : [data.error || 'Conflit détecté']);
+        setShowConflictDialog(true);
+        return;
+      }
+      if (!response.ok) throw new Error(data.error || 'Déplacement impossible.');
+      toast.success('Créneau déplacé.');
+      await fetchSchedulesAndCoursesOfClass();
+    } catch (cause) {
+      toast.error(cause instanceof Error ? cause.message : 'Déplacement impossible.');
+    } finally {
+      setSavingSlot(false);
+    }
+  };
+
   const handleDeleteSlot = async (slotId: string) => {
     if (!confirm('Retirer ce cours de la grille ?')) return;
     try {
@@ -671,6 +699,7 @@ export default function AdminSchedules() {
       {/* MOBILE DAY VIEW (< md): Vertical cards with day switcher       */}
       {/* ============================================================== */}
       <div className="block md:hidden space-y-3">
+        <p className="text-xs text-muted-foreground">Sur téléphone, ouvrez « Modifier » pour déplacer un cours. Le déplacement direct se fait dans la grille sur ordinateur; le serveur vérifie toujours les conflits.</p>
         {/* Day switcher pills */}
         <div className="grid grid-cols-6 gap-1 bg-muted/40 p-1.5 rounded-xl border">
           {DAYS.map((d) => (
@@ -782,6 +811,7 @@ export default function AdminSchedules() {
       {/* ============================================================== */}
       <Card className="hidden md:block shadow-lg border-2 border-blue-50/50">
         <CardContent className="p-4 overflow-x-auto">
+          <p className="mb-3 text-xs text-muted-foreground">Glissez un cours vers un créneau vide. Les conflits de professeur, de classe et de salle sont revérifiés avant l’enregistrement.</p>
           {loadingGrid ? (
             <div className="space-y-4 py-12 text-center">
               <RefreshCw className="w-8 h-8 text-blue-600 animate-spin mx-auto" />
@@ -865,9 +895,24 @@ export default function AdminSchedules() {
                           <div
                             key={day.value}
                             className="p-1.5 border-r last:border-0 flex flex-col justify-center group relative min-h-[88px] hover:bg-blue-50/10 transition-colors"
+                            onDragOver={(event) => { if (!cell && !isOffline && !ts.isBreak) event.preventDefault(); }}
+                            onDrop={(event) => {
+                              if (cell || isOffline || ts.isBreak) return;
+                              event.preventDefault();
+                              const slotId = event.dataTransfer.getData('application/x-gradeup-schedule-id') || event.dataTransfer.getData('text/plain');
+                              if (slotId) void moveSlotTo(slotId, day.value, ts.start, ts.end);
+                            }}
                           >
                             {cell ? (
-                              <div className="bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-950/30 dark:to-indigo-950/30 border-2 border-blue-200 dark:border-blue-900 rounded-xl p-2 shadow-sm h-full flex flex-col justify-between">
+                              <div
+                                draggable={!isOffline}
+                                onDragStart={(event) => {
+                                  event.dataTransfer.setData('application/x-gradeup-schedule-id', cell.id);
+                                  event.dataTransfer.setData('text/plain', cell.id);
+                                  event.dataTransfer.effectAllowed = 'move';
+                                }}
+                                className="bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-950/30 dark:to-indigo-950/30 border-2 border-blue-200 dark:border-blue-900 rounded-xl p-2 shadow-sm h-full flex flex-col justify-between cursor-grab active:cursor-grabbing"
+                              >
                                 <div>
                                   <p className="text-xs font-bold text-blue-800 dark:text-blue-400 line-clamp-2 leading-tight">
                                     {cell.course.name}

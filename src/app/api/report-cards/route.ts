@@ -3,6 +3,8 @@ import { db } from '@/lib/db';
 import { authenticateRequest, AuthError } from '@/lib/auth/authenticate';
 import { syncStudentReport } from '@/lib/grade-sync';
 
+const REPORT_CARD_STATUSES = ['auto_draft', 'draft', 'pending_admin', 'validated', 'published'] as const;
+
 export async function GET(request: NextRequest) {
   try {
     const auth = authenticateRequest(request);
@@ -16,20 +18,28 @@ export async function GET(request: NextRequest) {
     if (!schoolId || schoolId !== auth.schoolId) {
       return NextResponse.json({ error: 'schoolId invalide' }, { status: 400 });
     }
+    if (!['ADMIN', 'TEACHER', 'STUDENT', 'PARENT'].includes(auth.role)) {
+      return NextResponse.json({ error: 'Accès non autorisé.' }, { status: 403 });
+    }
+    if (status && !REPORT_CARD_STATUSES.includes(status as (typeof REPORT_CARD_STATUSES)[number])) {
+      return NextResponse.json({ error: 'Statut de bulletin invalide.' }, { status: 400 });
+    }
 
-    const where: Record<string, unknown> = { schoolId };
+    const where: Record<string, unknown> = { schoolId, deletedAt: null };
     if (classId) where.classId = classId;
     if (status) where.status = status;
     if (studentId) where.studentId = studentId;
 
     if (auth.role === 'STUDENT') {
       where.studentId = auth.userId;
+      where.status = 'published';
     } else if (auth.role === 'PARENT') {
       const children = await db.user.findMany({
-        where: { schoolId, parentId: auth.userId },
+        where: { schoolId, parentId: auth.userId, role: 'STUDENT', deletedAt: null },
         select: { id: true },
       });
       where.studentId = { in: children.map((child) => child.id) };
+      where.status = 'published';
     } else if (auth.role === 'TEACHER') {
       const courses = await db.course.findMany({
         where: { schoolId, teacherId: auth.userId, deletedAt: null },
@@ -37,7 +47,10 @@ export async function GET(request: NextRequest) {
         distinct: ['classId'],
       });
       const classIds = courses.map((course) => course.classId);
-      where.classId = classId && classIds.includes(classId) ? classId : { in: classIds };
+      if (classId && !classIds.includes(classId)) {
+        return NextResponse.json({ error: 'Cette classe ne vous est pas attribuée.' }, { status: 403 });
+      }
+      where.classId = classId || { in: classIds };
     }
 
     const reportCards = await db.reportCard.findMany({
@@ -102,41 +115,52 @@ export async function PUT(request: NextRequest) {
   try {
     const auth = authenticateRequest(request);
     const body = await request.json();
-    const { id, status, teacherId, ...data } = body;
+    const { id, status } = body ?? {};
 
-    if (!id) {
-      return NextResponse.json({ error: 'id is required' }, { status: 400 });
+    if (typeof id !== 'string' || !id.trim() || typeof status !== 'string') {
+      return NextResponse.json({ error: 'id et status sont requis.' }, { status: 400 });
+    }
+    if (Object.keys(body).some((key) => !['id', 'status', 'teacherId'].includes(key))) {
+      return NextResponse.json({ error: 'Seul le statut du bulletin peut être modifié par cette route.' }, { status: 400 });
     }
 
-    const existing = await db.reportCard.findUnique({ where: { id } });
-    if (!existing || existing.schoolId !== auth.schoolId) {
+    const existing = await db.reportCard.findUnique({ where: { id }, select: { id: true, schoolId: true, classId: true, studentId: true, trimester: true, status: true, deletedAt: true } });
+    if (!existing || existing.schoolId !== auth.schoolId || existing.deletedAt) {
       return NextResponse.json({ error: 'Bulletin introuvable dans cet établissement.' }, { status: 404 });
     }
-    if (auth.role === 'STUDENT' || auth.role === 'PARENT') {
+
+    if (auth.role === 'TEACHER') {
+      const klass = await db.schoolClass.findFirst({
+        where: { id: existing.classId, schoolId: auth.schoolId, deletedAt: null },
+        select: { titulaireId: true },
+      });
+      if (klass?.titulaireId !== auth.userId || status !== 'pending_admin') {
+        return NextResponse.json({ error: 'Seul le titulaire peut transmettre le bulletin de sa classe.' }, { status: 403 });
+      }
+      if (!['draft', 'auto_draft'].includes(existing.status)) {
+        return NextResponse.json({ error: 'Ce bulletin a déjà été transmis ou traité.' }, { status: 409 });
+      }
+    } else if (auth.role === 'ADMIN') {
+      const allowedTransition =
+        (existing.status === 'pending_admin' && status === 'validated') ||
+        (existing.status === 'validated' && status === 'published');
+      if (!allowedTransition) {
+        return NextResponse.json({ error: 'Transition interdite : le bulletin doit être transmis, validé, puis publié.' }, { status: 409 });
+      }
+    } else {
       return NextResponse.json({ error: 'Accès non autorisé.' }, { status: 403 });
     }
-    if (auth.role === 'TEACHER') {
-      const course = await db.course.findFirst({
-        where: { schoolId: auth.schoolId, classId: existing.classId, teacherId: auth.userId, deletedAt: null },
-        select: { id: true },
-      });
-      if (!course || status !== 'pending_admin') {
-        return NextResponse.json({ error: 'Un professeur peut uniquement transmettre le bulletin de ses classes.' }, { status: 403 });
-      }
-    }
-    if (auth.role === 'ADMIN' && status !== undefined && !['pending_admin', 'validated', 'published'].includes(status)) {
-      return NextResponse.json({ error: 'Statut de bulletin invalide.' }, { status: 400 });
-    }
 
-    const updateData: Record<string, unknown> = auth.role === 'ADMIN' ? { ...data } : {};
-    if (status) updateData.status = status;
-
-    const reportCard = await db.reportCard.update({
-      where: { id },
-      data: updateData,
+    const changed = await db.reportCard.updateMany({
+      where: { id, schoolId: auth.schoolId, status: existing.status, deletedAt: null },
+      data: { status },
     });
+    if (changed.count !== 1) {
+      return NextResponse.json({ error: 'Le bulletin a changé entre-temps. Rechargez la page.' }, { status: 409 });
+    }
+    const reportCard = await db.reportCard.findUnique({ where: { id } });
 
-    if (status === 'pending_admin' && teacherId) {
+    if (status === 'pending_admin') {
       const report = await db.reportCard.findUnique({
         where: { id },
         select: { schoolId: true, student: { select: { id: true, fullName: true } } },
@@ -151,7 +175,7 @@ export async function PUT(request: NextRequest) {
             message: `Un bulletin pour ${report.student.fullName} a été créé et transmis pour validation.`,
             type: 'REPORT_CARD',
             priority: 'HIGH',
-            senderId: teacherId,
+            senderId: auth.userId,
             metadata: { reportCardId: id },
           });
         } catch { /* non-blocking */ }

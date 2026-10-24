@@ -23,18 +23,22 @@ const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444'];
 
 interface ChartsWidgetProps {
   schoolId: string;
+  currency?: string;
 }
 
-export function MonthlyRevenueChart({ schoolId }: ChartsWidgetProps) {
+export function MonthlyRevenueChart({ schoolId, currency = 'USD' }: ChartsWidgetProps) {
   const [data, setData] = useState<{ month: string; revenue: number }[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
   useEffect(() => {
     const fetchRevenue = async () => {
+      setError('');
       try {
         const res = await fetch(`/api/payments?schoolId=${schoolId}&status=paid`);
+        if (!res.ok) throw new Error('Impossible de charger les paiements.');
         const json = await res.json();
-        const payments: { month: string; amount: number }[] = Array.isArray(json.payments) ? json.payments : [];
+        const payments: { amount: number; currency?: string; createdAt: string }[] = Array.isArray(json.payments) ? json.payments : [];
 
         const monthMap: Record<string, number> = {};
         const monthNames = [
@@ -42,50 +46,34 @@ export function MonthlyRevenueChart({ schoolId }: ChartsWidgetProps) {
           'Juil', 'Aoû', 'Sep', 'Oct', 'Nov', 'Déc',
         ];
 
-        payments.forEach((p) => {
-          const dt = new Date(p.month);
-          const key = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}`;
-          monthMap[key] = (monthMap[key] || 0) + parseFloat(String(p.amount));
+        const currentMonth = new Date();
+        const monthsToShow = Array.from({ length: 6 }, (_, index) => {
+          const date = new Date(currentMonth.getFullYear(), currentMonth.getMonth() - (5 - index), 1);
+          const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+          return { key, label: `${monthNames[date.getMonth()]} ${String(date.getFullYear()).slice(-2)}` };
         });
-
-        const sorted = Object.entries(monthMap)
-          .sort(([a], [b]) => a.localeCompare(b))
-          .slice(-6)
-          .map(([key, revenue]) => {
-            const [y, m] = key.split('-');
-            return { month: monthNames[parseInt(m) - 1], revenue };
-          });
-
-        setData(sorted.length > 0 ? sorted : [
-          { month: 'Jan', revenue: 0 },
-          { month: 'Fév', revenue: 0 },
-          { month: 'Mar', revenue: 0 },
-          { month: 'Avr', revenue: 0 },
-          { month: 'Mai', revenue: 0 },
-          { month: 'Jun', revenue: 0 },
-        ]);
-      } catch {
-        setData([
-          { month: 'Jan', revenue: 0 },
-          { month: 'Fév', revenue: 0 },
-          { month: 'Mar', revenue: 0 },
-          { month: 'Avr', revenue: 0 },
-          { month: 'Mai', revenue: 0 },
-          { month: 'Jun', revenue: 0 },
-        ]);
+        payments.filter((payment) => (payment.currency || 'USD') === currency).forEach((payment) => {
+          const dt = new Date(payment.createdAt);
+          if (!Number.isFinite(dt.getTime())) return;
+          const key = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}`;
+          monthMap[key] = (monthMap[key] || 0) + Number(payment.amount || 0);
+        });
+        setData(monthsToShow.map(({ key, label }) => ({ month: label, revenue: monthMap[key] || 0 })));
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : 'Erreur réseau lors du chargement des paiements.');
       } finally {
         setLoading(false);
       }
     };
 
     fetchRevenue();
-  }, [schoolId]);
+  }, [schoolId, currency]);
 
   if (loading) {
     return (
       <Card className="transition-all duration-300 hover:shadow-lg hover:-translate-y-0.5">
         <CardHeader className="pb-3">
-          <CardTitle className="text-lg">Revenus mensuels</CardTitle>
+          <CardTitle className="text-lg">Revenus mensuels · {currency}</CardTitle>
         </CardHeader>
         <CardContent>
           <Skeleton className="h-64 w-full rounded-lg" />
@@ -95,11 +83,12 @@ export function MonthlyRevenueChart({ schoolId }: ChartsWidgetProps) {
   }
 
   return (
-    <Card className="transition-all duration-300 hover:shadow-lg hover:-translate-y-0.5">
+      <Card className="transition-all duration-300 hover:shadow-lg hover:-translate-y-0.5">
       <CardHeader className="pb-3">
-        <CardTitle className="text-lg">Revenus mensuels</CardTitle>
+        <CardTitle className="text-lg">Revenus mensuels · {currency}</CardTitle>
       </CardHeader>
       <CardContent>
+        {error ? <p role="alert" className="py-16 text-center text-sm text-destructive">{error}</p> : data.every((item) => item.revenue === 0) ? <p className="py-16 text-center text-sm text-muted-foreground">Aucun paiement confirmé en {currency} sur les six derniers mois.</p> :
         <ResponsiveContainer width="100%" height={260}>
           <BarChart data={data} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
             <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
@@ -119,11 +108,12 @@ export function MonthlyRevenueChart({ schoolId }: ChartsWidgetProps) {
                 borderRadius: '8px',
                 fontSize: '13px',
               }}
-              formatter={(value: number) => [`${value.toLocaleString()} USD`, 'Revenus']}
+              formatter={(value: number) => [`${value.toLocaleString('fr-FR')} ${currency}`, 'Revenus']}
             />
             <Bar dataKey="revenue" fill="#3b82f6" radius={[6, 6, 0, 0]} />
           </BarChart>
         </ResponsiveContainer>
+        }
       </CardContent>
     </Card>
   );

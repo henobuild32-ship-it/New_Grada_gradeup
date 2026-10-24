@@ -1,7 +1,7 @@
 'use client';
 
 import { useLiveQuery } from 'dexie-react-hooks';
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { getLocalDB, type EntityName } from './db';
 import type { LocalRecord } from './types';
 import { readLocal, refreshRemote, mutateLocalFirst, type MutationOptions } from './repository';
@@ -17,23 +17,37 @@ import { readLocal, refreshRemote, mutateLocalFirst, type MutationOptions } from
 export interface UseEntityOptions {
   /** URL GET pour rafraîchir en arrière-plan (stale-while-revalidate). */
   remoteUrl?: string;
+  /** Extrait la liste lorsque l'API l'enveloppe sous une clé métier. */
+  extract?: (data: unknown) => Record<string, unknown>[];
   /** Filtre local (par ex. non supprimé, par élève…). */
   filter?: (rec: LocalRecord) => boolean;
   /** Désactive le rafraîchissement automatique (lecture pure locale). */
   skipRefresh?: boolean;
 }
 
+export interface UseEntityListState<T extends LocalRecord> {
+  data: T[];
+  /** Chargement initial local/réseau; un cache existant reste affiché pendant le refresh. */
+  loading: boolean;
+  refreshing: boolean;
+  error: string | null;
+  refresh: () => Promise<void>;
+}
+
 /**
  * Liste live d'une entité pour une école. Retourne [] tant que la DB n'est
  * pas prête (SSR-safe). Rafraîchit en arrière-plan si `remoteUrl` fourni.
  */
-export function useEntityList<T extends LocalRecord = LocalRecord>(
+export function useEntityListState<T extends LocalRecord = LocalRecord>(
   entity: EntityName,
   schoolId: string | undefined | null,
   options: UseEntityOptions = {}
-): T[] {
-  const { remoteUrl, filter, skipRefresh } = options;
-  const filterKey = filter ? filter.toString() : '';
+): UseEntityListState<T> {
+  const { remoteUrl, extract, filter, skipRefresh } = options;
+  const extractRef = useRef(extract);
+  extractRef.current = extract;
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   // Live query : se ré-exécute à chaque écriture dans la table.
   const rows = useLiveQuery(
@@ -41,26 +55,76 @@ export function useEntityList<T extends LocalRecord = LocalRecord>(
       if (!schoolId) return [] as T[];
       return readLocal<T>(entity, schoolId, filter as ((r: T) => boolean) | undefined);
     },
-    [entity, schoolId, filterKey],
-    [] as T[]
-  ) as T[];
+    [entity, schoolId, filter],
+  ) as T[] | undefined;
 
   // Stale-while-revalidate : rafraîchir en arrière-plan une fois au mount.
-  const refresh = useCallback(() => {
+  const refresh = useCallback(async () => {
     if (!schoolId || !remoteUrl || skipRefresh) return;
     if (typeof navigator !== 'undefined' && !navigator.onLine) return;
-    void refreshRemote(entity, remoteUrl, schoolId);
+    setRefreshing(true);
+    setError(null);
+    try {
+      const result = await refreshRemote<T>(entity, remoteUrl, schoolId, extractRef.current);
+      if (result === null && (typeof navigator === 'undefined' || navigator.onLine)) {
+        setError('La synchronisation a échoué. Les dernières données enregistrées restent disponibles.');
+      }
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Impossible de synchroniser ces données.');
+    } finally {
+      setRefreshing(false);
+    }
   }, [entity, schoolId, remoteUrl, skipRefresh]);
 
-  const called = useRef(false);
+  const lastRefreshKey = useRef<string | null>(null);
+  const data = rows ?? [];
   useEffect(() => {
-    if (!called.current) {
-      called.current = true;
-      refresh();
-    }
-  }, [refresh]);
+    if (!schoolId || !remoteUrl || skipRefresh) return;
+    const key = `${entity}:${schoolId}:${remoteUrl}`;
+    const handleOnline = () => { void refresh(); };
+    const handleOffline = () => {
+      if (data.length === 0) {
+        setError('Aucune copie locale disponible. Reconnectez-vous pour charger ces données.');
+      } else {
+        setError(null);
+      }
+    };
 
-  return rows ?? [];
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    if (navigator.onLine) {
+      if (lastRefreshKey.current !== key) {
+        lastRefreshKey.current = key;
+        void refresh();
+      }
+    } else {
+      handleOffline();
+    }
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, [data.length, entity, refresh, remoteUrl, schoolId, skipRefresh]);
+
+  return {
+    data,
+    loading: rows === undefined || (refreshing && data.length === 0),
+    refreshing,
+    error,
+    refresh,
+  };
+}
+
+/**
+ * Liste live d'une entité pour une école. Conserve l'API historique du hook;
+ * les pages ayant besoin d'états de chargement/erreur utilisent useEntityListState.
+ */
+export function useEntityList<T extends LocalRecord = LocalRecord>(
+  entity: EntityName,
+  schoolId: string | undefined | null,
+  options: UseEntityOptions = {}
+): T[] {
+  return useEntityListState<T>(entity, schoolId, options).data;
 }
 
 /**

@@ -155,6 +155,7 @@ async function main() {
   await expectStatus('B6 PARENT → POST /api/events', ['POST', '/api/events', cookies.parent, {}], 403);
   await expectStatus('B7 STUDENT → POST /api/fees', ['POST', '/api/fees', cookies.student, {}], 403);
   await expectStatus('B8 PARENT → POST /api/users', ['POST', '/api/users', cookies.parent, {}], 403);
+  await expectStatus('B10 TEACHER → GET /api/payments', ['GET', '/api/payments', cookies.teacher], 403);
   const b9 = await expectStatus('B9 TEACHER → POST /api/periods (rôle OK, corps invalide)', [
     'POST',
     '/api/periods',
@@ -165,6 +166,117 @@ async function main() {
 
   // ── C. Ownership ────────────────────────────────────────────────────────
   console.log('\nC. Périmètre de données (ownership)');
+  await expectStatus('C0 STUDENT ne consulte pas l’emploi du temps d’une autre classe', [
+    'GET',
+    '/api/schedules?schoolId=sch_demo_gradeup&classId=cls_demo_7b',
+    cookies.student,
+  ], 403);
+  await expectStatus('C0b PARENT ne consulte pas une classe sans enfant inscrit', [
+    'GET',
+    '/api/schedules?schoolId=sch_demo_gradeup&classId=cls_hors_perimetre',
+    cookies.parent,
+  ], 403);
+  const c0c = await expectStatus('C0c STUDENT consulte l’emploi du temps de sa classe', [
+    'GET',
+    '/api/schedules?schoolId=sch_demo_gradeup&classId=cls_demo_6a',
+    cookies.student,
+  ], 200);
+  expectData('C0c aucune classe tierce dans les horaires élève', c0c, (rows) =>
+    Array.isArray(rows) && rows.length > 0 && rows.every((schedule) => schedule?.course?.class?.id === 'cls_demo_6a')
+      ? true
+      : `réponse invalide ou horaires hors classe : ${Array.isArray(rows) ? rows.length : 'format incorrect'}`
+  );
+  const c0d = await expectStatus('C0d PARENT liste uniquement ses enfants sans filtre fourni', [
+    'GET',
+    '/api/users?schoolId=sch_demo_gradeup',
+    cookies.parent,
+  ], 200);
+  expectData('C0d aucun compte ou code parent confidentiel dans la liste', c0d, (j) =>
+    Array.isArray(j?.users) && j.users.length > 0 &&
+    j.users.every((u) => PARENT_CHILD_IDS.has(u.id) && u.role === 'STUDENT' && !Object.hasOwn(u, 'password') && !Object.hasOwn(u, 'parentCode') && !Object.hasOwn(u, 'children'))
+      ? true
+      : 'un utilisateur hors enfant ou une donnée confidentielle est exposée'
+  );
+  await expectStatus('C0e PARENT ne peut pas usurper le filtre d’un autre parent', [
+    'GET',
+    '/api/users?schoolId=sch_demo_gradeup&role=STUDENT&parentId=usr_demo_p_ngoy',
+    cookies.parent,
+  ], 403);
+  const c0f = await expectStatus('C0f STUDENT liste son profil uniquement', [
+    'GET',
+    '/api/users?schoolId=sch_demo_gradeup',
+    cookies.student,
+  ], 200);
+  expectData('C0f aucun compte ni code parent confidentiel dans le profil', c0f, (j) =>
+    Array.isArray(j?.users) && j.users.length === 1 && j.users[0].id === STUDENT_ID &&
+    !Object.hasOwn(j.users[0], 'password') && !Object.hasOwn(j.users[0], 'parentCode')
+      ? true
+      : 'le profil élève contient un autre compte ou une donnée confidentielle'
+  );
+  const c0g = await expectStatus('C0g PARENT → endpoint dédié de ses enfants', [
+    'GET',
+    '/api/parent/children',
+    cookies.parent,
+  ], 200);
+  expectData('C0g endpoint enfant sans secrets de compte', c0g, (j) =>
+    Array.isArray(j?.children) && j.children.length > 0 && j.children.every((child) =>
+      PARENT_CHILD_IDS.has(child.id) && !Object.hasOwn(child, 'password') && !Object.hasOwn(child, 'parentCode')
+    )
+      ? true
+      : 'l’endpoint parent renvoie un enfant hors scope ou une donnée confidentielle'
+  );
+  await expectStatus('C0h TEACHER ne peut pas usurper un autre enseignant', [
+    'GET',
+    '/api/users?schoolId=sch_demo_gradeup&role=STUDENT&teacherId=usr_demo_t_nsimba',
+    cookies.teacher,
+  ], 403);
+  await expectStatus('C0i TEACHER doit demander uniquement les élèves de ses classes', [
+    'GET',
+    '/api/users?schoolId=sch_demo_gradeup',
+    cookies.teacher,
+  ], 403);
+  const c0j = await expectStatus('C0j TEACHER liste les élèves de ses cours', [
+    'GET',
+    `/api/users?schoolId=sch_demo_gradeup&role=STUDENT&teacherId=${TEACHER_ID}`,
+    cookies.teacher,
+  ], 200);
+  expectData('C0j liste enseignant sans mot de passe ni code parent', c0j, (j) =>
+    Array.isArray(j?.users) && j.users.length > 0 && j.users.every((u) =>
+      u.role === 'STUDENT' && !Object.hasOwn(u, 'password') && !Object.hasOwn(u, 'parentCode')
+    )
+      ? true
+      : 'liste enseignant hors rôle ou donnée confidentielle exposée'
+  );
+  await expectStatus(
+    'C0k TEACHER ne consulte pas les notes du cours d’un autre professeur',
+    ['GET', '/api/grades?schoolId=sch_demo_gradeup&courseId=crs_demo_6a_fr', cookies.teacher],
+    403
+  );
+  await expectStatus(
+    'C0l TEACHER ne peut pas usurper teacherId dans les notes',
+    ['GET', '/api/grades?schoolId=sch_demo_gradeup&teacherId=usr_demo_t_nsimba', cookies.teacher],
+    403
+  );
+  await expectStatus(
+    'C0m TEACHER ne peut pas usurper teacherId dans les cours',
+    ['GET', '/api/courses?schoolId=sch_demo_gradeup&teacherId=usr_demo_t_nsimba', cookies.teacher],
+    403
+  );
+  await expectStatus(
+    'C0n STUDENT ne consulte pas les cours d’une autre classe',
+    ['GET', '/api/courses?schoolId=sch_demo_gradeup&classId=cls_demo_7b', cookies.student],
+    403
+  );
+  await expectStatus(
+    'C0o TEACHER ne consulte pas les leçons d’un autre professeur',
+    ['GET', '/api/lessons?schoolId=sch_demo_gradeup&courseId=crs_demo_6a_fr', cookies.teacher],
+    403
+  );
+  await expectStatus(
+    'C0p STUDENT ne consulte pas les leçons d’une autre classe',
+    ['GET', '/api/lessons?schoolId=sch_demo_gradeup&courseId=crs_demo_7b_maths', cookies.student],
+    403
+  );
   const c1 = await expectStatus(
     'C1 STUDENT → GET /api/grades',
     ['GET', '/api/grades?schoolId=sch_demo_gradeup', cookies.student],
@@ -203,6 +315,27 @@ async function main() {
       ? true
       : 'notifications destinées à un autre utilisateur'
   );
+  const c4b = await expectStatus('C4b STUDENT ne peut pas demander les notifications CAISSIER', [
+    'GET',
+    '/api/notifications?targetRole=CAISSIER',
+    cookies.student,
+  ], 200);
+  expectData('C4b filtrage du paramètre targetRole', c4b, (payload) => {
+    const rows = Array.isArray(payload) ? payload : payload?.notifications;
+    return Array.isArray(rows) && rows.every((n) => n.targetRole !== 'CAISSIER' || n.userId === STUDENT_ID)
+      ? true
+      : 'notification destinée à la caisse exposée à un élève';
+  });
+  const notificationDraft = { schoolId: 'sch_demo_gradeup', message: 'Contrôle RBAC automatisé' };
+  await expectStatus('C4c STUDENT ne peut pas diffuser une notification', [
+    'POST', '/api/notifications', cookies.student, notificationDraft,
+  ], 403);
+  await expectStatus('C4d TEACHER ne peut pas diffuser une annonce école', [
+    'POST', '/api/notifications', cookies.teacher, notificationDraft,
+  ], 403);
+  await expectStatus('C4e PARENT ne peut pas diffuser une annonce école', [
+    'POST', '/api/notifications', cookies.parent, notificationDraft,
+  ], 403);
   const c5 = await expectStatus('C5 PARENT → GET /api/notification-preferences', [
     'GET',
     '/api/notification-preferences',
@@ -211,6 +344,90 @@ async function main() {
   expectData('C5 préférences propres', c5, (j) =>
     !j?.preference || j.preference.userId === PARENT_ID ? true : 'préférence d’un autre utilisateur'
   );
+
+  const generated = await api('POST', '/api/report-cards', cookies.admin, {
+    schoolId: 'sch_demo_gradeup',
+    studentId: STUDENT_ID,
+    trimester: '1',
+  });
+  const generatedReportId = generated.status === 200 ? generated.json?.reportCard?.id : null;
+  record('C6a ADMIN génère un bulletin depuis les cotations du seed', Boolean(generatedReportId), `HTTP ${generated.status}`);
+  if (generatedReportId) {
+    const directPublish = await api('PUT', '/api/report-cards', cookies.admin, {
+      id: generatedReportId,
+      status: 'published',
+    });
+    record('C6b ADMIN ne peut pas publier sans validation préalable', directPublish.status === 409, `HTTP ${directPublish.status}`);
+    const teacherValidate = await api('PUT', '/api/report-cards', cookies.teacher, {
+      id: generatedReportId,
+      status: 'validated',
+    });
+    record('C6c TEACHER ne peut pas valider le statut administratif', teacherValidate.status === 403, `HTTP ${teacherValidate.status}`);
+  }
+
+  const c6 = await expectStatus('C6 STUDENT → GET /api/report-cards', [
+    'GET',
+    `/api/report-cards?schoolId=sch_demo_gradeup&studentId=${OTHER_STUDENT_ID}&status=draft`,
+    cookies.student,
+  ], 200);
+  expectData('C6 bulletins publiés de l’élève uniquement', c6, (j) =>
+    Array.isArray(j?.reportCards) && j.reportCards.every((r) => r.studentId === STUDENT_ID && r.status === 'published') &&
+    (!generatedReportId || j.reportCards.every((r) => r.id !== generatedReportId))
+      ? true
+      : 'bulletin étranger ou non publié renvoyé'
+  );
+  const c7 = await expectStatus('C7 PARENT → GET /api/report-cards', [
+    'GET',
+    `/api/report-cards?schoolId=sch_demo_gradeup&studentId=${OTHER_STUDENT_ID}&status=draft`,
+    cookies.parent,
+  ], 200);
+  expectData('C7 bulletins publiés des enfants uniquement', c7, (j) =>
+    Array.isArray(j?.reportCards) && j.reportCards.every((r) => PARENT_CHILD_IDS.has(r.studentId) && r.status === 'published')
+      ? true
+      : 'bulletin d’un autre élève ou non publié renvoyé'
+  );
+  const c8 = await expectStatus('C8 STUDENT → GET /api/sync/pull', [
+    'GET',
+    '/api/sync/pull',
+    cookies.student,
+  ], 200);
+  expectData('C8 synchro étudiant sans code parent ni bulletin non publié', c8, (j) =>
+    Array.isArray(j?.entities?.users) &&
+    j.entities.users.every((u) => u.id === STUDENT_ID && !Object.hasOwn(u, 'parentCode')) &&
+    Array.isArray(j?.entities?.bulletins) && j.entities.bulletins.every((b) => b.studentId === STUDENT_ID && b.status === 'PUBLISHED')
+      ? true
+      : 'données hors périmètre ou bulletin non publié dans le delta'
+  );
+  const c9 = await expectStatus('C9 PARENT → GET /api/sync/pull', [
+    'GET',
+    '/api/sync/pull',
+    cookies.parent,
+  ], 200);
+  expectData('C9 synchro parent limitée à ses enfants et bulletins publiés', c9, (j) =>
+    Array.isArray(j?.entities?.users) &&
+    j.entities.users.every((u) => PARENT_CHILD_IDS.has(u.id) && !Object.hasOwn(u, 'parentCode')) &&
+    Array.isArray(j?.entities?.bulletins) && j.entities.bulletins.every((b) => PARENT_CHILD_IDS.has(b.studentId) && b.status === 'PUBLISHED')
+      ? true
+      : 'données hors périmètre ou bulletin non publié dans le delta'
+  );
+  const c10 = await expectStatus('C10 TEACHER → GET /api/sync/pull', [
+    'GET',
+    '/api/sync/pull',
+    cookies.teacher,
+  ], 200);
+  expectData('C10 synchro professeur bornée à ses cours/classes', c10, (j) => {
+    const classIds = new Set(j?.entities?.classes?.map((c) => c.id) || []);
+    return Array.isArray(j?.entities?.users) &&
+      j.entities.users.every((u) => (u.id === TEACHER_ID || u.role === 'STUDENT') && !Object.hasOwn(u, 'parentCode')) &&
+      Array.isArray(j?.entities?.bulletins) && j.entities.bulletins.every((b) => classIds.has(b.classId))
+      ? true
+      : 'données hors cours/classe ou code parent transmis';
+  });
+  await expectStatus('C11 TEACHER filtre une classe non attribuée', [
+    'GET',
+    '/api/report-cards?schoolId=sch_demo_gradeup&classId=classe-hors-perimetre',
+    cookies.teacher,
+  ], 403);
 
   // ── D. Escalade de privilèges + isolation multi-écoles ──────────────────
   console.log('\nD. Escalade & isolation');
@@ -275,6 +492,12 @@ async function main() {
           ? true
           : 'audit d’une autre école présent'
       );
+      await expectStatus('D6 Admin école 2 ne génère pas le code parent d’un élève externe', [
+        'POST',
+        '/api/parent-code',
+        secondCookie,
+        { userId: STUDENT_ID },
+      ], 404);
     } else {
       record('D4/D5 isolation tenant', false, 'cookie de la 2ème école absent');
     }
@@ -306,6 +529,56 @@ async function main() {
   ], [200, 207]);
   expectData('E1 mutation refusée (ok=false)', e1, (j) =>
     j?.results?.[0] && j.results[0].ok === false && j.results[0].status >= 400
+      ? true
+      : `results=${JSON.stringify(j?.results)?.slice(0, 120)}`
+  );
+  const e2 = await expectStatus('E2 relais sync refuse un hôte externe', [
+    'POST',
+    '/api/sync/push',
+    cookies.student,
+    {
+      mutations: [
+        {
+          clientMutationId: '6eac77a3-cacb-4c06-9a4e-95b6d9a0a44e',
+          entity: 'grades',
+          operation: 'create',
+          recordId: 'offline-grade-test',
+          payload: {},
+          schoolId: 'sch_demo_gradeup',
+          clientUpdatedAt: Date.now(),
+          endpoint: 'https://example.invalid/api/grades',
+          method: 'POST',
+        },
+      ],
+    },
+  ], [200, 207]);
+  expectData('E2 SSRF / fuite de cookie bloquées', e2, (j) =>
+    j?.results?.[0]?.ok === false && j.results[0].status === 400
+      ? true
+      : `results=${JSON.stringify(j?.results)?.slice(0, 120)}`
+  );
+  const e3 = await expectStatus('E3 push sync refuse un autre schoolId', [
+    'POST',
+    '/api/sync/push',
+    cookies.student,
+    {
+      mutations: [
+        {
+          clientMutationId: '4f327381-5370-45c2-a45b-3df4b9600f74',
+          entity: 'grades',
+          operation: 'create',
+          recordId: 'offline-grade-tenant-test',
+          payload: {},
+          schoolId: 'school-foreign',
+          clientUpdatedAt: Date.now(),
+          endpoint: '/api/grades',
+          method: 'POST',
+        },
+      ],
+    },
+  ], [200, 207]);
+  expectData('E3 isolation tenant conservée au push', e3, (j) =>
+    j?.results?.[0]?.ok === false && j.results[0].status === 400
       ? true
       : `results=${JSON.stringify(j?.results)?.slice(0, 120)}`
   );

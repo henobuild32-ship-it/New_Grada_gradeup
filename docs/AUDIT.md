@@ -1,172 +1,174 @@
-# AUDIT — État des lieux GradeUp (Phase 0)
+# Audit complet GradeUp — Phase 0
 
-> Date : 2026-10-14 · Méthode : lecture seule du code + scripts de vérification (`tsc`, `eslint`, `next build`) + contrôle manuel des routes API sensibles. Aucune ligne de code applicative modifiée.
-> Rôles : ADMIN, TEACHER (Titulaire), STUDENT, PARENT. Contexte RDC : lent/mobre d'abord, USD/CDF, cotation TJ.
+> État observé le 23 octobre 2026. Inventaire statique des routes, pages, composants, API, schéma Prisma, types et couches offline. Aucun code métier n’est modifié pendant cette phase. Les états UI/sécurité sont vérifiés par lecture du code ; ils ne sont pas réputés validés en production sans parcours avec une base joignable.
 
----
+## Synthèse et baseline
 
-## 0. Baseline qualité (mesurée)
+| Mesure | État |
+|---|---:|
+| Routes API src/app/api/**/route.ts | 145 |
+| Routes avec garde local authenticateRequest/requireAuth | 126 |
+| Routes sans garde local explicite | 19, principalement routes publiques prévues, callbacks ou diagnostic neutralisé ; à justifier individuellement |
+| Modèles Prisma | 62 |
+| Composants gradeup | 82 |
+| Primitives UI | 60 |
+| Entrées de navigation cumulées tous rôles | 100 |
+| npx tsc --noEmit | Réussi, 0 erreur |
+| npm run lint | Réussi, 0 erreur |
+| npm run build | Réussi, exit 0 après correction du script standalone ; avertissements Prisma 7 et middleware Next non bloquants |
+| Base et API locale | PostgreSQL de développement isolé sur 127.0.0.1:5433 ; /api/health répond HTTP 200 |
+| Seed / promotion | Seed appliqué ; 12 élèves et inscriptions, 22 notes ; contrôles de lisibilité des historiques, notes et évaluations réussis |
+| npm run test:rbac | Réussi : 79/79 contrôles, dont scoping tenant, bulletins publiés, transition de publication, protection sync, notifications ciblées, accès paiements, horaires, cours/leçons/notes et listes utilisateurs bornées par rôle |
 
-| Contrôle | Commande | Résultat |
+La navigation adaptative, les composants UI, Dexie/outbox, endpoints sync, RBAC partagé, moteur de cotation et workflow Bulletin sont déjà présents. Les phases précédentes avaient déclaré plusieurs de ces fondations livrées, mais l’audit constate qu’elles ne sont pas raccordées uniformément aux écrans et que les checklists complètes restent ouvertes. Le brief décrit quatre rôles ; le produit ajoute aussi CAISSIER, à inclure dans les droits et la QA. La base utilisée pour les contrôles runtime est une instance de développement locale, jamais la base distante ni la production.
+
+## Matrice par rôle
+
+Les états sont estimés depuis le code, pas certifiés par parcours runtime. L’infrastructure Dexie/outbox existe, mais la plupart des pages font encore des appels fetch directs et ne lisent pas par repository local réactif.
+
+### ADMIN
+
+| Module | Fichiers | Actions | API/données | Chargement/erreur/vide | Responsive | Offline | Problèmes / priorité |
+|---|---|---|---|---|---|---|---|
+| Dashboard | admin-dashboard.tsx, /api/stats, /api/payments | indicateurs, listes, exports | API réelle | partiel | tableaux à vérifier | snapshot non démontré | devises et actions à valider par école — P1 |
+| Utilisateurs | admin-users.tsx, /api/users/** | CRUD, recherche, affectations, import/export selon écran | API réelle | partiel | formulaires/tableaux à vérifier à 360 px | écritures non mises en file | validations de création et isolation tenant — P0/P1 |
+| Classes/titulaires | admin-classes.tsx, /api/classes/**, /api/users | CRUD, frais, affectations, transfert | API réelle | partiel | à vérifier | pas de lecture locale écran | droits d’affectation et tenant — P1 |
+| Cours | admin-courses.tsx, /api/courses/**, /api/coefficients | CRUD, affectations | API réelle | partiel | à vérifier | non câblé localement | champs et droits par classe — P1 |
+| Horaires | admin-schedules.tsx, /api/schedules/** | CRUD, duplication, créneaux | API réelle | partiel | grille mobile non validée | lectures élève/professeur local-first; API GET classe-scopée | conflits et publication — P1 |
+| Calendrier/périodes | admin-school-calendar.tsx, /api/school-years, /api/periods, /api/academic-closures | années, périodes, fenêtres de saisie | API réelle | partiel | à vérifier | cache écran non prouvé | verrouillage métier à éprouver — P1 |
+| Configuration école | admin-config.tsx, /api/config, /api/schools/[id] | identité, devise, paramètres | API réelle | partiel | formulaires larges à vérifier | non câblé | cohérence USD/CDF — P1 |
+| Finances/frais | admin-payments.tsx, tuition-tracking.tsx, cashier-caisse.tsx, /api/payments/**, /api/fees/**, /api/tuition | encaissements, reçus, échéances | API réelle | partiel | formulaires/tableaux à vérifier | paiement online-only attendu ; brouillon offline non établi | reçu, solde parent et exports — P0/P1 |
+| Cartes | admin-cards.tsx, /api/users/cards, /api/carte/** | génération, aperçu, impression | API réelle | partiel | impression mobile à tester | téléchargement offline non prouvé | QA PDF/planche — P2 |
+| Cotation/coefficient | admin-cotation-rules.tsx, admin-coefficients.tsx, /api/grading-rules, /api/subject-rules, /api/coefficients | règles et coefficients | API réelle | partiel | tableaux à vérifier | non synchronisé à l’écran | systèmes de cotation à unifier — P1 |
+| Validation/rectification notes | admin-grade-validation.tsx, admin-note-modifications.tsx, /api/grades/**, /api/note-modifications/** | valider, verrouiller, accepter/refuser | API réelle | partiel | à vérifier | écritures sous conditions | droits et notifications — P0/P1 |
+| Bulletins/rapports | admin-reports.tsx, auto-report-sync-panel.tsx, /api/report-cards/**, Bulletin et bulletin-workflow.ts | générer, transmettre, publier, archiver | réel, principalement ReportCard | partiel | tableaux/PDF à vérifier | PDF/cache et online-only à valider | /api/bulletins absent ; second modèle/workflow non raccordé — P0 |
+| Passages/fin d’année | admin-passages.tsx, end-of-year.tsx, /api/passages, /api/deliberation, /api/end-of-year | décisions, transferts, clôture | API réelle | partiel | confirmations mobiles à tester | clôture online-only attendue | sauvegarde, réversibilité, permissions — P0/P1 |
+| Présences | admin-presence.tsx, presence-widget.tsx, /api/attendance/**, /api/presence/** | vue, filtres, pointage | API réelle | partiel | scan QR/GPS non testé sur appareil | sync partielle | sécurité et alertes — P1 |
+| Notifications/IA | admin-notifications.tsx, admin-ai.tsx, services notifications, /api/notifications/**, /api/ai/** | annonces, préférences, assistant | API réelle | partiel | à vérifier | IA online-only, notifications offline non garanties | livraison, ciblage et quotas — P1 |
+| Partagés | meetings/*, library/*, chat-page.tsx, school-calendar.tsx, profile-page.tsx, help-page.tsx, sync-center.tsx | réunions, ressources, messages, profil, aide, sync | API selon module | partiel | navigation responsive, pages à tester | couverture inégale | visibilité, pièces jointes, messages offline — P1 |
+
+### TEACHER (dont Professeur Titulaire)
+
+| Module | Fichiers | Actions | API/données | États | Responsive/offline | Problèmes / priorité |
+|---|---|---|---|---|---|---|
+| Dashboard | teacher-dashboard.tsx, /api/stats, /api/courses | cours, raccourcis, statistiques | réel | erreur partiellement avalée historiquement | mobile à vérifier ; cache absent | requêtes par classe et erreur — P1 |
+| Cours/classes | teacher-courses.tsx, teacher-classes.tsx, /api/courses, /api/classes | consulter, fiches élèves | réel | partiel | styles dynamiques à vérifier ; pas de lecture Dexie | droits classe/titulaire — P1 |
+| Leçons/documents | teacher-lessons.tsx, teacher-documents.tsx, /api/lessons/**, /api/documents | créer, publier, joindre fichiers | réel | partiel | éditeur mobile et brouillon local à valider | upload/publication — P1 |
+| Devoirs/copies | teacher-homework.tsx, /api/homework/**, /api/submissions/** | créer, corriger, commenter | réel | état « déjà rendu » à vérifier | un chemin historique outbox ; mobile à tester | portée classe et workflow copie — P0/P1 |
+| Présence | teacher-attendance.tsx, /api/attendance/** | appel, justification | réel | partiel | outbox historique seulement | sync reprise à éprouver — P1 |
+| Notes/cahier | teacher-grades.tsx, cahier-cotation.tsx, /api/grades/**, /api/cahier/** | saisir TJ, envoyer, valider | réel | partiel | écran monolithique ; quelques appels outbox | maxima/périodes/workflow — P0/P1 |
+| Bulletins titulaire | teacher-reports.tsx, auto-report-sync-panel.tsx, /api/report-cards/** | générer, transmettre | réel, modèle ancien | partiel | génération en ligne, mobile à valider | non branché à Bulletin ; droit titulaire strict — P0 |
+| Horaires/notifications/IA | schedules-page.tsx, teacher-notifications.tsx, teacher-ai.tsx, /api/schedules/**, /api/notifications/**, /api/ai/** | lire, notifier, assister | réel | partiel | lecture offline et mobile à tester | états et canaux — P1 |
+| Fin de cursus | end-of-year.tsx, /api/end-of-year, /api/passages | checklist, décisions | réel | partiel | online-only | droits titulaire à confirmer — P1 |
+| Partagés | bibliothèque, meetings, chat, calendrier, profil, aide, sync-center | ressources, réunions, messages, profil | API selon module | partiel | couverture offline inégale | permission et notification — P1 |
+
+### STUDENT
+
+| Module | Fichiers | Actions | API/données | États | Responsive/offline | Problèmes / priorité |
+|---|---|---|---|---|---|---|
+| Dashboard | student-dashboard.tsx, /api/stats/**, /api/attendance/** | résumé, raccourcis | réel, contenus statiques ponctuels | partiel | read-through non garanti | fraîcheur à valider — P1 |
+| Cours/leçons/horaires | student-courses.tsx, student-lessons.tsx, schedules-page.tsx, /api/courses, /api/lessons, /api/schedules | lire/télécharger | réel | partiel | lectures Dexie intégrées; affichage sur appareil encore à valider | pièces jointes et progression — P1 |
+| Notes/bulletins | student-grades.tsx, student-bulletins.tsx, /api/grades, /api/report-cards | consulter, imprimer | ReportCard réel | partiel | tableaux/PDF/cache à tester | GET ne force pas published ; confusion modèle — P0 |
+| Devoirs/copies | student-homework.tsx, /api/homework, /api/submissions | lire, déposer | réel | état déjà rendu à vérifier | soumission non reliée à lecture locale | droit classe, doublon et offline — P0 |
+| Présence/paiements | student-attendance.tsx, student-payments.tsx, /api/attendance, /api/payments | consulter | API réelle | paiement élève désormais routé, états et devise multi-devise affichés | cartes mobiles + table desktop | calcul des retards désormais en lecture seule; lecture paiements limitée au rôle — à revalider sur écrans authentifiés |
+| IA/notifications | student-ai.tsx, student-notifications.tsx, /api/ai/**, /api/notifications/** | chat, lire, marquer lu | réel | partiel | IA online-only ; historique local limité | scope, quotas et notifications — P1 |
+| Partagés | library, meetings, chat, calendrier, profil, aide, sync-center | ressources, réunions, messages, etc. | API selon module | partiel | navigation mobile présente, QA nécessaire | accès/attachments/cache — P1 |
+
+### PARENT
+
+| Module | Fichiers | Actions | API/données | États | Responsive/offline | Problèmes / priorité |
+|---|---|---|---|---|---|---|
+| Dashboard multi-enfant | parent-dashboard.tsx, /api/parent/children, /api/stats/** | sélectionner et consulter | réel | partiel | cache réactif non garanti | enfant actif/agrégation — P1 |
+| Notes/bulletins | parent-grades.tsx, parent-bulletins.tsx, /api/grades, /api/report-cards | lire, imprimer/partager | ReportCard réel | partiel | tableaux/PDF/cache à tester | parentId et statut publié doivent être imposés serveur — P0 |
+| Paiements | parent-payments.tsx, /api/payments/**, /api/fees/** | solde, reçus, paiement | réel | partiel | lecture parent locale intégrée; paiement online-only et lecture appareil à valider | reçus, solde par enfant, devise — P0/P1 |
+| Présence/justifications | parent-dashboard.tsx (onglet Absences/Présence), parent-presence.tsx, /api/absence-justifications/**, /api/attendance/** | consulter, justifier | API présente | accessible depuis le tableau de bord ; offline non établi | panneau parent présent, route dédiée absente | vérifier isolation enfant et revoir l’exposition de la géolocalisation précise — P0/P1 |
+| IA/notifications | parent-ai.tsx, parent-notifications.tsx, /api/ai/**, /api/notifications/** | chat, lire | réel | partiel | IA online-only, sync partielle | isolation multi-enfant/canaux — P1 |
+| Partagés | library, meetings, chat, profil, aide, sync-center | utiliser modules communs | API selon module | partiel | non testé | règles de communication et accès — P1 |
+
+### CAISSIER (rôle additionnel)
+
+| Module | Fichiers | Actions | API/données | États/mobile/offline | Problèmes / priorité |
+|---|---|---|---|---|---|
+| Caisse | cashier-caisse.tsx, /api/payments/**, /api/fees/** | saisir versement, consulter caisse | réel | partiel, mobile/offline à tester ; paiement sensible online-only attendu | rôle absent du brief, séparer et tester ses droits — P0/P1 |
+| Profil/aide | profile-page.tsx, help-page.tsx | profil, aide | partagé | à vérifier | droits caissier — P1 |
+
+## Modules transversaux
+
+| Module | Fichiers | Actions/API | États/mobile | Offline | Écart / priorité |
+|---|---|---|---|---|---|
+| Navigation | app-layout.tsx, navigation.config.ts, page.tsx | routes par rôle, bottom nav | adaptative et safe-area présentes ; pages non toutes testées | — | pages orphelines/doublons ; UI n’est pas RBAC serveur — P1 |
+| Design system | components/ui/*, ui-states.tsx, toasters | boutons, champs, tabs, états, toasts | primitives présentes, adoption inégale | — | cibles/contrastes et chaque écran à auditer — P1 |
+| PWA/cache | manifest.ts, sw.ts, offline/page.tsx, managers install/update | shell, API, fichiers | infrastructure documentée | cache navigateur, sans garantir Dexie local-first | installation réelle/quotas à tester — P1 |
+| Offline/sync | lib/offline/*, lib/sync/*, offline-sync.ts | tables, repository, push/pull, conflit | centre de sync présent | infrastructure existe mais peu branchée | lecture locale et mutations idempotentes non universelles — P0/P1 |
+| Messagerie | chat-page.tsx, message-center.tsx, /api/messages/**, /api/conversations/** | messages, recherche, réactions | réel, états partiels | ancien composant utilise outbox | deux composants, scopes et chat offline à valider — P0 |
+| Bibliothèque/fichiers | library-hub.tsx, /api/resources/**, /api/resources/upload | upload, publier, favoris | API réelle | téléchargement local partiel | visibilité et bouton publication à parcourir — P1 |
+| Notifications/realtime | src/services/notifications/*, /api/notifications/**, Supabase | in-app, push/SSE, préférences | infrastructure présente | queue UI non garantie | delivery/retry et flux inter-rôles — P1 |
+| Calendrier/visio | school-calendar.tsx, meetings/*, /api/calendar, /api/meetings | événements, salles, participants | API présente | portrait/3G/offline non testé | fournisseur visio et appareils — P2 |
+| Profil/aide | profile-page.tsx, help-page.tsx, FAQ, /api/users/[id] | profil, aide | réel/statique selon vue | purge session à vérifier | gestion sessions et données offline — P1 |
+
+## Actions et données inactives/incomplètes
+
+- student-payments et teacher-lessons sont désormais présents dans le menu du rôle et raccordés à leur composant dédié.
+- Depuis la reprise, les lectures student-payments, student-bulletins, student-attendance, student-courses, student-lessons, student-grades, student/teacher schedules, parent-grades, parent-payments et parent-bulletins utilisent le repository local avec filtres de portée; les autres écrans restent à migrer vers les hooks offline.
+- admin-coefficients est désormais dans le menu ADMIN ; les maquettes marketing du tableau de bord, du cahier, du bulletin, de la caisse et de Gradie n’affichent plus d’identifiants ni de résultats présentés comme des données d’école.
+- parent-presence est rendu dans l’onglet Présence du tableau de bord parent ; il n’existe pas comme entrée de navigation distincte.
+- admin-conferences sert à planifier une réunion et meetings reste le hub des visioconférences ; les intitulés du menu les distinguent.
+- Toutes les actions des 82 composants n’ont pas été validées individuellement ; les états non parcourus restent à vérifier.
+- Le scan ciblé n’a pas trouvé de compte DEMO_USERS/MOCK_USERS ou mockData d’authentification dans src. « Demander une démo » est un CTA marketing ; prisma/seed.js est un jeu de données de développement, à isoler de la production.
+- Les contenus d’exemple, textes codés en dur et statistiques doivent rester distingués des vraies données métier.
+
+## API manquantes ou incomplètes
+
+- Aucun src/app/api/bulletins/**/route.ts : les pages/API utilisent ReportCard et /api/report-cards, tandis que Bulletin et applyBulletinTransition() constituent un second circuit. Aucun PDF d’API pour ce workflow.
+- Le module parent utilise le composant présence dans le tableau de bord ; les routes de justification doivent encore être vérifiées de bout en bout.
+- /api/lessons existe ; MDX, pièces jointes, publication et visibilité élève doivent être vérifiés ensemble.
+- /api/resources et /api/resources/upload existent ; publier, validation et stockage doivent être parcourus.
+- /api/sync/push et /api/sync/pull existent, mais ne remplacent pas l’usage des repositories dans les vues.
+- Les conventions d’erreur, pagination et filtres ne sont pas uniformes dans toutes les routes.
+## Incohérences Prisma / types / interface
+
+- Bulletin et ReportCard coexistent : Bulletin a un enum de statuts et le workflow de double validation ; ReportCard utilise des statuts texte et alimente les vues actuelles. term entier et trimester chaîne coexistent.
+- User.role est String en base ; TypeScript déclare UserRole et le produit ajoute CAISSIER.
+- NoteModification et PassageHistorique peuvent correspondre à GradeModificationRequest et Passage mais équivalence des champs à confirmer.
+- Noms différents : birthDate/dateOfBirth, active/isActive, content/contentMdx, term/trimester/period.
+- Les 62 modèles ne semblent pas tous avoir l’enveloppe schoolId/version/deletedAt attendue pour la synchronisation.
+- Des modèles attendus existent au moins sous un nom proche : SchoolYear, Homework, Submission, Grade, GradeSnapshot, Bulletin, Attendance, AbsenceJustification, Payment, Fee/Installment, Message, Event, Ressource, CourseSchedule, Notification, AuditLog, PassageHistorique. Le nom ne prouve pas la parité fonctionnelle.
+
+## Sécurité
+
+| Constat statique | Fichier | Priorité |
 |---|---|---|
-| Types | `npx tsc --noEmit` | **0 erreur** |
-| Lint | `npm run lint` | **0 erreur** |
-| Build | `npm run build` | **EXIT 0**, `.next/standalone` généré |
-| Routes API | décompte `src/app/api/**/route.ts` | **124 routes**, **62 avec auth**, **62 sans** |
-| `requireRole` | recherche globale | **0 occurrence** (aucun garde de rôle centralisé) |
-| Toasts | 51 fichiers `from 'sonner'` vs 1 `<Toaster/>` shadcn monté | **toasts invisibles dans 51 fichiers** |
-| Offline | `queueOrFetch` utilisé dans **4 composants** d'écriture | 57 fichiers en `fetch` nu |
-| Baseline serveur | `http://localhost:3000/` | 200 OK, dev relancé |
+| [Corrigé 2026-10-23] POST /api/parent-code exige ADMIN et cible désormais un élève actif du même schoolId ; code généré avec crypto et collision unique retentée | src/app/api/parent-code/route.ts | Régression |
+| Un cookie vérifié au middleware ne prouve pas que chaque route contrôle rôle, tenant et propriété de la ressource | src/middleware.ts et routes API | P0 |
+| [Corrigé 2026-10-23] GET /api/report-cards force published côté serveur pour STUDENT/PARENT, limite les classes TEACHER et rejette les rôles non autorisés | src/app/api/report-cards/route.ts | Régression |
+| [Partiellement corrigé 2026-10-23] ReportCard impose désormais les transitions brouillon→transmis→validé par ADMIN→publié avec mise à jour conditionnelle ; le modèle Bulletin et /api/bulletins restent séparés et non raccordés | src/app/api/report-cards/route.ts, src/lib/business/bulletin-workflow.ts | P0 ouvert — unification requise |
+| Autorisations détaillées de chaque mutation sync doivent être exercées avec les rôles | src/app/api/sync/push/route.ts, src/app/api/sync/pull/route.ts | P0/P1 |
+| 19 fichiers API n’ont pas de garde local ; la plupart sont endpoints publics prévus, callbacks ou diagnostic neutralisé, à maintenir avec justification et test | middleware.ts et routes listées par scan | P1 |
 
----
+Risques historiques qui semblent corrigés, à garder en régression :
+- /api/debug/env renvoie 404 sans exposer les secrets.
+- /api/admin/db-health exige ADMIN et un secret d’opérations dans un header ; l’ancien secret en query est supprimé.
+- /api/users/[id] réserve les changements de rôle à ADMIN, d’après PHASE-3.md.
 
-## 1. Synthèse par priorité
+## Plan priorisé
 
-### P0 — bloquant (sécurité ou fonctionnel cassé)
-1. **`/api/debug/env` sans auth** — affiche préfixe/suffixe de `DEEPSEEK_API_KEY`, présence des secrets (`src/app/api/debug/env/route.ts:17-83`).
-2. **Escalade de rôle** — `PATCH/PUT /api/users/[id]` accepte `role` pour tout utilisateur auto-connecté (`src/app/api/users/[id]/route.ts:65,111`) : un étudiant peut se dire ADMIN.
-3. **Messagerie sans auth** — 7 routes lisent/écrivent avec un `userId` envoyé par le client (`messages/route.ts:9-92`, `[id]`, `reply`, `conversation`, `reactions`, `unread-count`, `search`) : lecture/impersonation de n'importe quelle conversation.
-4. **`GET /api/admin/fix-subscription` sans contrôle de rôle** (`src/app/api/admin/fix-subscription/route.ts:41`).
-5. **Reset `db-health` via `JWT_SECRET` en query string** (`src/app/api/admin/db-health/route.ts:52`) — secret transmis en clair dans l'URL/logs.
-6. **Toasts invisibles** — `src/app/layout.tsx:4,67` monte le Toaster shadcn, alors que 51 fichiers appellent `toast()` de **sonner** (`src/components/ui/sonner.tsx` jamais monté) : **zéro feedback** sur la majorité des actions.
-7. **Devoirs sans filtre `classId`** — `src/app/api/homework/route.ts:13-45` renvoie les devoirs de toute l'école à un élève.
-8. **« Régénérer le code parent » cassé** — `POST /api/parent-code` exige `role=STUDENT` (`src/app/api/parent-code/route.ts:18-19`) alors que l'action est côté parent.
+1. P0 : conserver les contrôles corrigés de parent-code et report-cards en régression, puis unifier Bulletin/ReportCard et câbler le workflow canonique aux écrans.
+2. Fondations : vérifier les routes de pages, supprimer ou connecter les pages mortes, validation des formulaires, états et layouts à 360–400 px.
+3. Offline intégré : brancher les pages aux repositories/outbox, protéger les opérations online-only et vérifier reprise, idempotence et conflits.
+4. Compléter les modules ADMIN A–D, TEACHER A/B, STUDENT, PARENT et CAISSIER additionnel.
+5. Finaliser les transversaux et scénarios inter-rôles : bibliothèque, messages, calendrier, profils, notifications et sync.
+6. QA : RBAC sur serveur/base, tests mobile 360/390/768/1280 px, mode avion, accessibilité, performance, build/lint/typecheck.
 
-> Requalification après vérification manuelle : `student-payments` n'apparaît dans **aucun menu** (seulement le titre `app-layout.tsx:280` et la vue `src/app/page.tsx:103` qui redirige vers le dashboard) → **code mort**, pas un écran visible. Reclassé P2 (§7.4).
+Les PHASE-1 à PHASE-3 existantes forment une base, mais les écarts ci-dessus ne permettent pas de considérer leurs checklists détaillées comme toutes vertes.
 
-### P1 — dégradation sérieuse de l'expérience
-- Tables non transformées en cartes sous 768 px ; scroll horizontal sur les tables admin. *(La bottom nav mobile existe déjà : `app-layout.tsx:1066-1114`, seuil 1024 px, padding contenu :981, badges non-lus — vérifiée conforme.)*
-- Erreurs avalées (`admin-dashboard.tsx:149,154`, `teacher-dashboard.tsx:50-51`) : l'utilisateur croit que l'action a marché. *(Partiellement traité en Phase 1 pour admin-dashboard.)*
-- Devise **USD en dur** dans l'UI admin (`admin-dashboard.tsx:249,260,647,723,751`) alors que le contexte est USD/CDF.
-- Aucun état « déjà rendu » pour un devoir ; aucun état vide/chargement homogène.
-- Classes Tailwind dynamiques (`teacher-classes.tsx:249-251`) : risque d'élimination Tailwind v4.
-- Hydration React 19 préexistante sur `/`, `/faq`, `/help` (script de thème dans l'arbre client) — connue, hors périmètre immédiat.
+## Checklist Phase 0
 
-### P2 — dette / fiabilité
-- N+1 : `teacher-dashboard.tsx:41-48` (une requête par classe) ; fetch secondaires silencieux (`admin-users.tsx:156-186`).
-- Offline : outbox IndexedDB existante (`src/lib/offline-sync.ts:10-30,56-105,112-131`) mais **4 écritures seulement** branchées : `teacher-grades.tsx:442,547`, `teacher-attendance.tsx:83`, `teacher-homework.tsx:166`, `message-center.tsx:85`. Aucune lecture cachée côté 57 fichiers.
-- Aucune i18n (textes en dur FR) ; aucun import CSV (export seulement).
-- `typescript.ignoreBuildErrors` historiquement présent (à vérifier dans `next.config`), aucun typecheck CI.
-
----
-
-## 2. Tableau par rôle — ADMIN
-
-| Module | Fichier(s) | Boutons/actions | Connecté API ? | Données réelles ? | Charg./err./vide ? | Responsive ? | Offline ? | Problèmes | Priorité |
-|---|---|---|---|---|---|---|---|---|---|
-| Tableau de bord | `admin-dashboard.tsx` | Stats, paiements, export CSV | Oui (`/api/stats`, `/api/payments`) | Partiel | Non / erreurs avalées :149,154 / Non | Non (tables) | Non | USD en dur :249,260,647,723,751 | P1 |
-| Utilisateurs | `admin-users.tsx` | CRUD, recherche, rôle | Oui + fetch secondaires :156-186 | Oui | Partiel / Non / Non | Non | Non | fetch silencieux, escalade via API | P1 |
-| Classes | `admin-classes.tsx` | CRUD, titulaire | Oui | Oui | Partiel | Non | Non | classes Tailwind dynamiques | P1 |
-| Cotation / coefficients | `admin-cotation-rules.tsx`, `admin-coefficients.tsx` | CRUD règles | Oui | Oui | Partiel | Non | Non | — | P1 |
-| Validation notes | `admin-grade-validation.tsx` | Valider/rejeter | Oui | Oui | Partiel | Non | Non | chaîne Titulaire→Admin→publication à verrouiller | P1 |
-| Bulletins | `admin-reports.tsx`, `auto-report-sync-panel.tsx` | Générer, publier, archiver | Oui (15 fetch) | Oui | Partiel | Non | Non | cycle DRAFT→…→PUBLISHED à confirmer | P1 |
-| Présence | `admin-presence.tsx` | Vue école | Oui | Oui | Partiel | Non | Non | — | P2 |
-| Paiements | `admin-payments.tsx` | Suivi, encaissement | Oui | Oui | Partiel | Non | Non | devise en dur | P1 |
-| Emploi du temps | `admin-schedules.tsx` | CRUD, duplication | Oui | Oui | Partiel | Non | Non | — | P2 |
-| Calendrier scolaire | `admin-school-calendar.tsx` | Périodes 1-4, semestres | Oui | Oui | Partiel | Non | Non | — | P2 |
-| Cartes / cartes d'état | `admin-cards.tsx`, `admin-passages.tsx` | Générer/imprimer | Oui | Oui | Partiel | Non | Non | impression non testée mobile | P2 |
-| Config école / congés | `admin-config.tsx`, `admin-conferences.tsx` | Paramètres | Oui | Oui | Partiel | Non | Non | — | P2 |
-| Notifications | `admin-notifications.tsx` | Envoyer | Oui | Oui | Partiel | Non | Non | pas de confirmation de diffusion | P2 |
-| Santé BDD | `admin/db-health/route.ts` | Check/reset | Oui | — | — | — | — | **reset via JWT_SECRET en query** | P0 |
-| Debug env | `api/debug/env/route.ts` | GET/POST | Oui | — | — | — | — | **expose préfixes de secrets, sans auth** | P0 |
-
-## 3. Tableau par rôle — TEACHER (Titulaire)
-
-| Module | Fichier(s) | Boutons/actions | Connecté API ? | Données réelles ? | Charg./err./vide ? | Responsive ? | Offline ? | Problèmes | Priorité |
-|---|---|---|---|---|---|---|---|---|---|
-| Cahier de cotation | `cahier-cotation.tsx` (931 l.) | Saisir TJ/interrogations/devoirs/examens, « Envoyer au titulaire » | Oui | Oui | Partiel | Non | Partiel (:442) | monolithe, flux de validation à clarifier | P1 |
-| Dashboard | `teacher-dashboard.tsx` | Aperçu classes | Oui | Oui | Oui / catch muet :50-51 / Oui | Non | Non | N+1 :41-48 | P1 |
-| Mes classes | `teacher-classes.tsx`, `teacher-courses.tsx` | Détail classe/élèves | Oui | Oui | Partiel | Non | Non | classes Tailwind dynamiques :249-251 | P1 |
-| Devoirs | `teacher-homework.tsx` | CRUD, noter | Oui | Oui | Partiel | Non | Partiel (:166) | — | P1 |
-| Présence | `teacher-attendance.tsx` | Appel | Oui | Oui | Partiel | Non | Partiel (:83) | — | P1 |
-| Documents | `teacher-documents.tsx` | Upload | Oui | Oui | Partiel | Non | Non | — | P2 |
-| Modifications de notes | `api/note-modifications/[id]` | Approuver/refuser | Partiel | Oui | — | — | — | vérifier rôle serveur (escalade possible) | P0 |
-| Widget présence | `presence-widget.tsx` | Rapide | Oui | Oui | Partiel | Oui | Non | — | P2 |
-
-## 4. Tableau par rôle — STUDENT
-
-| Module | Fichier(s) | Boutons/actions | Connecté API ? | Données réelles ? | Charg./err./vide ? | Responsive ? | Offline ? | Problèmes | Priorité |
-|---|---|---|---|---|---|---|---|---|---|
-| Dashboard | `student-dashboard.tsx` | Raccourcis | Oui | Facultatif | Partiel | Non | Non | citations en dur :28-34 | P2 |
-| Notes | `student-grades.tsx` | Consulter | Oui | Oui | Partiel | Non | Non | — | P1 |
-| Devoirs | `student-homework.tsx` | Rendre un devoir | Oui | Oui | Non | Non | Non | pas d'état « déjà rendu », filtre `classId` absent côté API | P0 |
-| Bulletins | `student-bulletins.tsx` | Consulter/imprimer | Oui | Oui | Partiel | Non | Non | — | P2 |
-| **Paiements** | `page.tsx:103` redirige vers le dashboard | — | — | — | — | — | — | **code mort** : `PageView` déclaré (`types.ts:333`, titre `app-layout.tsx:280`) mais absent des menus → supprimer ou brancher (zéro bouton mort) | P2 |
-| IA GradieChat | `GradieChat.tsx`, `ai-chat.tsx` | Chat | Oui (17 fetch) | Oui | Partiel | Oui | Non | clé côté serveur ok, rate-limit à voir | P2 |
-
-## 5. Tableau par rôle — PARENT
-
-| Module | Fichier(s) | Boutons/actions | Connecté API ? | Données réelles ? | Charg./err./vide ? | Responsive ? | Offline ? | Problèmes | Priorité |
-|---|---|---|---|---|---|---|---|---|---|
-| Dashboard | `parent-dashboard.tsx` | Vue enfants | Oui | Oui | Partiel | Non | Non | 9 fetch sans coordination | P1 |
-| Bulletins | `parent-bulletins.tsx` | Consulter | Oui | Oui | Partiel | Non | Non | — | P2 |
-| Notes | `parent-grades.tsx` | Consulter | Oui | Oui | Partiel | Non | Non | — | P1 |
-| Paiements | `parent-payments.tsx` | Historique | Oui | Oui | Partiel | Non | Non | — | P1 |
-| Notifications | `parent-notifications.tsx` | Lire | Oui | Oui | Partiel | Non | Non | — | P2 |
-| Code parent | `api/parent-code/route.ts` | Régénérer | **Cassé** | — | — | — | — | rôle exigé = STUDENT :18-19 | P0 |
-
-## 6. Modules transversaux
-
-| Module | Fichier(s) | Boutons/actions | Connecté API ? | Données réelles ? | Charg./err./vide ? | Responsive ? | Offline ? | Problèmes | Priorité |
-|---|---|---|---|---|---|---|---|---|---|
-| Messagerie | `message-center.tsx`, `chat-page.tsx` | Envoyer, réagir, rechercher | Oui (7 routes **sans auth**) | Oui | Partiel | Non | Partiel (:85) | IDOR + impersonation | P0 |
-| Meetings | `meetings-hub.tsx`, `meeting-room.tsx` | Créer, rejoindre | Oui | Oui | Partiel | Oui | Non | — | P2 |
-| Bibliothèque | `library-hub.tsx` | Ressources, favoris | Oui | Oui | Partiel | Oui | Non | — | P2 |
-| Calendrier | `admin-school-calendar.tsx` | Périodes | Oui | Oui | Partiel | Non | Non | — | P2 |
-| Notifications/realtime | `notification-permission-banner.tsx` | Permission navigateur | Oui | Oui | Partiel | Oui | Non | pas de file d'attente offline | P2 |
-| Profil | `app-layout.tsx` + `api/users/[id]` | Éditer profil/mot de passe | Oui | Oui | Partiel | Oui | Non | **escalade de rôle** :111 | P0 |
-| Aide / FAQ | `/faq`, `/help` | Accordéons | Statique | Oui | — | Oui | — | hydration React 19 préexistante | P2 |
-| Offline/sync | `offline-sync.ts`, `offline-sync-manager.tsx` | Synchroniser | Oui | — | Oui | Oui | — | 4 écritures branchées seulement | P1 |
-| Shell / navigation | `page.tsx`, `app-layout.tsx` | Navigation 4 rôles | — | — | Splash local | Bottom nav **absente** | Indicateur offline absent | P1 |
-
----
-
-## 7. Listes séparées (fichier:ligne)
-
-### 7.1 Boutons / actions inactifs ou cassés
-- `student-payments` : code mort (hors menus) — `page.tsx:103`, `app-layout.tsx:280`, `types.ts:333` → supprimer ou brancher.
-- `parent-code` régénérer : `api/parent-code/route.ts:18-19` (rôle STUDENT) — **reste à corriger (Phase 3)**.
-- ~~Toasts non montés (51 fichiers `from 'sonner'`)~~ → **corrigé Phase 1** : `<SonnerToaster />` ajouté dans `src/app/layout.tsx:5,69` (Toaster shadcn conservé pour les 6 fichiers `use-toast`).
-- Erreurs avalées : `admin-dashboard.tsx` → **corrigé Phase 1** (`loadError` + `<ErrorBanner onRetry>` sur stats/paiements) ; `teacher-dashboard.tsx:50-51` **reste à corriger (Phase 4)**.
-
-### 7.2 Données en dur / fictives
-- USD écrit en dur : `admin-dashboard.tsx:249,260,647,723,751`.
-- Citations motivation : `student-dashboard.tsx:28-34`.
-- Textes UI non i18n : partout (aucune lib i18n dans le projet).
-
-### 7.3 Appels API manquants ou orphelins
-- 62/124 routes sans authentification.
-- Lecture hors-ligne non branchée (57 fichiers en `fetch` nu).
-- `fix-subscription` GET sans rôle : `api/admin/fix-subscription/route.ts:41`.
-- Vérifier : `note-modifications/[id]` (approbation par un non-admin), `report-cards` publication.
-
-### 7.4 Incohérences schéma / types / UI
-- `Prisma` (51 modèles) vs `src/lib/types.ts` : comparaison à figer dans la doc ; usage mixte `ReportCard`/`Bulletin`/`ReportCounter` pour le cycle de bulletin.
-- `UserRole` (`types.ts`) vs `role` accepté en PUT utilisateur : divergence assumée côté client, non contrôlée côté serveur.
-
-### 7.5 Failles de sécurité (à corriger en Phase sécurité)
-| Faille | Fichier:ligne | Gravité |
-|---|---|---|
-| Escalade de rôle via `role` dans l'édition profil | `api/users/[id]/route.ts:65,111` | Critique |
-| Messagerie sans auth (7 routes) | `api/messages/**` | Critique |
-| Exposition de préfixes de secrets | `api/debug/env/route.ts:17-83` | Haute |
-| Reset BDD via `JWT_SECRET` en query | `api/admin/db-health/route.ts:52` | Haute |
-| `fix-subscription` GET sans rôle | `api/admin/fix-subscription/route.ts:41` | Haute |
-| Devoirs visibles toute l'école | `api/homework/route.ts:13-45` | Haute |
-| IDOR messagerie (userId client) | `api/messages/[id]/route.ts:48-59` | Haute |
-| IDOR notes (`[id]` sans `schoolId`/rôle) | `api/grades/[id]` (à confirmer) | Haute |
-| Aucun `requireRole` centralisé | `src/lib/auth/*` | Structurelle |
-
----
-
-## 8. Checklist de fin de Phase 0
-- [x] Modules ADMIN inventoriés (16 lignes)
-- [x] Modules TEACHER inventoriés (8 lignes)
-- [x] Modules STUDENT inventoriés (6 lignes)
-- [x] Modules PARENT inventoriés (6 lignes)
-- [x] Modules transversaux inventoriés (9 lignes)
-- [x] Aucune section vide
-- [x] Listes séparées remplies (actions, données en dur, API manquantes, incohérences, sécurité)
-- [x] Priorités P0/P1/P2 attribuées
-- [x] Baseline build/lint/typecheck consignée (§0)
-- [x] Aucune modification de code applicatif (hors `docs/`)
+- [x] Modules ADMIN, TEACHER, STUDENT, PARENT et CAISSIER inventoriés.
+- [x] Transversaux et systèmes techniques répertoriés.
+- [x] Actions/pages non raccordées et inconnues explicitement distinguées.
+- [x] Données statiques, API manquantes, écarts de schéma/types et sécurité documentés.
+- [x] Priorités et plan ordonné définis.
+- [x] TypeScript et lint vérifiés.
+- [x] Build final réussi après correction du helper standalone (aucun code métier modifié).
+- [x] Test RBAC exécuté sur serveur et base locale isolée : 79/79 après correctifs de synchronisation, notifications, portée des paiements, horaires et limites de cours, leçons et notes.
+- [x] Aucun code métier modifié pendant l’audit.

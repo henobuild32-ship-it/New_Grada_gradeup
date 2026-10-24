@@ -88,7 +88,23 @@ export async function GET(request: NextRequest) {
       where.studentId = auth.userId;
     }
     if (courseId) where.courseId = courseId;
-    if (teacherId) where.teacherId = teacherId;
+    if (auth.role === 'TEACHER') {
+      if (teacherId && teacherId !== auth.userId) {
+        return NextResponse.json({ error: 'Accès limité à vos propres notes de cours.' }, { status: 403 });
+      }
+      if (courseId) {
+        const course = await db.course.findFirst({
+          where: { id: courseId, schoolId, teacherId: auth.userId, deletedAt: null },
+          select: { id: true },
+        });
+        if (!course) {
+          return NextResponse.json({ error: 'Vous ne pouvez consulter que les notes de vos cours.' }, { status: 403 });
+        }
+      }
+      where.teacherId = auth.userId;
+    } else if (teacherId) {
+      where.teacherId = teacherId;
+    }
     if (trimester) {
       // A trimester includes its monthly periods (P1/P2/EX1, P3/P4/EX2), so a
       // student sees ALL their points for the selected trimester.

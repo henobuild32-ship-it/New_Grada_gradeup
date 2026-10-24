@@ -3,6 +3,7 @@ import { db } from '@/lib/db';
 import { generateGLMResponse } from '@/lib/ai/glm-provider';
 import { authenticateRequest, AuthError } from '@/lib/auth/authenticate';
 import { rateLimit, clientIp, rateLimitResponse } from '@/lib/api/rate-limit';
+import { createHash } from 'node:crypto';
 
 export const runtime = 'nodejs';
 export const maxDuration = 55; // Vercel Pro : 60s max, on laisse 5s de marge
@@ -13,6 +14,29 @@ const AI_MODELS: Record<string, string> = {
   gemma: 'Gemma 3 12B (OpenRouter)',
   llama: 'Llama 3.1 8B (OpenRouter)',
 };
+
+const aiReplyCache = new Map<string, { expiresAt: number; content: string }>();
+const AI_REPLY_CACHE_TTL_MS = 5 * 60_000;
+const AI_REPLY_CACHE_MAX_ENTRIES = 250;
+
+function getCachedReply(key: string): string | null {
+  const cached = aiReplyCache.get(key);
+  if (!cached) return null;
+  if (cached.expiresAt <= Date.now()) { aiReplyCache.delete(key); return null; }
+  aiReplyCache.delete(key);
+  aiReplyCache.set(key, cached);
+  return cached.content;
+}
+
+function setCachedReply(key: string, content: string): void {
+  aiReplyCache.delete(key);
+  aiReplyCache.set(key, { expiresAt: Date.now() + AI_REPLY_CACHE_TTL_MS, content });
+  while (aiReplyCache.size > AI_REPLY_CACHE_MAX_ENTRIES) {
+    const oldestKey = aiReplyCache.keys().next().value;
+    if (!oldestKey) break;
+    aiReplyCache.delete(oldestKey);
+  }
+}
 
 // ─── Helpers préférences (stockées en DB, pas en filesystem) ─────────────────
 
@@ -506,6 +530,8 @@ export async function POST(request: NextRequest) {
   let aiResponse: Response;
   let conversationIdFinal = '';
   let encoder: TextEncoder;
+  let responseCacheKey = '';
+  let responseWasCached = false;
   let userPreferences: Record<string, string> = {};
 
   try {
@@ -604,7 +630,28 @@ Tu peux ajouter des tags optionnels : \`[MEM: [TAG: categorie1, categorie2] text
       systemPrompt,
     };
 
-    aiResponse = await generateGLMResponse(aiInput);
+    responseCacheKey = createHash('sha256').update(JSON.stringify({
+      userId,
+      schoolId,
+      role,
+      model: activeModel,
+      message,
+      historyMessages,
+      systemPrompt,
+    })).digest('hex');
+    const cachedReply = getCachedReply(responseCacheKey);
+    if (cachedReply) {
+      responseWasCached = true;
+      const cachedSse = [
+        `data: ${JSON.stringify({ choices: [{ delta: { content: cachedReply } }] })}`,
+        'data: [DONE]',
+        '',
+        '',
+      ].join('\n');
+      aiResponse = new Response(cachedSse, { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
+    } else {
+      aiResponse = await generateGLMResponse(aiInput);
+    }
   } catch (err) {
     console.error('[AI] Échec de l\'appel IA:', err);
     const errMsg = err instanceof Error ? err.message : 'Erreur inconnue';
@@ -710,9 +757,15 @@ Tu peux ajouter des tags optionnels : \`[MEM: [TAG: categorie1, categorie2] text
             try {
               const actionParams = JSON.parse(actionMatch[2]);
               try {
-                const actionRes = await fetch(`${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/api/ai/actions`, {
+                const actionUrl = new URL('/api/ai/actions', request.url);
+                const actionHeaders = new Headers({ 'Content-Type': 'application/json' });
+                const sessionCookie = request.headers.get('cookie');
+                const authorization = request.headers.get('authorization');
+                if (sessionCookie) actionHeaders.set('cookie', sessionCookie);
+                if (authorization) actionHeaders.set('authorization', authorization);
+                const actionRes = await fetch(actionUrl, {
                   method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
+                  headers: actionHeaders,
                   body: JSON.stringify({ action: actionName, params: actionParams, userId, schoolId }),
                 });
                 const actionData = await actionRes.json();
@@ -739,6 +792,10 @@ Tu peux ajouter des tags optionnels : \`[MEM: [TAG: categorie1, categorie2] text
             .trim();
           await db.aiMessage.create({ data: { conversationId: conversationIdFinal, role: 'assistant', content: cleanReply } });
           await db.aiConversation.update({ where: { id: conversationIdFinal }, data: { updatedAt: new Date() } });
+          // Ne cache pas une réponse contenant une action ou une mutation de préférence/mémoire.
+          if (!responseWasCached && responseCacheKey && !/\[(?:ACTION|MEM|PREF):/i.test(fullReply)) {
+            setCachedReply(responseCacheKey, cleanReply);
+          }
         }
 
         controller.enqueue(

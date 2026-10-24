@@ -1,32 +1,22 @@
-/* QA Phase 1 : mobile-first 4 rôles × 4 viewports (shell rendu via user injecté). */
-const puppeteer = require('puppeteer-core');
-const path = require('path');
+/*
+ * Phase 1 browser QA: four roles × four viewports, using Chrome's built-in
+ * DevTools Protocol so this script does not need Puppeteer or Playwright.
+ * Start the app at http://localhost:3000 before running this file.
+ */
+const { spawn } = require('child_process');
 const fs = require('fs');
+const os = require('os');
+const path = require('path');
 
 const CHROME = 'C:/Program Files/Google/Chrome/Application/chrome.exe';
 const OUT = path.join(__dirname, 'qa-shots');
-const BASE = 'http://localhost:3000';
+const BASE = process.env.GRADEUP_QA_BASE || 'http://localhost:3000';
 
 const USERS = {
-  ADMIN: {
-    id: 'qa-admin', schoolId: 'qa-school', fullName: 'Alice Admin', email: 'admin@qa.local',
-    role: 'ADMIN', photoUrl: '', active: true, currentPage: 'admin-dashboard',
-  },
-  TEACHER: {
-    id: 'qa-teacher', schoolId: 'qa-school', fullName: 'Tina Prof', email: 'teacher@qa.local',
-    role: 'TEACHER', photoUrl: '', active: true, currentPage: 'teacher-dashboard',
-    isTitulaire: true, titulaireClassIds: [],
-  },
-  STUDENT: {
-    id: 'qa-student', schoolId: 'qa-school', fullName: 'Sam Élève', email: 'student@qa.local',
-    role: 'STUDENT', photoUrl: '', active: true, currentPage: 'student-dashboard',
-    gender: 'M', matricule: 'QA-001', academicYear: '2025-2026',
-  },
-  PARENT: {
-    id: 'qa-parent', schoolId: 'qa-school', fullName: 'Paul Parent', email: 'parent@qa.local',
-    role: 'PARENT', photoUrl: '', active: true, currentPage: 'parent-dashboard',
-    parentCode: 'QA-CODE',
-  },
+  ADMIN: { id: 'qa-admin', schoolId: 'qa-school', fullName: 'Alice Admin', email: 'admin@qa.local', role: 'ADMIN', photoUrl: '', active: true, currentPage: 'admin-dashboard' },
+  TEACHER: { id: 'qa-teacher', schoolId: 'qa-school', fullName: 'Tina Prof', email: 'teacher@qa.local', role: 'TEACHER', photoUrl: '', active: true, currentPage: 'teacher-dashboard', isTitulaire: true, titulaireClassIds: [] },
+  STUDENT: { id: 'qa-student', schoolId: 'qa-school', fullName: 'Sam Élève', email: 'student@qa.local', role: 'STUDENT', photoUrl: '', active: true, currentPage: 'student-dashboard', gender: 'M', matricule: 'QA-001', academicYear: '2025-2026' },
+  PARENT: { id: 'qa-parent', schoolId: 'qa-school', fullName: 'Paul Parent', email: 'parent@qa.local', role: 'PARENT', photoUrl: '', active: true, currentPage: 'parent-dashboard', parentCode: 'QA-CODE' },
 };
 
 const VIEWPORTS = [
@@ -38,146 +28,214 @@ const VIEWPORTS = [
 
 const results = [];
 let failures = 0;
+let nextId = 0;
 
-function record(ok, label, detail) {
+function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
+
+function record(ok, label, detail = '') {
   results.push({ ok, label, detail });
   if (!ok) failures += 1;
-  console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${detail ? ' — ' + detail : ''}`);
+  console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${detail ? ` — ${detail}` : ''}`);
 }
 
-async function injectSession(page, user, theme) {
-  await page.evaluate((u, t) => {
-    localStorage.setItem('gradeup-storage', JSON.stringify({
-      state: {
-        user: u,
-        currentPage: u.currentPage,
-        sidebarOpen: true,
-        chatMessages: {},
-      },
-      version: 0,
-    }));
-    localStorage.setItem('theme', t);
-  }, user, theme);
+class CdpClient {
+  constructor(url) {
+    this.pending = new Map();
+    this.ws = new WebSocket(url);
+    this.ready = new Promise((resolve, reject) => {
+      this.ws.addEventListener('open', resolve, { once: true });
+      this.ws.addEventListener('error', reject, { once: true });
+    });
+    this.ws.addEventListener('message', (event) => {
+      const message = JSON.parse(event.data);
+      if (!message.id) return;
+      const pending = this.pending.get(message.id);
+      if (!pending) return;
+      this.pending.delete(message.id);
+      clearTimeout(pending.timer);
+      if (message.error) pending.reject(new Error(message.error.message));
+      else pending.resolve(message.result);
+    });
+  }
+
+  async send(method, params = {}) {
+    await this.ready;
+    const id = ++nextId;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pending.delete(id);
+        reject(new Error(`Chrome DevTools timeout: ${method}`));
+      }, 15000);
+      this.pending.set(id, { resolve, reject, timer });
+      this.ws.send(JSON.stringify({ id, method, params }));
+    });
+  }
+
+  async evaluate(expression) {
+    const response = await this.send('Runtime.evaluate', {
+      expression,
+      returnByValue: true,
+      awaitPromise: true,
+      userGesture: true,
+    });
+    if (response.exceptionDetails) {
+      throw new Error(response.exceptionDetails.exception?.description || response.exceptionDetails.text);
+    }
+    return response.result?.value;
+  }
 }
 
-async function measure(page) {
-  return page.evaluate(() => ({
-    scrollWidth: Math.max(document.documentElement.scrollWidth, document.body ? document.body.scrollWidth : 0),
-    innerWidth: window.innerWidth,
-    innerHeight: window.innerHeight,
-  }));
+async function waitForDevTools(profilePath, chrome) {
+  const activePort = path.join(profilePath, 'DevToolsActivePort');
+  const deadline = Date.now() + 20000;
+  while (Date.now() < deadline) {
+    if (chrome.exitCode !== null) throw new Error(`Chrome exited with ${chrome.exitCode}`);
+    if (fs.existsSync(activePort)) {
+      const [port, browserPath] = fs.readFileSync(activePort, 'utf8').trim().split(/\r?\n/);
+      return { port: Number(port), browserPath };
+    }
+    await sleep(200);
+  }
+  throw new Error('Chrome did not expose its DevTools endpoint.');
+}
+
+async function waitUntilReady(page) {
+  const deadline = Date.now() + 30000;
+  while (Date.now() < deadline) {
+    try {
+      if (await page.evaluate('document.readyState === "complete"')) return;
+    } catch { /* the initial document may still be navigating */ }
+    await sleep(200);
+  }
+  throw new Error('The page did not finish loading.');
+}
+
+async function navigate(page, url) {
+  await page.send('Page.navigate', { url });
+  await waitUntilReady(page);
+  await sleep(700);
+}
+
+async function screenshot(page, filePath) {
+  const shot = await page.send('Page.captureScreenshot', { format: 'png', fromSurface: true });
+  fs.writeFileSync(filePath, Buffer.from(shot.data, 'base64'));
 }
 
 async function main() {
+  if (!fs.existsSync(CHROME)) throw new Error(`Chrome not found at ${CHROME}`);
   fs.mkdirSync(OUT, { recursive: true });
-  const browser = await puppeteer.launch({
-    executablePath: CHROME,
-    headless: true,
-    args: ['--no-sandbox', '--disable-dev-shm-usage'],
-  });
+  const profilePath = fs.mkdtempSync(path.join(os.tmpdir(), 'gradeup-phase1-'));
+  const chrome = spawn(CHROME, [
+    '--headless=new', '--remote-debugging-port=0', '--remote-allow-origins=*',
+    `--user-data-dir=${profilePath}`, '--no-first-run', '--no-default-browser-check',
+    '--disable-extensions', '--disable-gpu', '--hide-scrollbars', 'about:blank',
+  ], { stdio: 'ignore', windowsHide: true });
 
+  let browser;
+  let page;
   try {
+    const devtools = await waitForDevTools(profilePath, chrome);
+    browser = new CdpClient(`ws://127.0.0.1:${devtools.port}${devtools.browserPath}`);
+    const target = await (await fetch(`http://127.0.0.1:${devtools.port}/json/new?${encodeURIComponent('about:blank')}`, { method: 'PUT' })).json();
+    page = new CdpClient(target.webSocketDebuggerUrl);
+    await page.send('Page.enable');
+    await page.send('Runtime.enable');
+
     for (const [role, user] of Object.entries(USERS)) {
-      for (const vp of VIEWPORTS) {
-        const page = await browser.newPage();
-        await page.setViewport({ width: vp.width, height: vp.height });
-        const tag = `${role} ${vp.name}`;
+      for (const viewport of VIEWPORTS) {
+        const tag = `${role} ${viewport.name}`;
+        await page.send('Emulation.setDeviceMetricsOverride', {
+          width: viewport.width,
+          height: viewport.height,
+          deviceScaleFactor: 1,
+          mobile: viewport.width < 768,
+        });
+        await navigate(page, BASE);
 
-        // 1) Établir l'origine puis injecter la session (light).
-        await page.goto(BASE, { waitUntil: 'domcontentloaded', timeout: 30000 });
-        await injectSession(page, user, 'light');
-        await page.reload({ waitUntil: 'networkidle2', timeout: 45000 }).catch(() => {});
-        await new Promise((r) => setTimeout(r, 800));
+        const userLiteral = JSON.stringify(user);
+        await page.evaluate(`(() => {
+          localStorage.setItem('gradeup-storage', JSON.stringify({ state: { user: ${userLiteral}, currentPage: ${JSON.stringify(user.currentPage)}, sidebarOpen: true, chatMessages: {} }, version: 0 }));
+          localStorage.setItem('theme', 'light');
+        })()`);
+        await navigate(page, BASE);
+        await sleep(600);
 
-        // 2) Pas de scroll horizontal.
-        const m = await measure(page);
-        record(m.scrollWidth <= m.innerWidth + 1, `${tag} — pas de scroll horizontal`,
-          `scrollWidth=${m.scrollWidth} innerWidth=${m.innerWidth}`);
+        const metrics = await page.evaluate(`({
+          scrollWidth: Math.max(document.documentElement.scrollWidth, document.body?.scrollWidth || 0),
+          innerWidth: window.innerWidth,
+        })`);
+        record(metrics.scrollWidth <= metrics.innerWidth + 1, `${tag} — pas de scroll horizontal`, `scrollWidth=${metrics.scrollWidth} innerWidth=${metrics.innerWidth}`);
 
-        // 3) Bottom nav présente et complète sur mobile, absente sur desktop.
-        const isMobile = vp.width < 768;
+        const isMobile = viewport.width < 768;
+        const navInfo = await page.evaluate(`(() => {
+          const nav = document.querySelector('nav[aria-label="Navigation principale"]');
+          const buttons = nav ? [...nav.querySelectorAll('button')] : [];
+          return {
+            exists: Boolean(nav),
+            count: buttons.length,
+            targets: buttons.map((button) => { const rect = button.getBoundingClientRect(); return Math.min(rect.width, rect.height); }),
+            plus: Boolean(nav?.querySelector('button[aria-haspopup="dialog"]')),
+          };
+        })()`);
+
         if (isMobile) {
-          const nav = await page.$('nav[aria-label="Navigation principale"]');
-          record(!!nav, `${tag} — bottom nav présente`);
-          if (nav) {
-            const tabCount = await page.$$eval('nav[aria-label="Navigation principale"] button', (els) => els.length);
-            record(tabCount === 5, `${tag} — 5 entrées bottom nav (4 + Plus)`, `count=${tabCount}`);
-            const targets = await page.$$eval(
-              'nav[aria-label="Navigation principale"] button',
-              (els) => els.map((el) => {
-                const r = el.getBoundingClientRect();
-                return Math.min(r.width, r.height);
-              })
-            );
-            record(targets.every((s) => s >= 34), `${tag} — cibles bottom nav ≥ ~44px (min-dimension)`,
-              `min=${Math.min(...targets).toFixed(1)}`);
-          }
-
-          // 4) Tiroir « Plus » s'ouvre.
-          const plus = await page.$('nav[aria-label="Navigation principale"] button[aria-haspopup="dialog"]');
-          if (plus) {
-            await plus.click();
-            await new Promise((r) => setTimeout(r, 600));
-            const sheetVisible = await page.evaluate(() => {
-              const dialogs = Array.from(document.querySelectorAll('[role="dialog"]'));
-              return dialogs.some((d) => {
-                const s = getComputedStyle(d);
-                return s.display !== 'none' && s.visibility !== 'hidden' && d.getBoundingClientRect().height > 40;
-              });
-            });
-            record(sheetVisible, `${tag} — tiroir « Plus » ouvre`);
-            await page.screenshot({ path: path.join(OUT, `${role}-${vp.name}-plus.png`), fullPage: false });
-            await page.keyboard.press('Escape');
-            await new Promise((r) => setTimeout(r, 400));
-          } else {
-            record(false, `${tag} — bouton « Plus » trouvé`);
+          record(navInfo.exists, `${tag} — bottom nav présente`);
+          record(navInfo.count === 5, `${tag} — 5 entrées bottom nav`, `count=${navInfo.count}`);
+          record(navInfo.targets.length === 5 && navInfo.targets.every((size) => size >= 44), `${tag} — cibles tactiles ≥ 44 px`, `min=${navInfo.targets.length ? Math.min(...navInfo.targets).toFixed(1) : 'n/a'}`);
+          record(navInfo.plus, `${tag} — bouton Plus trouvé`);
+          if (navInfo.plus) {
+            await page.evaluate(`document.querySelector('nav[aria-label="Navigation principale"] button[aria-haspopup="dialog"]').click()`);
+            await sleep(500);
+            const sheetVisible = await page.evaluate(`[...document.querySelectorAll('[role="dialog"]')].some((dialog) => {
+              const style = getComputedStyle(dialog);
+              return style.display !== 'none' && style.visibility !== 'hidden' && dialog.getBoundingClientRect().height > 40;
+            })`);
+            record(sheetVisible, `${tag} — tiroir Plus ouvert`);
+            await screenshot(page, path.join(OUT, `${role}-${viewport.name}-plus.png`));
+            await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape' });
+            await page.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape' });
           }
         } else {
-          const nav = await page.$('nav[aria-label="Navigation principale"]');
-          record(!nav, `${tag} — bottom nav absente sur ${vp.width >= 1024 ? 'desktop' : 'tablette'}`);
-          // Tablette : sidebar repliable visible (md:), desktop : sidebar.
-          const aside = await page.$('aside');
-          record(!!aside, `${tag} — sidebar présente (≥768px)`);
+          const desktopInfo = await page.evaluate(`(() => {
+            const nav = document.querySelector('nav[aria-label="Navigation principale"]');
+            const aside = document.querySelector('aside');
+            return { navExists: Boolean(nav), asideVisible: Boolean(aside && getComputedStyle(aside).display !== 'none' && aside.getBoundingClientRect().width > 0) };
+          })()`);
+          record(!desktopInfo.navExists, `${tag} — bottom nav absente`);
+          record(desktopInfo.asideVisible, `${tag} — sidebar présente`);
         }
 
-        // 5) Thème clair puis sombre.
-        await page.screenshot({ path: path.join(OUT, `${role}-${vp.name}-light.png`), fullPage: false });
-        await page.evaluate(() => localStorage.setItem('theme', 'dark'));
-        await page.reload({ waitUntil: 'networkidle2', timeout: 45000 }).catch(() => {});
-        await new Promise((r) => setTimeout(r, 800));
-        const darkOk = await page.evaluate(() => {
-          const hasDarkClass = document.documentElement.classList.contains('dark');
+        await screenshot(page, path.join(OUT, `${role}-${viewport.name}-light.png`));
+        await page.evaluate("localStorage.setItem('theme', 'dark'); location.reload();");
+        await waitUntilReady(page);
+        await sleep(600);
+        const darkState = await page.evaluate(`(() => {
           const bg = getComputedStyle(document.body).backgroundColor;
-          // Chrome peut renvoyer rgb(), rgba() ou lab().
-          let lum = null;
-          let m = bg.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
-          if (m) {
-            lum = 0.2126 * Number(m[1]) + 0.7152 * Number(m[2]) + 0.0722 * Number(m[3]);
-          } else {
-            m = bg.match(/lab\(([\d.]+)/);
-            if (m) lum = Number(m[1]); // L* de CIELAB : < 50 = sombre
-          }
-          const bgDark = lum !== null ? lum < 50 : false;
-          return { ok: hasDarkClass && bgDark, bg, hasDarkClass, lum };
-        });
-        record(darkOk.ok, `${tag} — thème sombre appliqué`,
-          `classDark=${darkOk.hasDarkClass} bg=${darkOk.bg} lum=${darkOk.lum !== null ? darkOk.lum.toFixed(2) : 'n/a'}`);
-        const mDark = await measure(page);
-        record(mDark.scrollWidth <= mDark.innerWidth + 1, `${tag} — pas de scroll horizontal (sombre)`,
-          `scrollWidth=${mDark.scrollWidth} innerWidth=${mDark.innerWidth}`);
-        await page.screenshot({ path: path.join(OUT, `${role}-${vp.name}-dark.png`), fullPage: false });
-
-        await page.close();
+          const rgb = bg.match(/rgba?\\((\\d+),\\s*(\\d+),\\s*(\\d+)/);
+          const lab = bg.match(/lab\\(([\\d.]+)/);
+          const lum = rgb ? 0.2126 * Number(rgb[1]) + 0.7152 * Number(rgb[2]) + 0.0722 * Number(rgb[3]) : (lab ? Number(lab[1]) : null);
+          return { ok: document.documentElement.classList.contains('dark') && lum !== null && lum < 50, bg, lum };
+        })()`);
+        record(darkState.ok, `${tag} — thème sombre appliqué`, `bg=${darkState.bg} lum=${darkState.lum}`);
+        const darkMetrics = await page.evaluate('({ scrollWidth: Math.max(document.documentElement.scrollWidth, document.body?.scrollWidth || 0), innerWidth: window.innerWidth })');
+        record(darkMetrics.scrollWidth <= darkMetrics.innerWidth + 1, `${tag} — pas de scroll horizontal sombre`, `scrollWidth=${darkMetrics.scrollWidth} innerWidth=${darkMetrics.innerWidth}`);
+        await screenshot(page, path.join(OUT, `${role}-${viewport.name}-dark.png`));
       }
     }
   } finally {
-    await browser.close();
+    try { await browser?.send('Browser.close'); } catch { /* Chrome may already be closed */ }
+    try { page?.ws.close(); } catch { /* ignore cleanup errors */ }
+    try { browser?.ws.close(); } catch { /* ignore cleanup errors */ }
+    if (chrome.exitCode === null) chrome.kill();
   }
 
   fs.writeFileSync(path.join(OUT, 'results.json'), JSON.stringify(results, null, 2));
-  console.log(`\n${results.filter((r) => r.ok).length}/${results.length} checks OK — ${failures} échec(s)`);
+  console.log(`\n${results.filter((result) => result.ok).length}/${results.length} checks OK — ${failures} échec(s)`);
   console.log(`Captures : ${OUT}`);
-  process.exit(failures > 0 ? 1 : 0);
+  process.exitCode = failures > 0 ? 1 : 0;
 }
 
-main().catch((e) => { console.error(e); process.exit(1); });
+main().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});

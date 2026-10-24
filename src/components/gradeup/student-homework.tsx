@@ -13,6 +13,8 @@ import { Input } from '@/components/ui/input';
 import { Calendar, Clock, AlertTriangle, Upload, Download, ClipboardList } from 'lucide-react';
 import { toast } from 'sonner';
 import type { HomeworkInfo } from '@/lib/types';
+import { flushHomeworkSubmissions, listPendingHomeworkSubmissions, queueHomeworkSubmission, type PendingHomeworkSubmission } from '@/lib/offline/homework-submissions';
+import { getLocalDB } from '@/lib/offline/db';
 
 export default function StudentHomework() {
   const { user } = useAppStore();
@@ -24,11 +26,42 @@ export default function StudentHomework() {
   const submitFileRef = useRef<File | null>(null);
   const submitFileInputRef = useRef<HTMLInputElement>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [pendingSubmissions, setPendingSubmissions] = useState<PendingHomeworkSubmission[]>([]);
 
   useEffect(() => {
     if (!user) return;
     fetchHomework();
   }, [user]);
+
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    const refreshPending = async () => {
+      try {
+        const items = await listPendingHomeworkSubmissions(user.schoolId, user.id);
+        if (!cancelled) setPendingSubmissions(items);
+      } catch (error) {
+        console.warn('Impossible de lire la file des devoirs hors ligne:', error);
+      }
+    };
+    const syncPending = async () => {
+      try {
+        await flushHomeworkSubmissions(user.schoolId, user.id);
+        await refreshPending();
+      } catch (error) {
+        console.warn('La synchronisation des devoirs sera retentée:', error);
+      }
+    };
+    void refreshPending();
+    if (navigator.onLine) void syncPending();
+    window.addEventListener('online', syncPending);
+    document.addEventListener('visibilitychange', syncPending);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('online', syncPending);
+      document.removeEventListener('visibilitychange', syncPending);
+    };
+  }, [user?.id, user?.schoolId]);
 
   const fetchHomework = async () => {
     if (!user) return;
@@ -37,9 +70,22 @@ export default function StudentHomework() {
       const res = await fetch('/api/homework?schoolId=' + user.schoolId);
       if (!res.ok) throw new Error('Erreur chargement');
       const data = await res.json();
-      setHomeworkList(Array.isArray(data.homework) ? data.homework : []);
+      const homework = Array.isArray(data.homework) ? data.homework : [];
+      setHomeworkList(homework);
+      try {
+        await getLocalDB().syncMeta.put({ key: `cache:student-homework:${user.schoolId}:${user.id}`, value: { homework, cachedAt: Date.now() } });
+      } catch (cacheError) {
+        console.warn('Cache local des devoirs indisponible:', cacheError);
+      }
     } catch {
-      toast.error('Erreur lors du chargement des devoirs');
+      try {
+        const cached = await getLocalDB().syncMeta.get(`cache:student-homework:${user.schoolId}:${user.id}`);
+        const data = cached?.value as { homework?: HomeworkInfo[] } | undefined;
+        if (Array.isArray(data?.homework)) setHomeworkList(data.homework);
+        else toast.error('Les devoirs ne sont pas disponibles hors connexion.');
+      } catch {
+        toast.error('Erreur lors du chargement des devoirs');
+      }
     } finally {
       setLoading(false);
     }
@@ -49,38 +95,38 @@ export default function StudentHomework() {
     if (!user || !selectedHw) return;
     setSubmitting(true);
     try {
-      let fileUrl = '';
-      if (submitFileRef.current) {
-        const fd = new FormData();
-        fd.append('file', submitFileRef.current);
-        const uploadRes = await fetch('/api/resources/upload', { method: 'POST', body: fd });
-        if (!uploadRes.ok) throw new Error('Erreur upload fichier');
-        const uploadData = await uploadRes.json();
-        fileUrl = uploadData.url;
-      }
-      const res = await fetch('/api/submissions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          homeworkId: selectedHw.id,
-          studentId: user.id,
-          schoolId: user.schoolId,
-          fileUrl,
-          fileName: submitFileName,
-          content: submitContent.trim(),
-        }),
+      await queueHomeworkSubmission({
+        homeworkId: selectedHw.id,
+        userId: user.id,
+        schoolId: user.schoolId,
+        content: submitContent.trim(),
+        file: submitFileRef.current,
       });
-      if (!res.ok) throw new Error('Erreur soumission');
-      toast.success('Devoir soumis avec succès !');
+      const homeworkId = selectedHw.id;
+      if (navigator.onLine) await flushHomeworkSubmissions(user.schoolId, user.id, true);
+      const queued = await listPendingHomeworkSubmissions(user.schoolId, user.id);
+      setPendingSubmissions(queued);
+      const remaining = queued.find((item) => item.homeworkId === homeworkId);
+      if (!remaining) toast.success('Devoir soumis avec succès !');
+      else if (remaining.status === 'error') toast.error(remaining.lastError || 'La soumission doit être corrigée.');
+      else toast.info('Devoir enregistré sur cet appareil. Envoi dès le retour du réseau.');
       setSelectedHw(null);
       setSubmitContent('');
       setSubmitFileName('');
       submitFileRef.current = null;
-    } catch {
-      toast.error('Erreur lors de la soumission');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Impossible d’enregistrer la soumission sur cet appareil.');
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const retrySubmission = async (item: PendingHomeworkSubmission) => {
+    if (!user || !item.retryable) return;
+    await flushHomeworkSubmissions(user.schoolId, user.id, true);
+    const items = await listPendingHomeworkSubmissions(user.schoolId, user.id);
+    setPendingSubmissions(items);
+    if (!items.some((pending) => pending.homeworkId === item.homeworkId)) toast.success('Devoir synchronisé.');
   };
 
   const getDaysRemaining = (dueDate: string): number => {
@@ -125,6 +171,7 @@ export default function StudentHomework() {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-1">
                         <Badge variant="secondary" className="text-[10px] bg-blue-100 text-blue-700">{hw.course?.name || 'Cours'}</Badge>
+                    {pendingSubmissions.find((item) => item.homeworkId === hw.id) && <Badge variant="outline" className="text-[10px]">{pendingSubmissions.find((item) => item.homeworkId === hw.id)?.status === 'error' ? 'À corriger' : 'En attente d’envoi'}</Badge>}
                       </div>
                       <CardTitle className="text-base">{hw.title}</CardTitle>
                     </div>
@@ -154,6 +201,10 @@ export default function StudentHomework() {
                       </a>
                     </div>
                   )}
+                  {pendingSubmissions.find((item) => item.homeworkId === hw.id) && <div className="mt-3 rounded-md bg-amber-50 p-2 text-xs text-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+                    {pendingSubmissions.find((item) => item.homeworkId === hw.id)?.lastError || 'Votre devoir est conservé sur cet appareil et sera envoyé à la reconnexion.'}
+                    {pendingSubmissions.find((item) => item.homeworkId === hw.id)?.retryable && typeof navigator !== 'undefined' && navigator.onLine && <Button size="sm" variant="link" className="h-auto p-1 text-xs" onClick={() => void retrySubmission(pendingSubmissions.find((item) => item.homeworkId === hw.id)!)}>Réessayer</Button>}
+                  </div>}
                 </CardContent>
               </Card>
             );

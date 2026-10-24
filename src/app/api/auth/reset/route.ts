@@ -22,9 +22,9 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
-    if (!newPassword || newPassword.length < 4) {
+    if (!newPassword || newPassword.length < 8) {
       return NextResponse.json(
-        { error: 'Le nouveau mot de passe doit contenir au moins 4 caractères.' },
+        { error: 'Le nouveau mot de passe doit contenir au moins 8 caractères.' },
         { status: 400 }
       );
     }

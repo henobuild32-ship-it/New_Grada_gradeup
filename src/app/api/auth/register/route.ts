@@ -59,9 +59,9 @@ export async function POST(request: NextRequest) {
           { status: 400 }
         );
       }
-      if (password.length < 4) {
+      if (password.length < 8) {
         return NextResponse.json(
-          { error: 'Le mot de passe doit contenir au moins 4 caractères.' },
+          { error: 'Le mot de passe doit contenir au moins 8 caractères.' },
           { status: 400 }
         );
       }
@@ -123,9 +123,9 @@ export async function POST(request: NextRequest) {
           { status: 400 }
         );
       }
-      if (password.length < 4) {
+      if (password.length < 8) {
         return NextResponse.json(
-          { error: 'Le mot de passe doit contenir au moins 4 caractères.' },
+          { error: 'Le mot de passe doit contenir au moins 8 caractères.' },
           { status: 400 }
         );
       }

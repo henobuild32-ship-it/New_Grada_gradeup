@@ -72,11 +72,13 @@ export const NAV_ITEMS_BY_ROLE: Record<UserRole, NavItem[]> = {
     { label: 'Présence', page: 'admin-presence', icon: ClipboardCheck, emoji: '✅' },
     { label: 'Rapports', page: 'admin-reports', icon: BarChart3, emoji: '📈' },
     { label: 'Notifications', page: 'admin-notifications', icon: Bell, emoji: '🔔' },
-    { label: 'Visioconférences', page: 'admin-conferences', icon: Video, emoji: '🎥' },
+    { label: 'Planifier une réunion', page: 'admin-conferences', icon: Video, emoji: '🎥' },
     { label: 'Cours', page: 'admin-courses', icon: BookOpen, emoji: '📚' },
     { label: 'Emploi du temps', page: 'admin-schedules', icon: CalendarDays, emoji: '🗓️' },
     { label: 'Bulletins Sync', page: 'auto-report-sync', icon: Zap, emoji: '⚡' },
     { label: 'Cotation & Délibération RDC', page: 'admin-cotation-rules', icon: SlidersHorizontal, emoji: '⚖️' },
+    { label: 'Validation des bulletins', page: 'admin-bulletins', icon: Award, emoji: '🏆' },
+    { label: 'Coefficients', page: 'admin-coefficients', icon: SlidersHorizontal, emoji: '⚖️' },
     { label: 'Calendrier des périodes', page: 'admin-school-calendar', icon: CalendarDays, emoji: '🗓️' },
     { label: 'Passages', page: 'admin-passages', icon: GraduationCap, emoji: '🎓' },
     { label: 'Demandes de notes', page: 'admin-note-modifications', icon: PenLine, emoji: '✍️' },
@@ -93,12 +95,14 @@ export const NAV_ITEMS_BY_ROLE: Record<UserRole, NavItem[]> = {
   ],
   CAISSIER: [
     { label: 'Caisse', page: 'caisse', icon: DollarSign, emoji: '💵' },
+    { label: 'Notifications', page: 'caisse-notifications', icon: Bell, emoji: '🔔' },
     { label: 'Profil', page: 'profile', icon: User, emoji: '👤' },
     { label: 'Aide', page: 'help', icon: Lightbulb, emoji: '💡' },
   ],
   TEACHER: [
     { label: 'Tableau de bord', page: 'teacher-dashboard', icon: LayoutDashboard, emoji: '📊' },
     { label: 'Cours', page: 'teacher-courses', icon: BookOpen, emoji: '📚' },
+    { label: 'Leçons', page: 'teacher-lessons', icon: FileText, emoji: '📖' },
     { label: 'Mes Classes', page: 'teacher-classes', icon: School, emoji: '🏫' },
     { label: 'Emploi du temps', page: 'teacher-schedules', icon: CalendarDays, emoji: '🗓️' },
     { label: 'Notes', page: 'teacher-grades', icon: ClipboardList, emoji: '📝' },
@@ -126,6 +130,7 @@ export const NAV_ITEMS_BY_ROLE: Record<UserRole, NavItem[]> = {
     { label: 'Emploi du temps', page: 'student-schedules', icon: CalendarDays, emoji: '🗓️' },
     { label: 'Leçons', page: 'student-lessons', icon: FileText, emoji: '📖' },
     { label: 'Notes', page: 'student-grades', icon: ClipboardList, emoji: '📝' },
+    { label: 'Paiements', page: 'student-payments', icon: CreditCard, emoji: '💳' },
     { label: 'Bulletins', page: 'student-bulletins', icon: Award, emoji: '🏆' },
     { label: 'Devoirs', page: 'student-homework', icon: ClipboardCheck, emoji: '📋' },
     { label: 'Absences', page: 'student-attendance', icon: Calendar, emoji: '📅' },
@@ -218,8 +223,10 @@ export const PAGE_TITLES: Record<PageView, string> = {
   'auto-report-sync': 'Bulletins Synchronisés',
   'cahier-cotation': 'Cahier de Cotation RDC',
   'admin-cotation-rules': 'Cotation & Délibération RDC',
+  'admin-bulletins': 'Validation des bulletins',
   'admin-end-of-year': 'Fin du cursus',
   caisse: 'Caisse',
+  'caisse-notifications': 'Notifications',
   'teacher-dashboard': 'Tableau de bord',
   'teacher-courses': 'Cours',
   'teacher-classes': 'Mes Classes',
@@ -258,8 +265,10 @@ export const PAGE_TITLES: Record<PageView, string> = {
 };
 
 export const PAGE_HELP: Partial<Record<PageView, string>> = {
+  'caisse-notifications': 'Consultez les annonces et messages destinés à la caisse.',
   'admin-dashboard': 'Consultez les indicateurs principaux de votre établissement.',
   'admin-users': 'Gérez les comptes, rôles et informations des utilisateurs.',
+  'admin-bulletins': 'Générez, validez et publiez les bulletins officiels.',
   'admin-notifications': "Consultez et gérez les notifications envoyées dans l'établissement.",
   'teacher-dashboard': 'Retrouvez un résumé de vos cours et activités.',
   'teacher-grades': 'Ajoutez les notes. Au primaire, le trimestre est calculé depuis la date.',
@@ -269,6 +278,19 @@ export const PAGE_HELP: Partial<Record<PageView, string>> = {
   'parent-grades': 'Suivez les notes et moyennes de vos enfants.',
   'parent-notifications': 'Consultez les informations concernant vos enfants.',
 };
+
+/** Écran de notifications destiné à chaque rôle, utilisé par la cloche globale. */
+export const NOTIFICATION_PAGE_BY_ROLE: Record<UserRole, PageView> = {
+  ADMIN: 'admin-notifications',
+  CAISSIER: 'caisse-notifications',
+  TEACHER: 'teacher-notifications',
+  STUDENT: 'student-notifications',
+  PARENT: 'parent-notifications',
+};
+
+export function getNotificationPage(role: UserRole): PageView {
+  return NOTIFICATION_PAGE_BY_ROLE[role];
+}
 
 function filterForRole(items: NavItem[], role: UserRole, isTitulaire?: boolean): NavItem[] {
   if (role === 'TEACHER' && !isTitulaire) {

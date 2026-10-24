@@ -1,4 +1,4 @@
-import { getLocalDB, ENTITY_NAMES } from './db';
+import { deleteLocalDB, getLocalDB, ENTITY_NAMES } from './db';
 
 /**
  * Gestion du stockage local : quota, purge des données anciennes,
@@ -30,21 +30,29 @@ export async function purgeOldRecords(retentionMs: number = DEFAULT_RETENTION_MS
   const cutoff = Date.now() - retentionMs;
   let purged = 0;
   for (const entity of ENTITY_NAMES) {
-    const table = (db as unknown as Record<string, { toArray: () => Promise<Array<{ updatedAt: number; syncStatus: string; delete: () => Promise<void> }>> }>)[entity];
+    const table = (db as unknown as Record<string, {
+      toArray: () => Promise<Array<{ id: string; updatedAt: number; syncStatus: string }>>;
+      delete: (id: string) => Promise<void>;
+    }>)[entity];
     if (!table) continue;
     const rows = await table.toArray();
     for (const row of rows) {
       if (row.syncStatus === 'synced' && row.updatedAt < cutoff) {
-        await row.delete();
+        await table.delete(row.id);
         purged++;
       }
     }
   }
   // Purger aussi les fichiers hors ligne anciens (> 30 jours).
   const files = await db.offlineFiles.toArray();
+  const syncMeta = await db.syncMeta.toArray();
+  const pendingFileKeys = new Set(syncMeta.flatMap((entry) => {
+    const value = entry.value && typeof entry.value === 'object' ? entry.value as { fileKey?: unknown } : null;
+    return typeof value?.fileKey === 'string' ? [value.fileKey] : [];
+  }));
   const fileCutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
   for (const f of files) {
-    if (f.downloadedAt < fileCutoff) {
+    if (f.downloadedAt < fileCutoff && !pendingFileKeys.has(f.url)) {
       await db.offlineFiles.delete(f.url);
       purged++;
     }
@@ -78,10 +86,7 @@ export async function clearLocalCache(): Promise<{ clearedTables: number; cleare
  * (sécurité : ne pas laisser de données d'un autre utilisateur).
  */
 export async function wipeAllLocalData(): Promise<void> {
-  const db = getLocalDB();
-  await db.delete();
-  // Réinitialiser l'instance pour forcer une réouverture propre.
-  // (getLocalDB recrée à la prochaine appelée.)
+  await deleteLocalDB();
 }
 
 /** Télécharge un fichier pour lecture hors ligne (cache à la demande). */

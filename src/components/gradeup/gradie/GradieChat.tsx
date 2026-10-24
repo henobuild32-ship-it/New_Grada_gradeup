@@ -697,6 +697,7 @@ export default function GradieChat({ userId, schoolId, userRole, userName }: Gra
   const [activeConversation, setActiveConversation] = useState<Conversation | null>(null);
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
+  const [isOnline, setIsOnline] = useState(true);
   const [streamingContent, setStreamingContent] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [search, setSearch] = useState('');
@@ -726,6 +727,17 @@ export default function GradieChat({ userId, schoolId, userRole, userName }: Gra
   const attachInputRef = useRef<HTMLInputElement>(null);
   const stopRequestedRef = useRef(false);
   const activeConversationIdKey = `gradeup-gradie-active-${userId}`;
+
+  useEffect(() => {
+    const updateConnection = () => setIsOnline(navigator.onLine);
+    updateConnection();
+    window.addEventListener('online', updateConnection);
+    window.addEventListener('offline', updateConnection);
+    return () => {
+      window.removeEventListener('online', updateConnection);
+      window.removeEventListener('offline', updateConnection);
+    };
+  }, []);
 
   // ── Attach / upload document ─────────────────────────────────────────────────
   const handleAttachFile = async (file: File) => {
@@ -899,6 +911,10 @@ export default function GradieChat({ userId, schoolId, userRole, userName }: Gra
   const sendMessage = async (override?: string) => {
     const msg = (override ?? input).trim();
     if (!msg || isStreaming) return;
+    if (!navigator.onLine) {
+      setError('Fonction IA disponible en ligne. Votre message reste dans le champ et ne sera pas envoyé hors connexion.');
+      return;
+    }
     setInput('');
     setError(null);
     setStopRequested(false);
@@ -1120,7 +1136,7 @@ export default function GradieChat({ userId, schoolId, userRole, userName }: Gra
               Gradie IA
             </h1>
             <p className="text-[13px] text-emerald-400 font-medium leading-tight mt-0.5 flex items-center gap-1.5">
-              {isStreaming ? 'En train d\'écrire...' : 'En ligne'}
+              {isStreaming ? 'En train d\'écrire...' : isOnline ? 'En ligne' : 'Hors ligne — fonction IA indisponible'}
               <span className="text-[10px] bg-white/10 text-white/50 px-1.5 py-0.5 rounded-full font-normal">
                 {selectedModel === 'glm' ? 'GLM' : selectedModel === 'deepseek' ? 'DeepSeek' : selectedModel === 'gemma' ? 'Gemma' : 'Llama'}
               </span>

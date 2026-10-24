@@ -134,6 +134,8 @@ interface CsvRowValidation {
   birthDate: string;
   phone?: string;
   className?: string;
+  classId?: string;
+  specialty?: string;
   isValid: boolean;
   errors: string[];
 }
@@ -193,11 +195,12 @@ export default function AdminUsers() {
       email: '',
       password: '',
       role: 'STUDENT',
-      gender: 'M',
+      gender: '',
       birthDate: '',
       specialty: '',
       phone: '',
       className: '',
+      classId: '',
       parentId: '',
       isTitulaire: false,
       titulaireClassIds: [],
@@ -303,11 +306,12 @@ export default function AdminUsers() {
       email: '',
       password: '',
       role: 'STUDENT',
-      gender: 'M',
+      gender: '',
       birthDate: '',
       specialty: '',
       phone: '',
       className: '',
+      classId: '',
       parentId: '',
       isTitulaire: false,
       titulaireClassIds: [],
@@ -333,11 +337,12 @@ export default function AdminUsers() {
       email: u.email || '',
       password: '',
       role: (u.role as AdminUserFormValues['role']) || 'STUDENT',
-      gender: u.gender === 'F' ? 'F' : 'M',
+      gender: u.gender === 'F' || u.gender === 'M' ? u.gender : '',
       birthDate: u.birthDate || '',
       specialty: u.specialty || '',
       phone: u.phone || '',
       className: u.classEnrollments?.[0]?.class?.name || '',
+      classId: u.classEnrollments?.[0]?.class?.id || '',
       parentId: u.parentId || '',
       isTitulaire: u.isTitulaire || false,
       titulaireClassIds: u.titulaireClassIds || [],
@@ -388,6 +393,7 @@ export default function AdminUsers() {
           birthDate: data.birthDate,
           specialty: data.specialty,
           phone: data.phone,
+          classId: data.role === 'STUDENT' ? data.classId : undefined,
           isTitulaire: data.isTitulaire,
           titulaireClassIds: data.isTitulaire ? data.titulaireClassIds : [],
           photoUrl: photoPreview,
@@ -414,11 +420,11 @@ export default function AdminUsers() {
           birthDate: data.birthDate,
           specialty: data.specialty,
           phone: data.phone,
+          classId: data.role === 'STUDENT' ? data.classId : undefined,
           isTitulaire: data.isTitulaire,
           titulaireClassIds: data.isTitulaire ? data.titulaireClassIds : [],
           photoUrl: photoPreview,
         };
-        if (data.role === 'STUDENT' && data.className) body.className = data.className;
         if (data.role === 'STUDENT' && data.parentId) body.parentId = data.parentId;
 
         const res = await fetch('/api/users', {
@@ -601,22 +607,29 @@ export default function AdminUsers() {
       const birthDate = parts[4] || '';
       const phone = parts[5] || '';
       const className = parts[6] || '';
+      const specialty = parts[7] || '';
+      const matchedClass = classes.find((item) => item.name.toLowerCase() === className.toLowerCase());
 
       const errors: string[] = [];
       if (fullName.length < 3) errors.push('Nom trop court (min 3 car.)');
       if (!email.includes('@')) errors.push('Email invalide');
       if (gender !== 'M' && gender !== 'F') errors.push('Sexe obligatoire (M ou F)');
       if ((role === 'STUDENT' || role === 'TEACHER') && !birthDate) errors.push('Date de naissance requise');
+      if (role === 'STUDENT' && !matchedClass) errors.push(className ? 'Classe inconnue dans cet établissement' : 'Classe requise pour un élève');
+      if (role === 'TEACHER' && !phone.trim()) errors.push('Téléphone requis pour un professeur');
+      if (role === 'TEACHER' && !specialty.trim()) errors.push('Spécialité requise pour un professeur');
 
       parsedRows.push({
         row: i,
         fullName,
         email,
         role,
-        gender: gender === 'F' ? 'F' : 'M',
+        gender: gender === 'F' || gender === 'M' ? gender : '',
         birthDate,
         phone,
         className,
+        classId: matchedClass?.id,
+        specialty,
         isValid: errors.length === 0,
         errors,
       });
@@ -650,8 +663,8 @@ export default function AdminUsers() {
           gender: r.gender,
           birthDate: r.birthDate,
           phone: r.phone || '',
-          className: r.className || '',
-          specialty: r.role === 'TEACHER' ? 'Général' : '',
+          classId: r.role === 'STUDENT' ? r.classId : undefined,
+          specialty: r.specialty || '',
         };
 
         const res = await fetch('/api/users', {
@@ -1403,22 +1416,22 @@ export default function AdminUsers() {
                 <div className="space-y-1.5">
                   <Label>Classe d&apos;affectation *</Label>
                   <Select
-                    value={form.watch('className') || undefined}
-                    onValueChange={(val) => form.setValue('className', val, { shouldValidate: true })}
+                    value={form.watch('classId') || undefined}
+                    onValueChange={(val) => form.setValue('classId', val, { shouldValidate: true })}
                   >
                     <SelectTrigger className="h-11">
                       <SelectValue placeholder="Sélectionnez une classe" />
                     </SelectTrigger>
                     <SelectContent>
                       {classes.map((c) => (
-                        <SelectItem key={c.id} value={c.name}>
+                        <SelectItem key={c.id} value={c.id}>
                           {c.name}
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
-                  {form.formState.errors.className && (
-                    <p className="text-xs text-red-600">{form.formState.errors.className.message}</p>
+                  {form.formState.errors.classId && (
+                    <p className="text-xs text-red-600">{form.formState.errors.classId.message}</p>
                   )}
                 </div>
 

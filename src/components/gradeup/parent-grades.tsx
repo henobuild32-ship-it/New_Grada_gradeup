@@ -1,8 +1,13 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useAppStore } from '@/lib/store';
 import type { UserInfo, GradeInfo } from '@/lib/types';
+import { useEntityListState } from '@/lib/offline/hooks';
+import { useParentChildren } from '@/lib/offline/parent-children';
+import { usePersistedChildSelection } from '@/lib/offline/child-selection';
+import type { GradeRecord } from '@/lib/offline/db';
+import type { LocalRecord } from '@/lib/offline/types';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -16,7 +21,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
 import {
-  TrendingUp, BookOpen, Award, BarChart3, PenLine,
+  TrendingUp, BookOpen, Award, BarChart3, PenLine, AlertTriangle, RefreshCw,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
@@ -25,82 +30,75 @@ import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Loader2 } from 'lucide-react';
 
+function extractGrades(data: unknown): Record<string, unknown>[] {
+  if (typeof data !== 'object' || data === null || !('grades' in data)) return [];
+  const grades = (data as { grades?: unknown }).grades;
+  return Array.isArray(grades)
+    ? grades.filter((grade): grade is Record<string, unknown> => typeof grade === 'object' && grade !== null)
+    : [];
+}
+
+function gradeMatchesTrimester(grade: GradeRecord, trimester: string): boolean {
+  const term = String(grade.trimester ?? grade.period ?? '');
+  if (trimester === '1') return ['1', 'P1', 'P2', 'EX1'].includes(term);
+  if (trimester === '2') return ['2', 'P3', 'P4', 'EX2'].includes(term);
+  return term === trimester;
+}
+
 export default function ParentGrades() {
   const { user } = useAppStore();
-  const [children, setChildren] = useState<UserInfo[]>([]);
-  const [selectedChildId, setSelectedChildId] = useState('');
   const [trimester, setTrimester] = useState('1');
-  const [grades, setGrades] = useState<GradeInfo[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [loadingChildren, setLoadingChildren] = useState(true);
   const [modTarget, setModTarget] = useState<GradeInfo | null>(null);
   const [modReason, setModReason] = useState('');
   const [modNewScore, setModNewScore] = useState('');
   const [modSending, setModSending] = useState(false);
   const [modStatusMap, setModStatusMap] = useState<Record<string, string>>({});
   const schoolId = user?.schoolId || '';
+  const childrenState = useParentChildren(user?.role === 'PARENT' ? user.id : undefined, schoolId);
+  const children = childrenState.data as unknown as UserInfo[];
+  const { selectedChildId, selectChild } = usePersistedChildSelection(user?.id ?? '', children.map((child) => child.id));
+  const gradeFilter = useCallback(
+    (record: LocalRecord) => {
+      const grade = record as GradeRecord;
+      return grade.studentId === selectedChildId && gradeMatchesTrimester(grade, trimester);
+    },
+    [selectedChildId, trimester]
+  );
+  const gradeState = useEntityListState<GradeRecord>('grades', schoolId, {
+    remoteUrl: selectedChildId
+      ? `/api/grades?schoolId=${encodeURIComponent(schoolId)}&studentId=${encodeURIComponent(selectedChildId)}&trimester=${encodeURIComponent(trimester)}`
+      : undefined,
+    extract: extractGrades,
+    filter: gradeFilter,
+  });
+  const grades = gradeState.data as unknown as GradeInfo[];
+  const loading = gradeState.loading;
+  const loadingChildren = childrenState.loading;
 
-  useEffect(() => { fetchChildren(); }, [user]);
-  useEffect(() => { if (selectedChildId && schoolId) { fetchGrades(); } }, [selectedChildId, trimester, schoolId]);
-
-  const fetchChildren = async () => {
-    if (!user?.id || !schoolId) {
-      setLoadingChildren(false);
-      return;
-    }
-    setLoadingChildren(true);
-    try {
-      const res = await fetch(`/api/users?schoolId=${schoolId}&role=STUDENT&parentId=${user.id}`);
-      if (res.ok) { 
-        const data = await res.json(); 
-        const childrenArray = Array.isArray(data.users) ? data.users : [];
-        setChildren(childrenArray); 
-        if (childrenArray.length > 0 && !selectedChildId) { 
-          setSelectedChildId(childrenArray[0].id); 
-        } 
-      } else {
-        setChildren([]);
-      }
-    } catch { 
-      toast.error('Erreur lors du chargement des enfants');
-      setChildren([]);
-    } finally { 
-      setLoadingChildren(false);
-    }
-  };
-
-  const fetchGrades = async () => {
-    if (!selectedChildId) return;
-    setLoading(true);
-    try {
-      const res = await fetch(`/api/grades?schoolId=${schoolId}&studentId=${selectedChildId}&trimester=${trimester}`);
-      if (res.ok) { 
-        const data = await res.json();
-        setGrades(Array.isArray(data.grades) ? data.grades : []);
-      } else {
-        setGrades([]);
-      }
-      // Statut des demandes de correction pour cet enfant
-      try {
-        const modRes = await fetch(`/api/note-modifications?schoolId=${schoolId}&studentId=${selectedChildId}`);
-        const modData = await modRes.json();
+  useEffect(() => {
+    if (!selectedChildId || !schoolId || typeof navigator !== 'undefined' && !navigator.onLine) return;
+    let active = true;
+    void fetch(`/api/note-modifications?schoolId=${encodeURIComponent(schoolId)}&studentId=${encodeURIComponent(selectedChildId)}`)
+      .then(async (res) => {
+        if (!res.ok) throw new Error('Statut des demandes indisponible');
+        return res.json();
+      })
+      .then((data) => {
+        if (!active) return;
         const map: Record<string, string> = {};
-        const mods = Array.isArray(modData.noteModifications) ? modData.noteModifications : [];
-        for (const m of mods) {
-          if (!map[m.noteId] || m.requestStatus === 'PENDING') map[m.noteId] = m.requestStatus;
+        const modifications = Array.isArray(data.noteModifications) ? data.noteModifications : [];
+        for (const modification of modifications) {
+          if (!map[modification.noteId] || modification.requestStatus === 'PENDING') {
+            map[modification.noteId] = modification.requestStatus;
+          }
         }
         setModStatusMap(map);
-      } catch { /* silencieux */ }
-    } catch { 
-      toast.error('Erreur lors du chargement des notes');
-      setGrades([]);
-    } finally { 
-      setLoading(false);
-    }
-  };
+      })
+      .catch(() => undefined);
+    return () => { active = false; };
+  }, [schoolId, selectedChildId]);
 
-  // Vérification que children est bien un tableau avant d'utiliser find
-  const selectedChild = Array.isArray(children) ? children.find(c => c.id === selectedChildId) : undefined;
+  const selectedChild = children.find((child) => child.id === selectedChildId);
 
   const gradesByCourse = (Array.isArray(grades) ? grades : []).reduce<Record<string, GradeInfo[]>>((acc, grade) => {
     const key = grade.courseId;
@@ -211,19 +209,29 @@ export default function ParentGrades() {
   }
 
   // Aucun enfant trouvé
-  if (Array.isArray(children) && children.length === 0) {
+  if (children.length === 0) {
     return (
       <div className="space-y-6 animate-fade-in">
         <div className="mb-6 rounded-xl bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/30 dark:to-indigo-950/30 p-6">
           <h1 className="text-2xl font-bold">Notes</h1>
           <p className="text-sm text-muted-foreground mt-1">Suivi des notes de vos enfants</p>
         </div>
-        <div className="text-center py-20">
-          <div className="mx-auto w-24 h-24 rounded-full bg-muted/50 flex items-center justify-center mb-4">
-            <BarChart3 className="h-12 w-12 text-muted-foreground/50" />
+        {childrenState.error ? (
+          <div role="alert" className="flex flex-col items-center gap-3 rounded-xl border border-amber-300 bg-amber-50 p-6 text-center text-amber-950 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100">
+            <AlertTriangle className="h-8 w-8" />
+            <p className="text-sm">{childrenState.error}</p>
+            <Button type="button" variant="outline" className="min-h-11" onClick={() => void childrenState.refresh()} disabled={childrenState.refreshing}>
+              <RefreshCw className={`mr-2 h-4 w-4 ${childrenState.refreshing ? 'animate-spin' : ''}`} /> Réessayer
+            </Button>
           </div>
-          <p className="text-muted-foreground text-center">Aucun enfant trouvé</p>
-        </div>
+        ) : (
+          <div className="py-20 text-center">
+            <div className="mx-auto mb-4 flex h-24 w-24 items-center justify-center rounded-full bg-muted/50">
+              <BarChart3 className="h-12 w-12 text-muted-foreground/50" />
+            </div>
+            <p className="text-center text-muted-foreground">Aucun enfant trouvé</p>
+          </div>
+        )}
       </div>
     );
   }
@@ -238,11 +246,11 @@ export default function ParentGrades() {
 
       {/* Controls */}
       <div className="flex flex-col sm:flex-row gap-4">
-        {Array.isArray(children) && children.length > 1 && (
+        {children.length > 1 && (
           <div className="flex items-center gap-2">
             <span className="text-sm text-muted-foreground whitespace-nowrap">Enfant :</span>
-            <Select value={selectedChildId} onValueChange={setSelectedChildId}>
-              <SelectTrigger className="w-[200px] focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all">
+            <Select value={selectedChildId} onValueChange={selectChild}>
+              <SelectTrigger className="h-11 w-full transition-all focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 sm:w-[200px]">
                 <SelectValue placeholder="Sélectionner un enfant" />
               </SelectTrigger>
               <SelectContent>
@@ -254,7 +262,7 @@ export default function ParentGrades() {
         <div className="flex items-center gap-2">
           <span className="text-sm text-muted-foreground whitespace-nowrap">Trimestre :</span>
           <Select value={trimester} onValueChange={setTrimester}>
-            <SelectTrigger className="w-[180px] focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all">
+            <SelectTrigger className="h-11 w-full transition-all focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 sm:w-[180px]">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -265,6 +273,20 @@ export default function ParentGrades() {
           </Select>
         </div>
       </div>
+
+      {childrenState.error && (
+        <p role="status" className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100">
+          {childrenState.error} Les informations enregistrées restent disponibles.
+        </p>
+      )}
+      {gradeState.error && (
+        <div role="status" className="flex flex-col gap-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100 sm:flex-row sm:items-center sm:justify-between">
+          <span>{gradeState.error}</span>
+          <Button type="button" variant="outline" className="min-h-11 shrink-0" onClick={() => void gradeState.refresh()} disabled={gradeState.refreshing}>
+            <RefreshCw className={`mr-2 h-4 w-4 ${gradeState.refreshing ? 'animate-spin' : ''}`} /> Réessayer
+          </Button>
+        </div>
+      )}
 
       {loading ? (
         <div className="space-y-6">

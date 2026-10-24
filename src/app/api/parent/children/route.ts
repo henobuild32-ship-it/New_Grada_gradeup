@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { authenticateRequest, AuthError } from '@/lib/auth/authenticate';
+import { authenticateRequestActive, AuthError } from '@/lib/auth/authenticate';
 
 export async function GET(request: NextRequest) {
   try {
-    const auth = authenticateRequest(request);
+    const auth = await authenticateRequestActive(request);
     if (auth.role !== 'PARENT') return NextResponse.json({ error: 'Accès réservé aux parents.' }, { status: 403 });
     const children = await db.user.findMany({
-      where: { parentId: auth.userId, role: 'STUDENT', active: true },
+      where: { parentId: auth.userId, role: 'STUDENT', active: true, deletedAt: null },
       include: { school: { select: { id: true, name: true, logoUrl: true, academicYear: true } }, classEnrollments: { include: { class: { select: { id: true, name: true, level: true } } } } },
       orderBy: [{ school: { name: 'asc' } }, { fullName: 'asc' }],
     });

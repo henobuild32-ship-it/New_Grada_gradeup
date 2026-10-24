@@ -30,6 +30,7 @@ const AdminDashboard = dynamic(() => import('@/components/gradeup/admin-dashboar
 const AdminUsers = dynamic(() => import('@/components/gradeup/admin-users'), { ssr: false, loading: () => <PageSkeleton /> });
 const AdminClasses = dynamic(() => import('@/components/gradeup/admin-classes'), { ssr: false, loading: () => <PageSkeleton /> });
 const AdminPayments = dynamic(() => import('@/components/gradeup/admin-payments'), { ssr: false, loading: () => <PageSkeleton /> });
+const AdminBulletins = dynamic(() => import('@/components/gradeup/admin-bulletins'), { ssr: false, loading: () => <PageSkeleton /> });
 const AdminConfig = dynamic(() => import('@/components/gradeup/admin-config'), { ssr: false, loading: () => <PageSkeleton /> });
 const AdminReports = dynamic(() => import('@/components/gradeup/admin-reports'), { ssr: false, loading: () => <PageSkeleton /> });
 const AdminNotifications = dynamic(() => import('@/components/gradeup/admin-notifications'), { ssr: false, loading: () => <PageSkeleton /> });
@@ -41,8 +42,9 @@ const AdminCards = dynamic(() => import('@/components/gradeup/admin-cards'), { s
 const AdminAi = dynamic(() => import('@/components/gradeup/admin-ai'), { ssr: false, loading: () => <PageSkeleton /> });
 const TuitionTracking = dynamic(() => import('@/components/gradeup/tuition-tracking'), { ssr: false, loading: () => <PageSkeleton /> });
 const CashierCaisse = dynamic(() => import('@/components/gradeup/cashier-caisse'), { ssr: false, loading: () => <PageSkeleton /> });
+const CashierNotifications = dynamic(() => import('@/components/gradeup/cashier-notifications'), { ssr: false, loading: () => <PageSkeleton /> });
 const EndOfYear = dynamic(() => import('@/components/gradeup/end-of-year'), { ssr: false, loading: () => <PageSkeleton /> });
-const TeacherReports = dynamic(() => import('@/components/gradeup/teacher-reports'), { ssr: false, loading: () => <PageSkeleton /> });
+const TeacherCanonicalBulletins = dynamic(() => import('@/components/gradeup/teacher-canonical-bulletins'), { ssr: false, loading: () => <PageSkeleton /> });
 const AdminCourses = dynamic(() => import('@/components/gradeup/admin-courses'), { ssr: false, loading: () => <PageSkeleton /> });
 const AdminPresence = dynamic(() => import('@/components/gradeup/admin-presence'), { ssr: false, loading: () => <PageSkeleton /> });
 const AdminSchedules = dynamic(() => import('@/components/gradeup/admin-schedules'), { ssr: false, loading: () => <PageSkeleton /> });
@@ -75,6 +77,7 @@ const StudentAI = dynamic(() => import('@/components/gradeup/student-ai'), { ssr
 const StudentSchedules = dynamic(() => import('@/components/gradeup/schedules-page'), { ssr: false, loading: () => <PageSkeleton /> });
 const StudentHomework = dynamic(() => import('@/components/gradeup/student-homework'), { ssr: false, loading: () => <PageSkeleton /> });
 const StudentNotifications = dynamic(() => import('@/components/gradeup/student-notifications'), { ssr: false, loading: () => <PageSkeleton /> });
+const StudentPayments = dynamic(() => import('@/components/gradeup/student-payments'), { ssr: false, loading: () => <PageSkeleton /> });
 const ParentDashboard = dynamic(() => import('@/components/gradeup/parent-dashboard'), { ssr: false, loading: () => <PageSkeleton /> });
 const ParentGrades = dynamic(() => import('@/components/gradeup/parent-grades'), { ssr: false, loading: () => <PageSkeleton /> });
 const ParentBulletins = dynamic(() => import('@/components/gradeup/parent-bulletins'), { ssr: false, loading: () => <PageSkeleton /> });
@@ -102,15 +105,12 @@ function PageRouter({ page }: { page: PageView }) {
     if (!allowed) return <AuthPage />;
   }
 
-  if (page === 'student-payments') {
-    return <StudentDashboard />;
-  }
-
   if (page === 'auth' || page === 'register') return <AuthPage />;
   if (page === 'admin-dashboard') return <AdminDashboard />;
   if (page === 'admin-users') return <AdminUsers />;
   if (page === 'admin-classes') return <AdminClasses />;
   if (page === 'admin-payments') return <AdminPayments />;
+  if (page === 'admin-bulletins') return <AdminBulletins />;
   if (page === 'admin-config') return <AdminConfig />;
   if (page === 'admin-reports') return <AdminReports />;
   if (page === 'admin-notifications') return <AdminNotifications />;
@@ -132,10 +132,11 @@ function PageRouter({ page }: { page: PageView }) {
   if (page === 'admin-cotation-rules') return <AdminCotationRules />;
   if (page === 'admin-tuition') return <TuitionTracking />;
   if (page === 'caisse') return <CashierCaisse />;
+  if (page === 'caisse-notifications') return <CashierNotifications />;
   if (page === 'admin-end-of-year') return <EndOfYear />;
   if (page === 'admin-ai') return <AdminAi />;
   if (page === 'teacher-dashboard') return <TeacherDashboard />;
-  if (page === 'teacher-reports') return <TeacherReports />;
+  if (page === 'teacher-reports') return <TeacherCanonicalBulletins />;
   if (page === 'teacher-courses') return <TeacherCourses />;
   if (page === 'teacher-classes') return <TeacherClasses />;
   if (page === 'teacher-lessons') return <TeacherLessons />;
@@ -157,6 +158,7 @@ function PageRouter({ page }: { page: PageView }) {
   if (page === 'student-ai') return <StudentAI />;
   if (page === 'student-homework') return <StudentHomework />;
   if (page === 'student-notifications') return <StudentNotifications />;
+  if (page === 'student-payments') return <StudentPayments />;
   if (page === 'parent-dashboard') return <ParentDashboard />;
   if (page === 'parent-grades') return <ParentGrades />;
   if (page === 'parent-bulletins') return <ParentBulletins />;
@@ -197,20 +199,13 @@ function hasStoredSession() {
 }
 
 export default function HomePage() {
-  const { currentPage, user, setCurrentPage, hydrateSession } = useAppStore();
+  const { currentPage, user, hydrateSession } = useAppStore();
   const [hydrating, setHydrating] = useState(true);
   const [maybeLoggedIn] = useState(hasStoredSession);
 
   useEffect(() => {
     hydrateSession().finally(() => setHydrating(false));
   }, [hydrateSession]);
-
-  // Reset unauthorized pages for student users after session restoration
-  useEffect(() => {
-    if (user?.role === 'STUDENT' && currentPage === 'student-payments') {
-      setCurrentPage('student-dashboard');
-    }
-  }, [user, currentPage, setCurrentPage]);
 
   if (hydrating && maybeLoggedIn) {
     return <SessionSplash />;

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { authenticateRequest, AuthError } from '@/lib/auth/authenticate';
 import { assertYearOpen } from '@/lib/year-status';
+import { auditFromRequest } from '@/lib/api/audit';
 
 // Haversine formula — returns distance in meters between two GPS points
 function haversineDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
@@ -32,6 +33,7 @@ export async function POST(request: NextRequest) {
     if (!userId || !schoolId) {
       return NextResponse.json({ error: 'userId et schoolId requis' }, { status: 400 });
     }
+    if (schoolId !== auth.schoolId) return NextResponse.json({ error: 'Établissement invalide' }, { status: 403 });
 
     // Vérifier que l'utilisateur marque sa propre présence
     if (auth.userId !== userId) {
@@ -58,8 +60,13 @@ export async function POST(request: NextRequest) {
     let geoValid = true;
     let distanceMeters: number | null = null;
 
-    if (school.latitude !== null && school.longitude !== null && latitude !== undefined && longitude !== undefined) {
-      distanceMeters = haversineDistance(latitude, longitude, school.latitude, school.longitude);
+    if (school.latitude !== null && school.longitude !== null) {
+      const lat = Number(latitude);
+      const lng = Number(longitude);
+      if (!Number.isFinite(lat) || lat < -90 || lat > 90 || !Number.isFinite(lng) || lng < -180 || lng > 180) {
+        return NextResponse.json({ error: 'La position GPS est obligatoire pour pointer dans le périmètre de l’école.' }, { status: 422 });
+      }
+      distanceMeters = haversineDistance(lat, lng, school.latitude, school.longitude);
       geoValid = distanceMeters <= GEO_RADIUS_METERS;
     }
 
@@ -111,8 +118,8 @@ export async function POST(request: NextRequest) {
         heureArrivee: now,
         statut,
         justification: justification || null,
-        latitude: latitude ?? null,
-        longitude: longitude ?? null,
+        latitude: latitude === undefined ? null : Number(latitude),
+        longitude: longitude === undefined ? null : Number(longitude),
       },
     });
 
@@ -128,6 +135,32 @@ export async function POST(request: NextRequest) {
         targetRole: 'ADMIN',
       },
     });
+
+    await auditFromRequest(request, {
+      schoolId,
+      userId,
+      action: 'PRESENCE_SELF_CHECK_IN',
+      entity: 'Presence',
+      entityId: presence.id,
+      after: { status: statut, date: dateKey, distanceMeters },
+    });
+
+    if (statut === 'RETARD' && user.role === 'STUDENT') {
+      const student = await db.user.findUnique({ where: { id: userId }, select: { fullName: true, parentId: true } });
+      if (student?.parentId) {
+        const { notifyUser } = await import('@/services/notifications/notificationEngine');
+        await notifyUser({
+          schoolId,
+          userId: student.parentId,
+          senderId: userId,
+          title: `Retard de ${student.fullName}`,
+          message: `${student.fullName} a pointé en retard aujourd’hui.`,
+          type: 'ATTENDANCE',
+          priority: 'HIGH',
+          metadata: { presenceId: presence.id, date: dateKey.toISOString() },
+        });
+      }
+    }
 
     return NextResponse.json({
       success: true,

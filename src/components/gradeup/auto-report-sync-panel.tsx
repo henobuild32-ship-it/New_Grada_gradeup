@@ -88,6 +88,7 @@ type SerializedGrade = {
 
 export default function AutoReportSyncPanel() {
   const { user } = useAppStore();
+  const isAdmin = user?.role === 'ADMIN';
   const [classes, setClasses] = useState<ClassInfo[]>([]);
   const [selectedClass, setSelectedClass] = useState('');
   const [selectedTrimester, setSelectedTrimester] = useState('1');
@@ -174,22 +175,24 @@ export default function AutoReportSyncPanel() {
 
   // Bulk publish selected bulletins
   const handleBulkPublish = async () => {
-    if (selectedIds.size === 0) return;
+    const publishable = reports.filter((report) => selectedIds.has(report.id) && report.status === 'validated');
+    if (publishable.length === 0) {
+      toast.error('Seuls les bulletins validés par l’administration peuvent être publiés.');
+      return;
+    }
     setBulkPublishing(true);
     try {
       let published = 0;
-      for (const id of selectedIds) {
-        const report = reports.find((r) => r.id === id);
-        if (report && report.status !== 'published') {
-          const res = await fetch('/api/report-cards', {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ id, status: 'published' }),
-          });
-          if (res.ok) published++;
-        }
+      for (const report of publishable) {
+        const res = await fetch('/api/report-cards', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: report.id, status: 'published' }),
+        });
+        if (res.ok) published++;
       }
-      toast.success(`${published} bulletin(s) publié(s)`);
+      if (published === publishable.length) toast.success(`${published} bulletin(s) publié(s)`);
+      else toast.error(`${published} sur ${publishable.length} bulletin(s) publié(s). Rechargez la liste pour vérifier les autres.`);
       setSelectedIds(new Set());
       fetchReports();
     } catch {
@@ -217,6 +220,26 @@ export default function AutoReportSyncPanel() {
       fetchReports();
     } catch {
       toast.error('Erreur lors de la validation');
+    } finally {
+      setValidating(null);
+    }
+  };
+
+  const handleAdminTransition = async (report: SyncedReport, status: 'validated' | 'published') => {
+    setValidating(report.id);
+    try {
+      const res = await fetch('/api/report-cards', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: report.id, status }),
+      });
+      const result = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(result.error || 'Transition refusée.');
+      toast.success(status === 'validated' ? 'Bulletin validé par l’administration.' : 'Bulletin publié aux élèves et parents.');
+      setViewReport(null);
+      fetchReports();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Impossible de mettre à jour le bulletin.');
     } finally {
       setValidating(null);
     }
@@ -438,11 +461,12 @@ export default function AutoReportSyncPanel() {
                 Bulletins des élèves (T{selectedTrimester})
               </CardTitle>
               <CardDescription>
-                Cochez les élèves dont vous souhaitez publier le bulletin, puis cliquez sur{' '}
-                <strong className="text-foreground">Publier la sélection</strong>.
+                {isAdmin
+                  ? 'Transmettez les bulletins en attente pour validation, puis publiez ceux qui ont été validés.'
+                  : 'Vérifiez les bulletins de votre classe, puis transmettez-les à l’administration.'}
               </CardDescription>
             </div>
-            {selectedIds.size > 0 && (
+            {isAdmin && selectedIds.size > 0 && (
               <Button
                 onClick={handleBulkPublish}
                 disabled={bulkPublishing}
@@ -553,7 +577,7 @@ export default function AutoReportSyncPanel() {
                               <Eye className="w-3.5 h-3.5" /> Voir
                             </Button>
                             {(report.status === 'auto_draft' ||
-                              report.status === 'draft') && (
+                              report.status === 'draft') && !isAdmin && (
                               <Button
                                 variant="ghost"
                                 size="sm"
@@ -565,6 +589,28 @@ export default function AutoReportSyncPanel() {
                                 {validating === report.id
                                   ? 'Envoi...'
                                   : 'Transmettre'}
+                              </Button>
+                            )}
+                            {isAdmin && report.status === 'pending_admin' && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 gap-1 text-xs text-blue-600 hover:bg-blue-50"
+                                onClick={() => handleAdminTransition(report, 'validated')}
+                                disabled={validating === report.id}
+                              >
+                                <CheckCircle2 className="w-3.5 h-3.5" /> Valider
+                              </Button>
+                            )}
+                            {isAdmin && report.status === 'validated' && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 gap-1 text-xs text-emerald-700 hover:bg-emerald-50"
+                                onClick={() => handleAdminTransition(report, 'published')}
+                                disabled={validating === report.id}
+                              >
+                                <Send className="w-3.5 h-3.5" /> Publier
                               </Button>
                             )}
                           </div>
@@ -621,7 +667,7 @@ export default function AutoReportSyncPanel() {
                       >
                         <Eye className="w-3.5 h-3.5" /> Voir
                       </Button>
-                      {(report.status === 'auto_draft' || report.status === 'draft') && (
+                      {(report.status === 'auto_draft' || report.status === 'draft') && !isAdmin && (
                         <Button
                           size="sm"
                           className="flex-1 min-h-[44px] gap-1.5"
@@ -630,6 +676,16 @@ export default function AutoReportSyncPanel() {
                         >
                           <Send className="w-3.5 h-3.5" />
                           {validating === report.id ? 'Envoi…' : 'Transmettre'}
+                        </Button>
+                      )}
+                      {isAdmin && report.status === 'pending_admin' && (
+                        <Button size="sm" className="min-h-[44px] flex-1 gap-1.5" onClick={() => handleAdminTransition(report, 'validated')} disabled={validating === report.id}>
+                          <CheckCircle2 className="w-3.5 h-3.5" /> Valider
+                        </Button>
+                      )}
+                      {isAdmin && report.status === 'validated' && (
+                        <Button size="sm" className="min-h-[44px] flex-1 gap-1.5 bg-emerald-600 hover:bg-emerald-700" onClick={() => handleAdminTransition(report, 'published')} disabled={validating === report.id}>
+                          <Send className="w-3.5 h-3.5" /> Publier
                         </Button>
                       )}
                     </div>
@@ -798,22 +854,16 @@ export default function AutoReportSyncPanel() {
             <Button variant="outline" onClick={() => setViewReport(null)}>
               Fermer
             </Button>
-            {viewReport && viewReport.status !== 'published' && (
+            {isAdmin && viewReport && viewReport.status === 'pending_admin' && (
+              <Button className="gap-2" onClick={() => handleAdminTransition(viewReport, 'validated')} disabled={validating === viewReport.id}>
+                <CheckCircle2 className="w-4 h-4" /> Valider le bulletin
+              </Button>
+            )}
+            {isAdmin && viewReport && viewReport.status === 'validated' && (
               <Button
                 className="bg-emerald-600 hover:bg-emerald-700 text-white gap-2"
-                onClick={async () => {
-                  try {
-                    const res = await fetch('/api/report-cards', {
-                      method: 'PUT',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ id: viewReport.id, status: 'published' }),
-                    });
-                    if (res.ok) {
-                      setViewReport(null);
-                      fetchReports();
-                    }
-                  } catch { /* ignore */ }
-                }}
+                onClick={() => handleAdminTransition(viewReport, 'published')}
+                disabled={validating === viewReport.id}
               >
                 Publier aux élèves/parents
               </Button>

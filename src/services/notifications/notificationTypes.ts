@@ -12,7 +12,8 @@ export type NotificationType =
   | 'HOMEWORK_SUBMISSION'
   | 'ATTENDANCE'
   | 'PAYMENT'
-  | 'REPORT_CARD';
+  | 'REPORT_CARD'
+  | 'SCHEDULE_UPDATED';
 
 export type NotificationPriority = 'LOW' | 'NORMAL' | 'HIGH' | 'URGENT';
 

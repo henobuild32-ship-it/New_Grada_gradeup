@@ -83,7 +83,9 @@ export function SiteFooter() {
           {/* Identité */}
           <div className="max-w-sm">
             <div className="flex items-center gap-2.5">
-              <Image src="/logo-mark.svg" alt="" width={32} height={32} className="size-8" />
+              <span className="shrink-0 overflow-hidden rounded-xl bg-[#111820] ring-1 ring-black/10 dark:ring-white/10">
+                <Image src="/logo-gradeup.png" alt="Logo officiel GradeUp" width={56} height={56} className="size-14 object-contain" />
+              </span>
               <span className="text-[17px] font-semibold tracking-tight text-foreground">{site.fullName}</span>
             </div>
             <p className="mt-3 text-sm leading-relaxed text-muted-foreground">{footer.description}</p>

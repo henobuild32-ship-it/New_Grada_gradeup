@@ -14,6 +14,7 @@
     "db:reset": "prisma migrate reset",
     "db:seed": "node prisma/seed.js",
     "test:rbac": "node scripts/rbac-check.mjs",
+    "test:business": "node --experimental-strip-types --test scripts/tests/gradeup-business.test.cjs",
     "verify:grade-flow": "node scripts/verify-grade-promotion-flow.js"
   },
   "prisma": {

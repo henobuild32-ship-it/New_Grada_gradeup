@@ -5,6 +5,7 @@ import { authenticateRequestActive, AuthError } from '@/lib/auth/authenticate';
 export async function GET(request: NextRequest) {
   try {
     const auth = await authenticateRequestActive(request);
+    if (auth.role !== 'ADMIN') return NextResponse.json({ error: 'Accès réservé à l’administration.' }, { status: 403 });
     const { searchParams } = new URL(request.url);
     const schoolId = auth.schoolId;
 
@@ -21,25 +22,32 @@ export async function GET(request: NextRequest) {
       totalPayments,
       paidPayments,
       pendingPayments,
+      school,
     ] = await Promise.all([
-      db.user.count({ where: { schoolId, role: 'STUDENT' } }),
-      db.user.count({ where: { schoolId, role: 'TEACHER' } }),
-      db.user.count({ where: { schoolId, role: 'PARENT' } }),
-      db.schoolClass.count({ where: { schoolId } }),
-      db.course.count({ where: { schoolId } }),
-      db.payment.findMany({ where: { schoolId } }),
-      db.payment.aggregate({
-        where: { schoolId, status: 'paid' },
+      db.user.count({ where: { schoolId, role: 'STUDENT', active: true, deletedAt: null } }),
+      db.user.count({ where: { schoolId, role: 'TEACHER', active: true, deletedAt: null } }),
+      db.user.count({ where: { schoolId, role: 'PARENT', active: true, deletedAt: null } }),
+      db.schoolClass.count({ where: { schoolId, deletedAt: null } }),
+      db.course.count({ where: { schoolId, deletedAt: null } }),
+      db.payment.findMany({ where: { schoolId, deletedAt: null }, select: { id: true } }),
+      db.payment.groupBy({
+        by: ['currency'],
+        where: { schoolId, deletedAt: null, status: 'paid' },
         _sum: { amount: true },
       }),
-      db.payment.aggregate({
-        where: { schoolId, status: 'pending' },
+      db.payment.groupBy({
+        by: ['currency'],
+        where: { schoolId, deletedAt: null, status: 'pending' },
         _sum: { amount: true },
       }),
+      db.school.findUnique({ where: { id: schoolId }, select: { currency: true } }),
     ]);
 
-    const totalRevenue = paidPayments._sum.amount || 0;
-    const pendingRevenue = pendingPayments._sum.amount || 0;
+    const revenueByCurrency = Object.fromEntries(paidPayments.map((row) => [row.currency, row._sum.amount || 0]));
+    const pendingRevenueByCurrency = Object.fromEntries(pendingPayments.map((row) => [row.currency, row._sum.amount || 0]));
+    const configuredCurrency = school?.currency || 'USD';
+    const totalRevenue = revenueByCurrency[configuredCurrency] || 0;
+    const pendingRevenue = pendingRevenueByCurrency[configuredCurrency] || 0;
 
     const attendanceToday = new Date().toISOString().split('T')[0];
     const [
@@ -48,13 +56,13 @@ export async function GET(request: NextRequest) {
       totalAttendanceToday,
     ] = await Promise.all([
       db.attendance.count({
-        where: { schoolId, date: attendanceToday, status: 'present' },
+        where: { schoolId, date: attendanceToday, status: 'present', deletedAt: null },
       }),
       db.attendance.count({
-        where: { schoolId, date: attendanceToday, status: 'absent' },
+        where: { schoolId, date: attendanceToday, status: 'absent', deletedAt: null },
       }),
       db.attendance.count({
-        where: { schoolId, date: attendanceToday },
+        where: { schoolId, date: attendanceToday, deletedAt: null },
       }),
     ]);
 
@@ -68,6 +76,9 @@ export async function GET(request: NextRequest) {
         totalPayments: totalPayments.length,
         totalRevenue,
         pendingRevenue,
+        revenueByCurrency,
+        pendingRevenueByCurrency,
+        currency: configuredCurrency,
         attendanceToday: {
           present: presentToday,
           absent: absentToday,

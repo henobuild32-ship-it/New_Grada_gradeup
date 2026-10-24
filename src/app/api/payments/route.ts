@@ -9,6 +9,9 @@ import { assignReceiptNumber } from '@/lib/business/rules';
 export async function GET(request: NextRequest) {
   try {
     const auth = authenticateRequest(request);
+    if (!['ADMIN', 'CAISSIER', 'STUDENT', 'PARENT'].includes(auth.role)) {
+      return NextResponse.json({ error: 'Accès non autorisé' }, { status: 403 });
+    }
     const { searchParams } = new URL(request.url);
     // Multi-tenant : l'école vient TOUJOURS de la session (query ignorée).
     const schoolId = auth.schoolId;
@@ -22,15 +25,20 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'schoolId invalide' }, { status: 400 });
     }
 
-    const where: Record<string, unknown> = { schoolId };
+    const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const where: Record<string, unknown> = { schoolId, deletedAt: null };
+    const allowedStatuses = ['paid', 'pending', 'late', 'overdue', 'cancelled'];
+    if (status && !allowedStatuses.includes(status)) {
+      return NextResponse.json({ error: 'Statut de paiement invalide' }, { status: 400 });
+    }
 
     if (studentId) {
       if (auth.role === 'PARENT') {
         const student = await db.user.findUnique({
           where: { id: studentId },
-          select: { parentId: true, schoolId: true },
+          select: { parentId: true, schoolId: true, role: true, deletedAt: true },
         });
-        if (!student || student.parentId !== auth.userId || student.schoolId !== schoolId) {
+        if (!student || student.deletedAt || student.role !== 'STUDENT' || student.parentId !== auth.userId || student.schoolId !== schoolId) {
           return NextResponse.json({ error: 'Vous ne pouvez consulter que les paiements de vos enfants' }, { status: 403 });
         }
       } else if (auth.role === 'STUDENT' && studentId !== auth.userId) {
@@ -40,48 +48,23 @@ export async function GET(request: NextRequest) {
     } else if (auth.role === 'STUDENT') {
       where.studentId = auth.userId;
     } else if (auth.role === 'PARENT') {
-      where.student = { is: { parentId: auth.userId, schoolId } };
+      where.student = { is: { parentId: auth.userId, schoolId, role: 'STUDENT', deletedAt: null } };
     }
-    if (status) where.status = status;
+    if (status === 'late' || status === 'overdue') {
+      where.OR = [
+        { status: 'late' },
+        { status: 'pending', createdAt: { lt: cutoff } },
+      ];
+    } else if (status === 'pending') {
+      where.status = 'pending';
+      where.createdAt = { gte: cutoff };
+    } else if (status) {
+      where.status = status;
+    }
     if (month) where.month = month;
     if (classId && auth.role === 'ADMIN') {
       // Filtrer aux paiements des élèves inscrits dans cette classe
       where.student = { classEnrollments: { some: { classId } } };
-    }
-
-    // ─── Règle métier : paiement en retard > 30 jours → statut LATE ───
-    const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-    const overdue = await db.payment.findMany({
-      where: {
-        schoolId,
-        status: 'pending',
-        createdAt: { lt: cutoff },
-        deletedAt: null,
-      },
-      select: { id: true, studentId: true },
-      take: 200,
-    });
-    if (overdue.length > 0) {
-      await db.payment.updateMany({
-        where: { id: { in: overdue.map((p) => p.id) } },
-        data: { status: 'late' },
-      });
-      // Notifier les élèves concernés (non bloquant)
-      try {
-        const { notifyUser } = await import('@/services/notifications/notificationEngine');
-        for (const p of overdue) {
-          notifyUser({
-            schoolId,
-            userId: p.studentId,
-            senderId: auth.userId,
-            title: '⚠️ Scolarité en retard',
-            message: 'Un paiement en attente a plus de 30 jours de retard.',
-            type: 'PAYMENT',
-            priority: 'HIGH',
-            metadata: { paymentId: p.id },
-          }).catch(() => {});
-        }
-      } catch { /* notifications non bloquantes */ }
     }
 
     const payments = await db.payment.findMany({
@@ -99,7 +82,15 @@ export async function GET(request: NextRequest) {
       orderBy: { createdAt: 'desc' },
     });
 
-    return NextResponse.json({ payments });
+    // GET is read-only: overdue is derived from age and never mutates rows or
+    // emits notifications. A scheduled job can persist reminders separately.
+    return NextResponse.json({
+      payments: payments.map((payment) =>
+        payment.status === 'pending' && payment.createdAt < cutoff
+          ? { ...payment, status: 'late' }
+          : payment
+      ),
+    });
   } catch (err: unknown) {
     if (err instanceof AuthError) {
       return NextResponse.json({ error: err.message }, { status: err.status });
@@ -130,25 +121,74 @@ export async function POST(request: NextRequest) {
       throw new ApiError('Élève introuvable dans votre établissement.', 404, 'STUDENT_NOT_FOUND');
     }
 
-    // Numéro de reçu UNIQUE attribué par le serveur (jamais par le client).
-    const receiptNumber = await assignReceiptNumber(schoolId);
+    const school = await db.school.findUnique({ where: { id: schoolId }, select: { currency: true } });
+    const installment = parsed.installmentId
+      ? await db.installment.findFirst({
+          where: { id: parsed.installmentId, schoolId, studentId: parsed.studentId, deletedAt: null },
+        })
+      : null;
+    if (parsed.installmentId && !installment) {
+      throw new ApiError('Tranche introuvable pour cet élève.', 404, 'INSTALLMENT_NOT_FOUND');
+    }
+    if (installment && installment.status === 'PAID') {
+      throw new ApiError('Cette tranche est déjà réglée.', 409, 'INSTALLMENT_ALREADY_PAID');
+    }
+    if (installment && parsed.status !== 'paid') {
+      throw new ApiError('Une tranche ne peut être clôturée qu’avec un paiement confirmé.', 400, 'INSTALLMENT_REQUIRES_PAID');
+    }
+    if (installment && (Math.abs(parsed.amount - installment.amount) > 0.009 || (parsed.currency && parsed.currency !== installment.currency))) {
+      throw new ApiError('Le montant et la devise doivent correspondre à la tranche sélectionnée.', 400, 'INSTALLMENT_AMOUNT_MISMATCH');
+    }
 
-    const payment = await db.payment.create({
-      data: {
-        schoolId,
-        studentId: parsed.studentId,
-        amount: parsed.amount,
-        status: parsed.status || 'pending',
-        month: parsed.month || '',
-        method: parsed.method || 'cash',
-        currency: parsed.currency || 'USD',
-        receiptNumber,
-        academicYear: parsed.academicYear || '',
-      },
-      include: {
-        student: { select: { id: true, fullName: true, parentId: true } },
-      },
-    });
+    const currency = parsed.currency || installment?.currency || school?.currency || 'USD';
+    // Le contrôle de tranche et l'attribution du reçu sont protégés contre les
+    // doubles clics/requêtes concurrentes; l'unicité du reçu est également
+    // garantie par l'index unique en base.
+    let payment: (Awaited<ReturnType<typeof db.payment.create>> & {
+      student: { id: string; fullName: string; parentId: string | null };
+    }) | null = null;
+    let receiptNumber = '';
+    for (let attempt = 0; attempt < 5 && !payment; attempt++) {
+      receiptNumber = await assignReceiptNumber(schoolId);
+      try {
+        payment = await db.$transaction(async (tx) => {
+          const created = await tx.payment.create({
+            data: {
+              schoolId,
+              studentId: parsed.studentId,
+              amount: parsed.amount,
+              status: parsed.status || 'pending',
+              month: parsed.month || installment?.label || '',
+              method: parsed.method || 'cash',
+              currency,
+              receiptNumber,
+              academicYear: parsed.academicYear || '',
+            },
+            include: {
+              student: { select: { id: true, fullName: true, parentId: true } },
+            },
+          });
+          if (installment) {
+            const claimed = await tx.installment.updateMany({
+              where: {
+                id: installment.id,
+                schoolId,
+                studentId: parsed.studentId,
+                status: installment.status,
+                paymentId: installment.paymentId,
+              },
+              data: { status: 'PAID', paidAt: new Date(), paymentId: created.id },
+            });
+            if (claimed.count !== 1) throw new ApiError('Cette tranche vient d’être réglée par une autre opération.', 409, 'INSTALLMENT_ALREADY_PAID');
+          }
+          return created;
+        });
+      } catch (error) {
+        const uniqueCollision = typeof error === 'object' && error !== null && 'code' in error && (error as { code?: unknown }).code === 'P2002';
+        if (!uniqueCollision || attempt === 4) throw error;
+      }
+    }
+    if (!payment) throw new ApiError('Impossible d’attribuer un reçu unique. Réessayez.', 503, 'RECEIPT_NUMBER_UNAVAILABLE');
 
     // Audit (paiement = action sensible).
     await auditFromRequest(request, {

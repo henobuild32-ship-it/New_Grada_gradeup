@@ -1,6 +1,10 @@
 import { db } from '@/lib/db';
 import { ApiError } from '@/lib/api/errors';
 import { getRdcThresholds } from './rules';
+import { resolveClassCoefficients } from '@/lib/coefficient-resolver';
+import { calculateStudentAverageFromRows, getMention, rankAverageResults } from './average-calculations';
+
+export { getMention } from './average-calculations';
 
 /**
  * AverageService — calculs serveur des moyennes pondérées, rangs, mentions.
@@ -31,17 +35,6 @@ export interface StudentAverageResult {
   failedSubjects: number;
 }
 
-/** Mention RDC (français). */
-export function getMention(percentage: number): string {
-  if (percentage >= 90) return 'Excellent';
-  if (percentage >= 80) return 'Très bien';
-  if (percentage >= 70) return 'Bien';
-  if (percentage >= 60) return 'Assez bien';
-  if (percentage >= 50) return 'Passable';
-  if (percentage >= 45) return 'Insuffisant (rattrapage)';
-  return 'Faible';
-}
-
 /**
  * Moyenne pondérée d'un élève pour une période.
  * Chaque matière compte pour son coefficient ; la note est ramenée /20
@@ -59,64 +52,38 @@ export async function computeStudentAverage(
       deletedAt: null,
       ...(opts.trimester ? { trimester: opts.trimester } : {}),
       ...(opts.period ? { period: opts.period } : {}),
-      ...(opts.classId ? {} : {}),
+      ...(opts.classId ? { course: { is: { classId: opts.classId } } } : {}),
     },
     include: {
       course: { select: { id: true, name: true, coefficient: true, maxScore: true, classId: true } },
     },
   });
 
-  // Regrouper par matière.
-  const byCourse = new Map<string, { scores: number[]; maxScore: number; coefficient: number; name: string }>();
-  for (const g of grades) {
-    const key = g.courseId;
-    const entry = byCourse.get(key) ?? {
-      scores: [],
-      maxScore: g.maxScore || g.course.maxScore || 20,
-      coefficient: g.course.coefficient || 1,
-      name: g.course.name,
-    };
-    entry.scores.push(g.score);
-    byCourse.set(key, entry);
+  // Les coefficients configurés par l'administration priment sur le coefficient
+  // historique du cours. Les notes conservent leur maximum réel (10/20/50/100).
+  const coefficientsByCourse: Record<string, number> = {};
+  const byClass = new Map<string, Array<{ id: string; coefficient: number }>>();
+  for (const grade of grades) {
+    const courseClassId = grade.course.classId;
+    if (!courseClassId) continue;
+    const items = byClass.get(courseClassId) ?? [];
+    if (!items.some((item) => item.id === grade.courseId)) {
+      items.push({ id: grade.courseId, coefficient: grade.course.coefficient || 1 });
+      byClass.set(courseClassId, items);
+    }
+  }
+  for (const [courseClassId, courses] of byClass) {
+    const resolved = await resolveClassCoefficients(schoolId, courseClassId, courses);
+    Object.assign(coefficientsByCourse, resolved.byCourse);
   }
 
-  const subjects: SubjectAverage[] = [];
-  let weightedSum = 0;
-  let coefSum = 0;
-  let passed = 0;
-  let failed = 0;
-
-  for (const [courseId, entry] of byCourse) {
-    if (entry.scores.length === 0) continue;
-    const avgRaw = entry.scores.reduce((a, b) => a + b, 0) / entry.scores.length;
-    const ratio = entry.maxScore > 0 ? avgRaw / entry.maxScore : 0;
-    const avg20 = ratio * 20;
-    subjects.push({
-      courseId,
-      courseName: entry.name,
-      coefficient: entry.coefficient,
-      average: Math.round(avg20 * 100) / 100,
-      maxScore: entry.maxScore,
-      percentage: Math.round(ratio * 10000) / 100,
-    });
-    weightedSum += avg20 * entry.coefficient;
-    coefSum += entry.coefficient;
-    if (ratio >= 0.5) passed += 1;
-    else failed += 1;
-  }
-
-  const weightedAverage = coefSum > 0 ? weightedSum / coefSum : 0;
-  const percentage = (weightedAverage / 20) * 100;
-
-  return {
-    studentId,
-    subjects,
-    weightedAverage: Math.round(weightedAverage * 100) / 100,
-    percentage: Math.round(percentage * 100) / 100,
-    mention: getMention(percentage),
-    passedSubjects: passed,
-    failedSubjects: failed,
-  };
+  return calculateStudentAverageFromRows(studentId, grades.map((grade) => ({
+    courseId: grade.courseId,
+    courseName: grade.course.name,
+    score: grade.score,
+    maxScore: grade.maxScore || grade.course.maxScore || 20,
+    coefficient: coefficientsByCourse[grade.courseId] ?? grade.course.coefficient ?? 1,
+  })));
 }
 
 export interface ClassRankingRow {
@@ -151,17 +118,7 @@ export async function computeClassRanking(
     });
   }
 
-  rows.sort((a, b) => b.weightedAverage - a.weightedAverage);
-  let lastAvg: number | null = null;
-  let lastRank = 0;
-  rows.forEach((row, i) => {
-    if (lastAvg === null || row.weightedAverage < lastAvg) {
-      lastRank = i + 1;
-      lastAvg = row.weightedAverage;
-    }
-    row.rank = lastRank;
-  });
-  return rows;
+  return rankAverageResults(rows);
 }
 
 /**

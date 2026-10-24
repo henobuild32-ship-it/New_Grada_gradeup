@@ -21,19 +21,33 @@ function parseSince(raw: string | null): Date | null {
   return Number.isNaN(asDate.getTime()) ? null : asDate;
 }
 
-async function childrenIds(parentId: string): Promise<string[]> {
-  const children = await db.user.findMany({ where: { parentId }, select: { id: true } });
+async function childrenIds(parentId: string, schoolId: string): Promise<string[]> {
+  const children = await db.user.findMany({
+    where: { parentId, schoolId, role: 'STUDENT', deletedAt: null },
+    select: { id: true },
+  });
   return children.map((c) => c.id);
 }
 
-async function studentClassIds(studentId: string): Promise<string[]> {
-  const enrollments = await db.enrolledClass.findMany({ where: { userId: studentId }, select: { classId: true } });
+async function studentClassIds(studentIds: string[], schoolId: string): Promise<string[]> {
+  if (studentIds.length === 0) return [];
+  const enrollments = await db.enrolledClass.findMany({
+    where: { userId: { in: studentIds }, class: { schoolId, deletedAt: null } },
+    select: { classId: true },
+  });
   return enrollments.map((e) => e.classId);
 }
 
-async function titulaireClassIds(teacherId: string): Promise<string[]> {
-  const t = await db.user.findUnique({ where: { id: teacherId }, select: { titulaireClasses: { select: { id: true } } } });
-  return (t?.titulaireClasses ?? []).map((c) => c.id);
+async function teacherClassIds(teacherId: string, schoolId: string): Promise<string[]> {
+  const classes = await db.schoolClass.findMany({
+    where: {
+      schoolId,
+      deletedAt: null,
+      OR: [{ titulaireId: teacherId }, { courses: { some: { teacherId, schoolId } } }],
+    },
+    select: { id: true },
+  });
+  return classes.map((schoolClass) => schoolClass.id);
 }
 
 export async function GET(request: NextRequest) {
@@ -45,6 +59,15 @@ export async function GET(request: NextRequest) {
     const schoolId = auth.schoolId;
     const role = auth.role;
     const userId = auth.userId;
+    const scopedStudentIds = role === 'PARENT' ? await childrenIds(userId, schoolId) : [userId];
+    const scopedClassIds = role === 'ADMIN'
+      ? []
+      : role === 'TEACHER'
+        ? await teacherClassIds(userId, schoolId)
+        : await studentClassIds(scopedStudentIds, schoolId);
+    const teacherStudentIds = role === 'TEACHER'
+      ? (await db.enrolledClass.findMany({ where: { classId: { in: scopedClassIds } }, select: { userId: true } })).map((enrollment) => enrollment.userId)
+      : [];
     const sinceFilter = since ? { gt: since } : {};
 
     /** Construit le scope Prisma : where schoolId + updatedAt + deletedAt + extra. */
@@ -58,14 +81,13 @@ export async function GET(request: NextRequest) {
     const entities: Record<string, unknown[]> = {};
 
     // --- Users ---
-    const userSelect = { id: true, schoolId: true, fullName: true, email: true, role: true, photoUrl: true, parentId: true, parentCode: true, phone: true, gender: true, birthDate: true, matricule: true, isTitulaire: true, active: true, version: true, updatedAt: true };
+    const userSelect = { id: true, schoolId: true, fullName: true, email: true, role: true, photoUrl: true, parentId: true, phone: true, gender: true, birthDate: true, matricule: true, isTitulaire: true, active: true, version: true, updatedAt: true };
     if (role === 'ADMIN') {
-      entities.users = await db.user.findMany({ where: where(), select: userSelect, take: MAX_ROWS });
+      entities.users = await db.user.findMany({ where: where(), select: { ...userSelect, parentCode: true }, take: MAX_ROWS });
     } else if (role === 'TEACHER') {
-      entities.users = await db.user.findMany({ where: where({ role: { in: ['TEACHER', 'STUDENT'] } }), select: userSelect, take: MAX_ROWS });
+      entities.users = await db.user.findMany({ where: where({ OR: [{ id: userId }, { id: { in: teacherStudentIds }, role: 'STUDENT' }] }), select: userSelect, take: MAX_ROWS });
     } else if (role === 'PARENT') {
-      const kids = await childrenIds(userId);
-      entities.users = await db.user.findMany({ where: where({ id: { in: kids } }), select: userSelect, take: MAX_ROWS });
+      entities.users = await db.user.findMany({ where: where({ id: { in: scopedStudentIds } }), select: userSelect, take: MAX_ROWS });
     } else {
       entities.users = await db.user.findMany({ where: where({ id: userId }), select: userSelect, take: MAX_ROWS });
     }
@@ -74,12 +96,9 @@ export async function GET(request: NextRequest) {
     if (role === 'ADMIN') {
       entities.classes = await db.schoolClass.findMany({ where: where(), take: MAX_ROWS });
     } else if (role === 'TEACHER') {
-      const tit = await titulaireClassIds(userId);
-      entities.classes = await db.schoolClass.findMany({ where: where({ OR: [{ titulaireId: userId }, { id: { in: tit } }] }), take: MAX_ROWS });
+      entities.classes = await db.schoolClass.findMany({ where: where({ id: { in: scopedClassIds } }), take: MAX_ROWS });
     } else {
-      const sid = role === 'PARENT' ? (await childrenIds(userId))[0] : userId;
-      const ids = await studentClassIds(sid);
-      entities.classes = await db.schoolClass.findMany({ where: where({ id: { in: ids } }), take: MAX_ROWS });
+      entities.classes = await db.schoolClass.findMany({ where: where({ id: { in: scopedClassIds } }), take: MAX_ROWS });
     }
 
     // --- Courses ---
@@ -88,9 +107,7 @@ export async function GET(request: NextRequest) {
     } else if (role === 'TEACHER') {
       entities.courses = await db.course.findMany({ where: where({ teacherId: userId }), take: MAX_ROWS });
     } else {
-      const sid = role === 'PARENT' ? (await childrenIds(userId))[0] : userId;
-      const ids = await studentClassIds(sid);
-      entities.courses = await db.course.findMany({ where: where({ classId: { in: ids } }), take: MAX_ROWS });
+      entities.courses = await db.course.findMany({ where: where({ classId: { in: scopedClassIds } }), take: MAX_ROWS });
     }
 
     // --- Grades ---
@@ -99,8 +116,7 @@ export async function GET(request: NextRequest) {
     } else if (role === 'TEACHER') {
       entities.grades = await db.grade.findMany({ where: where({ teacherId: userId }), take: MAX_ROWS });
     } else {
-      const sid = role === 'PARENT' ? (await childrenIds(userId))[0] : userId;
-      entities.grades = await db.grade.findMany({ where: where({ studentId: sid }), take: MAX_ROWS });
+      entities.grades = await db.grade.findMany({ where: where({ studentId: { in: scopedStudentIds } }), take: MAX_ROWS });
     }
 
     // --- Homework ---
@@ -109,9 +125,7 @@ export async function GET(request: NextRequest) {
     } else if (role === 'TEACHER') {
       entities.homework = await db.homework.findMany({ where: where({ teacherId: userId }), take: MAX_ROWS });
     } else {
-      const sid = role === 'PARENT' ? (await childrenIds(userId))[0] : userId;
-      const ids = await studentClassIds(sid);
-      const courses = await db.course.findMany({ where: { classId: { in: ids } }, select: { id: true } });
+      const courses = await db.course.findMany({ where: { schoolId, classId: { in: scopedClassIds } }, select: { id: true } });
       entities.homework = await db.homework.findMany({ where: where({ courseId: { in: courses.map((c) => c.id) } }), take: MAX_ROWS });
     }
 
@@ -121,8 +135,7 @@ export async function GET(request: NextRequest) {
     } else if (role === 'TEACHER') {
       entities.attendance = await db.attendance.findMany({ where: where({ teacherId: userId }), take: MAX_ROWS });
     } else {
-      const sid = role === 'PARENT' ? (await childrenIds(userId))[0] : userId;
-      entities.attendance = await db.attendance.findMany({ where: where({ studentId: sid }), take: MAX_ROWS });
+      entities.attendance = await db.attendance.findMany({ where: where({ studentId: { in: scopedStudentIds } }), take: MAX_ROWS });
     }
 
     // --- Submissions (pas de updatedAt/deletedAt : delta via submittedAt) ---
@@ -134,8 +147,7 @@ export async function GET(request: NextRequest) {
       const hws = await db.homework.findMany({ where: { courseId: { in: courses.map((c) => c.id) } }, select: { id: true } });
       entities.submissions = await db.submission.findMany({ where: { schoolId, homeworkId: { in: hws.map((h) => h.id) }, ...subSince }, take: MAX_ROWS });
     } else {
-      const sid = role === 'PARENT' ? (await childrenIds(userId))[0] : userId;
-      entities.submissions = await db.submission.findMany({ where: { schoolId, studentId: sid, ...subSince }, take: MAX_ROWS });
+      entities.submissions = await db.submission.findMany({ where: { schoolId, studentId: { in: scopedStudentIds }, ...subSince }, take: MAX_ROWS });
     }
 
     // --- Lessons ---
@@ -144,26 +156,24 @@ export async function GET(request: NextRequest) {
     } else if (role === 'TEACHER') {
       entities.lessons = await db.lesson.findMany({ where: where({ teacherId: userId }), take: MAX_ROWS });
     } else {
-      const sid = role === 'PARENT' ? (await childrenIds(userId))[0] : userId;
-      const ids = await studentClassIds(sid);
-      const courses = await db.course.findMany({ where: { classId: { in: ids } }, select: { id: true } });
+      const courses = await db.course.findMany({ where: { schoolId, classId: { in: scopedClassIds } }, select: { id: true } });
       entities.lessons = await db.lesson.findMany({ where: where({ courseId: { in: courses.map((c) => c.id) }, isPublished: true }), take: MAX_ROWS });
     }
 
     // --- Bulletins ---
     if (role === 'ADMIN') {
       entities.bulletins = await db.bulletin.findMany({ where: where(), take: MAX_ROWS });
+    } else if (role === 'TEACHER') {
+      entities.bulletins = await db.bulletin.findMany({ where: where({ classId: { in: scopedClassIds } }), take: MAX_ROWS });
     } else {
-      const sid = role === 'PARENT' ? (await childrenIds(userId))[0] : userId;
-      entities.bulletins = await db.bulletin.findMany({ where: where({ studentId: sid }), take: MAX_ROWS });
+      entities.bulletins = await db.bulletin.findMany({ where: where({ studentId: { in: scopedStudentIds }, status: 'PUBLISHED' }), take: MAX_ROWS });
     }
 
     // --- Payments ---
     if (role === 'ADMIN') {
       entities.payments = await db.payment.findMany({ where: where(), take: MAX_ROWS });
     } else if (role === 'PARENT') {
-      const kids = await childrenIds(userId);
-      entities.payments = await db.payment.findMany({ where: where({ studentId: { in: kids } }), take: MAX_ROWS });
+      entities.payments = await db.payment.findMany({ where: where({ studentId: { in: scopedStudentIds } }), take: MAX_ROWS });
     } else if (role === 'STUDENT') {
       entities.payments = await db.payment.findMany({ where: where({ studentId: userId }), take: MAX_ROWS });
     }
@@ -174,20 +184,48 @@ export async function GET(request: NextRequest) {
 
     // --- Notifications (delta via createdAt) ---
     const notifSince = since ? { gt: since } : {};
-    entities.notifications = await db.notification.findMany({ where: { schoolId, deletedAt: null, OR: [{ userId }, { userId: null }], createdAt: notifSince }, take: MAX_ROWS });
+    const notificationAudience = role === 'ADMIN'
+      ? { OR: [{ userId }, { userId: null }] }
+      : {
+          OR: [
+            { userId },
+            {
+              userId: null,
+              targetRole: { in: ['ALL', role] },
+              OR: [{ targetClassId: '' }, { targetClassId: { in: scopedClassIds } }],
+            },
+          ],
+        };
+    entities.notifications = await db.notification.findMany({ where: { schoolId, deletedAt: null, ...notificationAudience, createdAt: notifSince }, take: MAX_ROWS });
 
     // --- Schedules ---
     if (role === 'ADMIN') {
       entities.schedules = await db.courseSchedule.findMany({ where: where(), take: MAX_ROWS });
+    } else if (role === 'TEACHER') {
+      const courses = await db.course.findMany({ where: { schoolId, teacherId: userId }, select: { id: true } });
+      entities.schedules = await db.courseSchedule.findMany({ where: where({ courseId: { in: courses.map((c) => c.id) } }), take: MAX_ROWS });
     } else {
-      const sid = role === 'PARENT' ? (await childrenIds(userId))[0] : userId;
-      const ids = await studentClassIds(sid);
-      const courses = await db.course.findMany({ where: { classId: { in: ids } }, select: { id: true } });
+      const courses = await db.course.findMany({ where: { schoolId, classId: { in: scopedClassIds } }, select: { id: true } });
       entities.schedules = await db.courseSchedule.findMany({ where: where({ courseId: { in: courses.map((c) => c.id) } }), take: MAX_ROWS });
     }
 
     // --- Resources ---
-    entities.resources = await db.ressource.findMany({ where: where({ isPublished: true }), take: MAX_ROWS });
+    if (role === 'ADMIN') {
+      entities.resources = await db.ressource.findMany({ where: where(), take: MAX_ROWS });
+    } else {
+      entities.resources = await db.ressource.findMany({
+        where: where({
+          isPublished: true,
+          OR: [
+            { visibility: 'PUBLIC', targetRole: { in: ['ALL', role] } },
+            { visibility: 'SCHOOL', targetRole: { in: ['ALL', role] } },
+            { visibility: 'CLASS', targetRole: { in: ['ALL', role] }, targetClassId: { in: scopedClassIds } },
+            { visibility: 'PRIVATE', createdById: userId },
+          ],
+        }),
+        take: MAX_ROWS,
+      });
+    }
 
     // --- Periods (Phase 3) ---
     entities.periods = await db.period.findMany({ where: where(), take: MAX_ROWS });
@@ -197,8 +235,7 @@ export async function GET(request: NextRequest) {
     if (role === 'ADMIN') {
       entities.installments = await db.installment.findMany({ where: where(), take: MAX_ROWS });
     } else if (role === 'PARENT') {
-      const kids = await childrenIds(userId);
-      entities.installments = await db.installment.findMany({ where: where({ studentId: { in: kids } }), take: MAX_ROWS });
+      entities.installments = await db.installment.findMany({ where: where({ studentId: { in: scopedStudentIds } }), take: MAX_ROWS });
     } else if (role === 'STUDENT') {
       entities.installments = await db.installment.findMany({ where: where({ studentId: userId }), take: MAX_ROWS });
     } else {
@@ -208,17 +245,19 @@ export async function GET(request: NextRequest) {
 
     // --- Events (Phase 3) ---
     if (role === 'STUDENT' || role === 'PARENT') {
-      const sid = role === 'PARENT' ? (await childrenIds(userId))[0] : userId;
-      const ids = await studentClassIds(sid);
-      const tit = await titulaireClassIds(userId);
-      const allowed = [...new Set([...ids, ...tit])];
       entities.events = await db.event.findMany({
         where: where({
           OR: [
             { targetType: { not: 'CLASS' } },
-            { targetClassId: { in: allowed } },
+            { targetClassId: { in: scopedClassIds } },
           ],
         }),
+        orderBy: { startsAt: 'asc' },
+        take: MAX_ROWS,
+      });
+    } else if (role === 'TEACHER') {
+      entities.events = await db.event.findMany({
+        where: where({ OR: [{ targetType: { not: 'CLASS' } }, { targetClassId: { in: scopedClassIds } }] }),
         orderBy: { startsAt: 'asc' },
         take: MAX_ROWS,
       });
@@ -230,11 +269,13 @@ export async function GET(request: NextRequest) {
     if (role === 'ADMIN') {
       entities.absenceJustifications = await db.absenceJustification.findMany({ where: where(), take: MAX_ROWS });
     } else if (role === 'TEACHER') {
-      entities.absenceJustifications = await db.absenceJustification.findMany({ where: where(), take: MAX_ROWS });
-    } else if (role === 'PARENT') {
-      const kids = await childrenIds(userId);
       entities.absenceJustifications = await db.absenceJustification.findMany({
-        where: where({ OR: [{ explainedById: userId }, { studentId: { in: kids } }] }),
+        where: where({ OR: [{ studentId: { in: teacherStudentIds } }, { explainedById: userId }] }),
+        take: MAX_ROWS,
+      });
+    } else if (role === 'PARENT') {
+      entities.absenceJustifications = await db.absenceJustification.findMany({
+        where: where({ OR: [{ explainedById: userId }, { studentId: { in: scopedStudentIds } }] }),
         take: MAX_ROWS,
       });
     } else {
@@ -246,11 +287,12 @@ export async function GET(request: NextRequest) {
 
     // --- GradeSnapshots (Phase 3 — pas de updatedAt/deletedAt : delta via createdAt) ---
     const snapshotSince = since ? { gt: since } : {};
-    if (role === 'ADMIN' || role === 'TEACHER') {
+    if (role === 'ADMIN') {
       entities.gradeSnapshots = await db.gradeSnapshot.findMany({ where: { schoolId, ...snapshotSince }, take: MAX_ROWS });
+    } else if (role === 'TEACHER') {
+      entities.gradeSnapshots = await db.gradeSnapshot.findMany({ where: { schoolId, studentId: { in: teacherStudentIds }, ...snapshotSince }, take: MAX_ROWS });
     } else {
-      const sid = role === 'PARENT' ? (await childrenIds(userId))[0] : userId;
-      entities.gradeSnapshots = await db.gradeSnapshot.findMany({ where: { schoolId, studentId: sid, ...snapshotSince }, take: MAX_ROWS });
+      entities.gradeSnapshots = await db.gradeSnapshot.findMany({ where: { schoolId, studentId: { in: scopedStudentIds }, ...snapshotSince }, take: MAX_ROWS });
     }
 
     return NextResponse.json({

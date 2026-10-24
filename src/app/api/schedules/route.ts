@@ -1,13 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { Prisma } from '@prisma/client';
 import { db } from '@/lib/db';
 import { authenticateRequest, authenticateRequestActive, AuthError } from '@/lib/auth/authenticate';
 import { detectScheduleConflicts } from '@/lib/business/rules';
+import { auditFromRequest } from '@/lib/api/audit';
 
 // GET /api/schedules?schoolId=...&classId=...&dayOfWeek=...
 export async function GET(request: NextRequest) {
   try {
-    // Lecture : utilisateur authentifié, depuis sa propre école
-    const auth = authenticateRequest(request);
+    // La lecture reste limitée aux classes que l'utilisateur peut consulter.
+    const auth = await authenticateRequestActive(request);
     const { searchParams } = new URL(request.url);
     const schoolId = searchParams.get('schoolId') || auth.schoolId;
     const classId = searchParams.get('classId');
@@ -18,14 +20,57 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Accès non autorisé' }, { status: 403 });
     }
 
-    const where: any = { schoolId };
-    if (courseId) where.courseId = courseId;
-    if (dayOfWeek) where.dayOfWeek = parseInt(dayOfWeek);
-
-    // If classId provided, filter by courses belonging to that class
-    if (classId) {
-      where.course = { classId };
+    let allowedClassIds: string[] | null = null;
+    if (auth.role === 'TEACHER') {
+      const courses = await db.course.findMany({
+        where: { schoolId, teacherId: auth.userId, deletedAt: null },
+        select: { classId: true },
+      });
+      allowedClassIds = [...new Set(courses.map((course) => course.classId))];
+    } else if (auth.role === 'STUDENT') {
+      const enrollments = await db.enrolledClass.findMany({
+        where: { userId: auth.userId, class: { schoolId } },
+        select: { classId: true },
+      });
+      allowedClassIds = [...new Set(enrollments.map((enrollment) => enrollment.classId))];
+    } else if (auth.role === 'PARENT') {
+      const children = await db.user.findMany({
+        where: { parentId: auth.userId, schoolId, active: true, deletedAt: null },
+        select: {
+          classEnrollments: {
+            where: { class: { schoolId } },
+            select: { classId: true },
+          },
+        },
+      });
+      allowedClassIds = [...new Set(children.flatMap((child) => child.classEnrollments.map((enrollment) => enrollment.classId)))];
+    } else if (auth.role !== 'ADMIN') {
+      return NextResponse.json({ error: 'Accès non autorisé' }, { status: 403 });
     }
+
+    if (classId && allowedClassIds && !allowedClassIds.includes(classId)) {
+      return NextResponse.json({ error: 'Accès non autorisé à cette classe' }, { status: 403 });
+    }
+
+    let parsedDay: number | undefined;
+    if (dayOfWeek) {
+      parsedDay = Number(dayOfWeek);
+      if (!Number.isInteger(parsedDay) || parsedDay < 1 || parsedDay > 7) {
+        return NextResponse.json({ error: 'dayOfWeek doit être un entier de 1 à 7' }, { status: 400 });
+      }
+    }
+
+    const where: Prisma.CourseScheduleWhereInput = { schoolId, deletedAt: null };
+    const courseWhere: Prisma.CourseWhereInput = {};
+    if (parsedDay !== undefined) where.dayOfWeek = parsedDay;
+    if (allowedClassIds) {
+      if (allowedClassIds.length === 0) return NextResponse.json([]);
+      courseWhere.classId = { in: classId ? [classId] : allowedClassIds };
+    } else if (classId) {
+      courseWhere.classId = classId;
+    }
+    if (courseId) courseWhere.id = courseId;
+    if (Object.keys(courseWhere).length > 0) where.course = { is: courseWhere };
 
     const schedules = await db.courseSchedule.findMany({
       where,
@@ -122,6 +167,15 @@ export async function POST(request: NextRequest) {
       },
     });
 
+    await auditFromRequest(request, {
+      schoolId: auth.schoolId,
+      userId: auth.userId,
+      action: 'SCHEDULE_CREATE',
+      entity: 'CourseSchedule',
+      entityId: schedule.id,
+      after: schedule,
+    });
+
     return NextResponse.json(schedule, { status: 201 });
   } catch (error) {
     if (error instanceof AuthError) {
@@ -204,6 +258,16 @@ export async function PUT(request: NextRequest) {
       },
     });
 
+    await auditFromRequest(request, {
+      schoolId: auth.schoolId,
+      userId: auth.userId,
+      action: 'SCHEDULE_UPDATE',
+      entity: 'CourseSchedule',
+      entityId: updated.id,
+      before: existing,
+      after: updated,
+    });
+
     return NextResponse.json(updated);
   } catch (error) {
     if (error instanceof AuthError) {
@@ -235,7 +299,15 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: 'Accès non autorisé' }, { status: 403 });
     }
 
-    await db.courseSchedule.delete({ where: { id } });
+    const deleted = await db.courseSchedule.delete({ where: { id } });
+    await auditFromRequest(request, {
+      schoolId: auth.schoolId,
+      userId: auth.userId,
+      action: 'SCHEDULE_DELETE',
+      entity: 'CourseSchedule',
+      entityId: deleted.id,
+      before: existing,
+    });
 
     return NextResponse.json({ success: true });
   } catch (error) {

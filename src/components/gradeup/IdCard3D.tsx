@@ -85,7 +85,8 @@ export default function IdCard3D({ user, school, role }: IdCard3DProps) {
   const validLogo = school.logoUrl && !logoError;
   const color = school.color || '#2563eb';
   const age = getAge(user.birthDate);
-  const qrUrl = `https://gradeup-trho.vercel.app/carte/${user.matricule || user.id}`;
+  const cardLookupId = encodeURIComponent(user.matricule || user.id);
+  const qrUrl = `${typeof window === 'undefined' ? '' : window.location.origin}/carte/${cardLookupId}`;
   const genderLabel = user.gender === 'M' ? 'Masculin' : user.gender === 'F' ? 'Féminin' : user.gender || '';
 
   const handleFlip = () => setIsFlipped(!isFlipped);

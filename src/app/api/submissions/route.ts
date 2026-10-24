@@ -94,6 +94,16 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Devoir introuvable' }, { status: 404 });
     }
 
+    const previousSubmission = await db.submission.findUnique({
+      where: { homeworkId_studentId: { homeworkId, studentId } },
+      select: { id: true, fileUrl: true, fileName: true, content: true, status: true },
+    });
+    const shouldNotifyTeacher = !previousSubmission
+      || previousSubmission.status !== 'submitted'
+      || previousSubmission.fileUrl !== (fileUrl || '')
+      || previousSubmission.fileName !== (fileName || '')
+      || previousSubmission.content !== (content || '');
+
     const submission = await db.submission.upsert({
       where: {
         homeworkId_studentId: { homeworkId, studentId },
@@ -120,7 +130,7 @@ export async function POST(request: NextRequest) {
     });
 
     // Notify teacher
-    if (homework.teacherId) {
+    if (homework.teacherId && shouldNotifyTeacher) {
       const { notifyUser } = await import('@/services/notifications/notificationEngine');
       notifyUser({
         schoolId,
@@ -134,7 +144,7 @@ export async function POST(request: NextRequest) {
       }).catch((e) => console.error('[Submission] Notification trigger error:', e));
     }
 
-    return NextResponse.json({ submission }, { status: 201 });
+    return NextResponse.json({ submission }, { status: previousSubmission ? 200 : 201 });
   } catch (err: unknown) {
     return handleApiError(err);
   }

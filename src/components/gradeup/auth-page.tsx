@@ -139,6 +139,55 @@ function PasswordStrengthIndicator({ password }: { password: string }) {
   );
 }
 
+function AuthBrandPanel({
+  eyebrow,
+  title,
+  description,
+}: {
+  eyebrow: string;
+  title: string;
+  description: string;
+}) {
+  return (
+    <aside className="relative isolate flex min-h-[164px] flex-col justify-between overflow-hidden rounded-[28px] bg-[#111820] p-4 text-white shadow-[0_24px_60px_-30px_rgba(15,23,42,0.55)] sm:min-h-[188px] sm:p-6 lg:sticky lg:top-24 lg:min-h-[600px] lg:p-8">
+      <div aria-hidden="true" className="pointer-events-none absolute -right-20 -top-20 size-64 rounded-full border border-white/10" />
+      <div aria-hidden="true" className="pointer-events-none absolute -bottom-24 -left-20 size-72 rounded-full border border-white/10" />
+      <div className="relative z-10 flex items-center gap-4 lg:flex-col lg:items-start lg:gap-7">
+        <div className="shrink-0 overflow-hidden rounded-2xl border border-white/10 bg-[#10151c] shadow-2xl shadow-black/30">
+          <Image
+            src="/logo-gradeup.png"
+            alt="Logo officiel GradeUp"
+            width={240}
+            height={240}
+            priority
+            className="size-[76px] object-contain sm:size-[92px] lg:size-[224px]"
+          />
+        </div>
+        <div className="min-w-0">
+          <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#f1c979] sm:text-xs">{eyebrow}</p>
+          <h2 className="mt-2 text-lg font-semibold leading-tight tracking-tight sm:text-xl lg:mt-4 lg:text-3xl lg:leading-tight">
+            {title}
+          </h2>
+          <p className="mt-2 hidden max-w-sm text-sm leading-relaxed text-slate-300 lg:block">{description}</p>
+        </div>
+      </div>
+      <div className="relative z-10 mt-5 hidden space-y-4 lg:block">
+        <div className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+          <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-white/10 text-[#f1c979]"><BookOpen className="size-5" /></span>
+          <div><p className="text-sm font-semibold">Le suivi scolaire, simplement</p><p className="mt-0.5 text-xs text-slate-300">Notes, bulletins et présence au même endroit.</p></div>
+        </div>
+        <div className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+          <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-white/10 text-[#f1c979]"><Users className="size-5" /></span>
+          <div><p className="text-sm font-semibold">Une école mieux connectée</p><p className="mt-0.5 text-xs text-slate-300">Un espace adapté à chaque rôle.</p></div>
+        </div>
+      </div>
+      <p className="relative z-10 mt-4 hidden items-center gap-2 text-xs text-slate-300 lg:flex">
+        <ShieldCheck className="size-4 text-emerald-300" /> Accès sécurisé selon votre profil
+      </p>
+    </aside>
+  );
+}
+
 export default function AuthPage({ initialView }: { initialView?: LandingAction | null } = {}) {
   const { setUser, setCurrentPage, user } = useAppStore();
   const { toast } = useToast();
@@ -411,8 +460,8 @@ export default function AuthPage({ initialView }: { initialView?: LandingAction 
     e.preventDefault();
     if (forgotLoading) return;
     setForgotError('');
-    if (forgotNewPassword.length < 4) {
-      setForgotError('Le nouveau mot de passe doit contenir au moins 4 caractères.');
+    if (forgotNewPassword.length < 8) {
+      setForgotError('Le nouveau mot de passe doit contenir au moins 8 caractères.');
       return;
     }
     if (forgotNewPassword !== forgotConfirm) {
@@ -460,8 +509,8 @@ export default function AuthPage({ initialView }: { initialView?: LandingAction 
       toast({ title: 'Mots de passe non identiques', description: 'Les deux mots de passe doivent être identiques.', variant: 'destructive' });
       return;
     }
-    if (regPassword.length < 4) {
-      toast({ title: 'Mot de passe trop court', description: 'Le mot de passe doit comporter au moins 4 caractères.', variant: 'destructive' });
+    if (regPassword.length < 8) {
+      toast({ title: 'Mot de passe trop court', description: 'Le mot de passe doit comporter au moins 8 caractères.', variant: 'destructive' });
       return;
     }
     setRegLoading(true);
@@ -516,8 +565,8 @@ export default function AuthPage({ initialView }: { initialView?: LandingAction 
       toast({ title: 'Erreur de mot de passe', description: 'Les mots de passe ne correspondent pas.', variant: 'destructive' });
       return;
     }
-    if (joinPassword.length < 4) {
-      toast({ title: 'Mot de passe trop court', description: 'Le mot de passe doit comporter au moins 4 caractères.', variant: 'destructive' });
+    if (joinPassword.length < 8) {
+      toast({ title: 'Mot de passe trop court', description: 'Le mot de passe doit comporter au moins 8 caractères.', variant: 'destructive' });
       return;
     }
     if (joinRole === 'STUDENT' && joinClassIds.length === 0) {
@@ -603,11 +652,13 @@ export default function AuthPage({ initialView }: { initialView?: LandingAction 
         <button
           type="button"
           onClick={() => setView('welcome')}
-          className="flex items-center gap-2.5 rounded-md"
+          className="flex items-center gap-3 rounded-md"
           aria-label="Retour à l’accueil GradeUp"
         >
-          <Image src="/logo-mark.svg" alt="" width={32} height={32} priority className="size-8" />
-          <span className="text-[17px] font-semibold tracking-tight text-foreground">GradeUp</span>
+          <span className="overflow-hidden rounded-xl bg-[#111820] ring-1 ring-black/10 dark:ring-white/10">
+            <Image src="/logo-gradeup.png" alt="Logo GradeUp" width={48} height={48} priority className="size-11 object-contain" />
+          </span>
+          <span className="text-lg font-bold tracking-tight text-foreground">GradeUp</span>
         </button>
 
         <div className="flex items-center gap-1.5">
@@ -618,7 +669,7 @@ export default function AuthPage({ initialView }: { initialView?: LandingAction 
               onClick={() => setView('register-user')}
               className="h-10 rounded-lg px-3 text-sm font-semibold"
             >
-              Créer mon école
+              Rejoindre mon école
             </Button>
           ) : (
             <Button
@@ -654,25 +705,32 @@ export default function AuthPage({ initialView }: { initialView?: LandingAction 
   // ---------------------------------------------------------------------------
   if (view === 'login') {
     return (
-      <div className="min-h-screen flex flex-col bg-background text-foreground">
+      <div className="flex min-h-dvh flex-col bg-slate-50 text-foreground dark:bg-slate-950">
         {renderHeader()}
 
-        <main className="flex-1 flex items-center justify-center px-4 py-12">
-          <div className="w-full max-w-md space-y-8 bg-card p-6 sm:p-8 rounded-3xl border border-border/80 shadow-xl">
-            <div className="text-center space-y-2">
-              <div className="w-14 h-14 mx-auto rounded-2xl bg-gradient-to-tr from-blue-600 to-indigo-600 flex items-center justify-center text-white shadow-lg shadow-blue-500/20">
-                <Lock className="w-7 h-7" />
+        <main className="flex-1">
+          <div className="landing-container grid items-start gap-5 py-6 sm:gap-7 sm:py-10 lg:min-h-[680px] lg:grid-cols-[minmax(300px,0.86fr)_minmax(420px,1.14fr)] lg:gap-10 lg:py-12">
+            <AuthBrandPanel
+              eyebrow="Espace scolaire"
+              title="Heureux de vous retrouver."
+              description="Connectez-vous pour retrouver votre espace et les informations de votre école."
+            />
+            <section className="mx-auto w-full max-w-[560px] rounded-[28px] border border-slate-200 bg-white p-5 shadow-[0_24px_70px_-40px_rgba(15,23,42,0.35)] dark:border-white/10 dark:bg-slate-900 sm:p-8 lg:p-9">
+              <div className="mb-7">
+                <p className="inline-flex items-center gap-2 rounded-full bg-brand-subtle px-3 py-1.5 text-xs font-bold text-brand dark:bg-blue-950 dark:text-blue-200">
+                  <Lock className="size-3.5" /> Connexion sécurisée
+                </p>
+                <h1 className="mt-4 text-2xl font-bold tracking-tight sm:text-3xl">Se connecter</h1>
+                <p className="mt-2 text-sm leading-relaxed text-muted-foreground">Accédez à votre espace personnel GradeUp.</p>
               </div>
-              <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">Connexion à GradeUp</h1>
-              <p className="text-sm text-muted-foreground">Accédez à votre espace personnel sécurisé</p>
-            </div>
 
             {/* Toggle Mode User vs Admin */}
-            <div className="grid grid-cols-2 gap-1.5 p-1 bg-muted rounded-2xl">
+            <div className="grid grid-cols-2 gap-1.5 rounded-2xl bg-slate-100 p-1.5 dark:bg-slate-800">
               <button
                 type="button"
                 onClick={() => setLoginIsAdmin(false)}
-                className={`py-2.5 px-3 rounded-xl text-xs font-bold transition-all ${
+                aria-pressed={!loginIsAdmin}
+                className={`min-h-11 rounded-xl px-2 py-2.5 text-xs font-bold transition-all sm:px-3 ${
                   !loginIsAdmin
                     ? 'bg-card text-foreground shadow-sm'
                     : 'text-muted-foreground hover:text-foreground'
@@ -684,7 +742,8 @@ export default function AuthPage({ initialView }: { initialView?: LandingAction 
               <button
                 type="button"
                 onClick={() => setLoginIsAdmin(true)}
-                className={`py-2.5 px-3 rounded-xl text-xs font-bold transition-all ${
+                aria-pressed={loginIsAdmin}
+                className={`min-h-11 rounded-xl px-2 py-2.5 text-xs font-bold transition-all sm:px-3 ${
                   loginIsAdmin
                     ? 'bg-card text-foreground shadow-sm'
                     : 'text-muted-foreground hover:text-foreground'
@@ -695,7 +754,7 @@ export default function AuthPage({ initialView }: { initialView?: LandingAction 
               </button>
             </div>
 
-            <form onSubmit={handleLogin} className="space-y-4">
+            <form onSubmit={handleLogin} className="mt-6 space-y-5">
               {!loginIsAdmin ? (
                 <>
                   <div className="space-y-1.5">
@@ -708,7 +767,7 @@ export default function AuthPage({ initialView }: { initialView?: LandingAction 
                       placeholder="Ex: ECOLE-XXXXXX"
                       value={loginInviteCode}
                       onChange={(e) => setLoginInviteCode(e.target.value.toUpperCase())}
-                      className="h-11 font-mono uppercase tracking-wider rounded-xl"
+                      className="h-12 rounded-xl font-mono uppercase tracking-wider"
                       required
                     />
                     <p className="text-[11px] text-muted-foreground">Le code d'invitation fourni par votre établissement.</p>
@@ -716,7 +775,7 @@ export default function AuthPage({ initialView }: { initialView?: LandingAction 
 
                   <div className="space-y-1.5">
                     <Label htmlFor="login-identity" className="text-xs font-bold flex items-center gap-1.5">
-                      <User className="w-3.5 h-3.5 text-indigo-500" />
+                      <User className="w-3.5 h-3.5 text-brand" />
                       {loginIdentity.includes('@') ? 'Email' : loginIdentity ? 'Nom Complet' : 'Email ou Nom Complet'}
                     </Label>
                     <Input
@@ -725,7 +784,7 @@ export default function AuthPage({ initialView }: { initialView?: LandingAction 
                       value={loginIdentity}
                       onChange={(e) => setLoginIdentity(e.target.value)}
                       autoComplete="username"
-                      className="h-11 rounded-xl"
+                      className="h-12 rounded-xl"
                       required
                     />
                     <p className="text-[11px] text-muted-foreground">
@@ -749,7 +808,8 @@ export default function AuthPage({ initialView }: { initialView?: LandingAction 
                     placeholder="admin@ecole.com"
                     value={loginEmail}
                     onChange={(e) => setLoginEmail(e.target.value)}
-                    className="h-11 rounded-xl"
+                    autoComplete="username"
+                    className="h-12 rounded-xl"
                     required
                   />
                 </div>
@@ -757,7 +817,7 @@ export default function AuthPage({ initialView }: { initialView?: LandingAction 
 
               <div className="space-y-1.5">
                 <Label htmlFor="login-password" className="text-xs font-bold flex items-center gap-1.5">
-                  <Lock className="w-3.5 h-3.5 text-purple-500" />
+                  <Lock className="w-3.5 h-3.5 text-brand" />
                   Mot de passe
                 </Label>
                 <div className="relative">
@@ -767,7 +827,8 @@ export default function AuthPage({ initialView }: { initialView?: LandingAction 
                     placeholder="••••••••"
                     value={loginPassword}
                     onChange={(e) => setLoginPassword(e.target.value)}
-                    className="h-11 rounded-xl pr-10"
+                    autoComplete="current-password"
+                    className="h-12 rounded-xl pr-10"
                     required
                   />
                   <button
@@ -783,7 +844,7 @@ export default function AuthPage({ initialView }: { initialView?: LandingAction 
               <Button
                 type="submit"
                 disabled={loginLoading}
-                className="w-full h-12 rounded-xl text-base font-bold bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white shadow-lg shadow-blue-500/20"
+                className="h-12 w-full rounded-xl bg-brand text-base font-bold text-brand-foreground shadow-md shadow-blue-900/10 transition hover:bg-brand-hover"
               >
                 {loginLoading ? (
                   <>
@@ -796,19 +857,19 @@ export default function AuthPage({ initialView }: { initialView?: LandingAction 
               </Button>
             </form>
 
-            <div className="pt-2 text-center space-y-3">
-              <p className="text-xs text-muted-foreground">
+            <div className="mt-6 space-y-4 border-t border-slate-200 pt-5 text-center dark:border-white/10">
+              <p className="text-sm text-muted-foreground">
                 Pas encore de compte ?{' '}
                 <button
                   type="button"
                   onClick={() => setView('register-user')}
-                  className="font-bold text-primary hover:underline"
+                  className="font-bold text-brand hover:underline"
                 >
                   S'inscrire
                 </button>
               </p>
 
-              <p className="text-xs text-muted-foreground">
+              <p className="text-sm text-muted-foreground">
                 Mot de passe oublié ?{' '}
                 <button
                   type="button"
@@ -821,12 +882,13 @@ export default function AuthPage({ initialView }: { initialView?: LandingAction 
                     setForgotError('');
                     setView('forgot');
                   }}
-                  className="font-bold text-indigo-600 dark:text-indigo-400 hover:underline"
+                  className="font-bold text-brand hover:underline"
                 >
                   Réinitialiser mon mot de passe
                 </button>
               </p>
             </div>
+            </section>
           </div>
         </main>
         {renderFooter()}
@@ -839,22 +901,28 @@ export default function AuthPage({ initialView }: { initialView?: LandingAction 
   // ---------------------------------------------------------------------------
   if (view === 'forgot') {
     return (
-      <div className="min-h-screen flex flex-col bg-background text-foreground">
+      <div className="flex min-h-dvh flex-col bg-slate-50 text-foreground dark:bg-slate-950">
         {renderHeader()}
 
-        <main className="flex-1 flex items-center justify-center px-4 py-12">
-          <div className="w-full max-w-md space-y-6 bg-card p-6 sm:p-8 rounded-3xl border border-border/80 shadow-xl">
-            <div className="text-center space-y-2">
-              <div className="w-14 h-14 mx-auto rounded-2xl bg-gradient-to-tr from-indigo-600 to-purple-600 flex items-center justify-center text-white shadow-lg shadow-indigo-500/20">
-                <Lock className="w-7 h-7" />
-              </div>
-              <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">Mot de passe oublié</h1>
-              <p className="text-sm text-muted-foreground">
+        <main className="flex-1">
+          <div className="landing-container grid items-start gap-5 py-6 sm:gap-7 sm:py-10 lg:min-h-[680px] lg:grid-cols-[minmax(300px,0.86fr)_minmax(420px,1.14fr)] lg:gap-10 lg:py-12">
+            <AuthBrandPanel
+              eyebrow="Aide à la connexion"
+              title="Retrouvez l’accès à votre compte."
+              description="Nous vous accompagnons pour vérifier votre identité puis choisir un nouveau mot de passe."
+            />
+            <section className="mx-auto w-full max-w-[560px] rounded-[28px] border border-slate-200 bg-white p-5 shadow-[0_24px_70px_-40px_rgba(15,23,42,0.35)] dark:border-white/10 dark:bg-slate-900 sm:p-8 lg:p-9">
+              <div className="mb-7">
+                <p className="inline-flex items-center gap-2 rounded-full bg-brand-subtle px-3 py-1.5 text-xs font-bold text-brand dark:bg-blue-950 dark:text-blue-200">
+                  <Lock className="size-3.5" /> Récupération sécurisée
+                </p>
+                <h1 className="mt-4 text-2xl font-bold tracking-tight sm:text-3xl">Mot de passe oublié</h1>
+                <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
                 {forgotStep === 'identify' && 'Recevez un code de réinitialisation par email'}
                 {forgotStep === 'otp' && 'Saisissez le code reçu par email'}
                 {forgotStep === 'reset' && 'Choisissez votre nouveau mot de passe'}
-              </p>
-            </div>
+                </p>
+              </div>
 
             {/* Stepper */}
             <div className="flex items-center justify-center gap-2 text-[11px] font-bold">
@@ -863,7 +931,7 @@ export default function AuthPage({ initialView }: { initialView?: LandingAction 
                   <div
                     className={`w-6 h-6 rounded-full flex items-center justify-center text-xs transition-all ${
                       ['identify', 'otp', 'reset'].indexOf(forgotStep) >= idx
-                        ? 'bg-indigo-600 text-white'
+                        ? 'bg-brand text-brand-foreground'
                         : 'bg-muted text-muted-foreground'
                     }`}
                   >
@@ -941,7 +1009,7 @@ export default function AuthPage({ initialView }: { initialView?: LandingAction 
                     </div>
                     <div className="space-y-1.5">
                       <Label className="text-xs font-bold flex items-center gap-1.5">
-                        <User className="w-3.5 h-3.5 text-indigo-500" />
+                        <User className="w-3.5 h-3.5 text-brand" />
                         Email ou Nom Complet
                       </Label>
                       <Input
@@ -955,7 +1023,7 @@ export default function AuthPage({ initialView }: { initialView?: LandingAction 
                   </>
                 )}
 
-                <Button type="submit" disabled={forgotLoading} className="w-full h-12 rounded-xl text-base font-bold bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-lg">
+                <Button type="submit" disabled={forgotLoading} className="h-12 w-full rounded-xl bg-brand text-base font-bold text-brand-foreground shadow-md shadow-blue-900/10 hover:bg-brand-hover">
                   {forgotLoading ? (
                     <>
                       <Loader2 className="w-4 h-4 mr-2 animate-spin" />
@@ -975,7 +1043,7 @@ export default function AuthPage({ initialView }: { initialView?: LandingAction 
               <form onSubmit={handleVerifyOtp} className="space-y-4">
                 <div className="space-y-1.5">
                   <Label className="text-xs font-bold flex items-center gap-1.5">
-                    <Mail className="w-3.5 h-3.5 text-indigo-500" />
+                    <Mail className="w-3.5 h-3.5 text-brand" />
                     Code à 6 chiffres
                   </Label>
                   <Input
@@ -993,7 +1061,7 @@ export default function AuthPage({ initialView }: { initialView?: LandingAction 
                   </p>
                 </div>
 
-                <Button type="submit" disabled={forgotLoading || forgotCode.length < 6} className="w-full h-12 rounded-xl text-base font-bold bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-lg">
+                <Button type="submit" disabled={forgotLoading || forgotCode.length < 6} className="h-12 w-full rounded-xl bg-brand text-base font-bold text-brand-foreground shadow-md shadow-blue-900/10 hover:bg-brand-hover">
                   {forgotLoading ? (
                     <>
                       <Loader2 className="w-4 h-4 mr-2 animate-spin" />
@@ -1008,7 +1076,7 @@ export default function AuthPage({ initialView }: { initialView?: LandingAction 
                   {forgotResendIn > 0 ? (
                     <span className="text-xs text-muted-foreground">Renvoi possible dans {forgotResendIn}s</span>
                   ) : (
-                    <button type="button" onClick={() => { setForgotStep('identify'); setForgotMessage(''); setForgotError(''); }} className="text-xs font-bold text-indigo-600 hover:underline">
+                    <button type="button" onClick={() => { setForgotStep('identify'); setForgotMessage(''); setForgotError(''); }} className="text-xs font-bold text-brand hover:underline">
                       Retour et renvoyer le code
                     </button>
                   )}
@@ -1020,14 +1088,16 @@ export default function AuthPage({ initialView }: { initialView?: LandingAction 
               <form onSubmit={handleReset} className="space-y-4">
                 <div className="space-y-1.5">
                   <Label className="text-xs font-bold flex items-center gap-1.5">
-                    <Lock className="w-3.5 h-3.5 text-purple-500" />
+                    <Lock className="w-3.5 h-3.5 text-brand" />
                     Nouveau mot de passe
                   </Label>
                   <Input
                     type="password"
-                    placeholder="Au moins 4 caractères"
+                    placeholder="Au moins 8 caractères"
                     value={forgotNewPassword}
                     onChange={(e) => setForgotNewPassword(e.target.value)}
+                    minLength={8}
+                    autoComplete="new-password"
                     className="h-11 rounded-xl"
                     required
                   />
@@ -1039,12 +1109,14 @@ export default function AuthPage({ initialView }: { initialView?: LandingAction 
                     placeholder="••••••••"
                     value={forgotConfirm}
                     onChange={(e) => setForgotConfirm(e.target.value)}
+                    minLength={8}
+                    autoComplete="new-password"
                     className="h-11 rounded-xl"
                     required
                   />
                 </div>
 
-                <Button type="submit" disabled={forgotLoading} className="w-full h-12 rounded-xl text-base font-bold bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-lg">
+                <Button type="submit" disabled={forgotLoading} className="h-12 w-full rounded-xl bg-brand text-base font-bold text-brand-foreground shadow-md shadow-blue-900/10 hover:bg-brand-hover">
                   {forgotLoading ? (
                     <>
                       <Loader2 className="w-4 h-4 mr-2 animate-spin" />
@@ -1067,6 +1139,7 @@ export default function AuthPage({ initialView }: { initialView?: LandingAction 
                 Retour à la connexion
               </button>
             </div>
+            </section>
           </div>
         </main>
         {renderFooter()}
@@ -1078,18 +1151,24 @@ export default function AuthPage({ initialView }: { initialView?: LandingAction 
   // 4. INSCRIPTION (REGISTRATION SCREEN)
   // ---------------------------------------------------------------------------
   return (
-    <div className="min-h-screen flex flex-col bg-background text-foreground">
+    <div className="flex min-h-dvh flex-col bg-slate-50 text-foreground dark:bg-slate-950">
       {renderHeader()}
 
-      <main className="flex-1 flex items-center justify-center px-4 py-12">
-        <div className="w-full max-w-lg space-y-6 bg-card p-6 sm:p-8 rounded-3xl border border-border/80 shadow-xl">
-          <div className="text-center space-y-2">
-            <div className="w-14 h-14 mx-auto rounded-2xl bg-gradient-to-tr from-indigo-600 to-purple-600 flex items-center justify-center text-white shadow-lg shadow-indigo-500/20">
-              <UserCheck className="w-7 h-7" />
+      <main className="flex-1">
+        <div className="landing-container grid items-start gap-5 py-6 sm:gap-7 sm:py-10 lg:min-h-[700px] lg:grid-cols-[minmax(280px,0.72fr)_minmax(540px,1.28fr)] lg:gap-10 lg:py-12">
+          <AuthBrandPanel
+            eyebrow="Inscription GradeUp"
+            title={view === 'register-school' ? 'Donnez à votre école un espace à elle.' : 'Rejoignez votre communauté scolaire.'}
+            description="Créez un espace d’établissement ou rejoignez celui que votre école utilise déjà."
+          />
+          <section className="mx-auto w-full max-w-[760px] rounded-[28px] border border-slate-200 bg-white p-5 shadow-[0_24px_70px_-40px_rgba(15,23,42,0.35)] dark:border-white/10 dark:bg-slate-900 sm:p-8 lg:p-9">
+            <div className="mb-7">
+              <p className="inline-flex items-center gap-2 rounded-full bg-brand-subtle px-3 py-1.5 text-xs font-bold text-brand dark:bg-blue-950 dark:text-blue-200">
+                <UserCheck className="size-3.5" /> Commencez en quelques étapes
+              </p>
+              <h1 className="mt-4 text-2xl font-bold tracking-tight sm:text-3xl">Créer un accès GradeUp</h1>
+              <p className="mt-2 text-sm leading-relaxed text-muted-foreground">Choisissez votre parcours pour commencer.</p>
             </div>
-            <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">Inscription GradeUp</h1>
-            <p className="text-sm text-muted-foreground">Créez votre établissement ou rejoignez une école</p>
-          </div>
 
           {/* Dual Tabs for Registration */}
           <div className="grid grid-cols-2 gap-1.5 p-1 bg-muted rounded-2xl">
@@ -1113,7 +1192,7 @@ export default function AuthPage({ initialView }: { initialView?: LandingAction 
                   : 'text-muted-foreground hover:text-foreground'
               }`}
             >
-              <School className="w-3.5 h-3.5 inline mr-1 text-indigo-500" />
+              <School className="w-3.5 h-3.5 inline mr-1 text-brand" />
               Créer mon École
             </button>
           </div>
@@ -1214,6 +1293,8 @@ export default function AuthPage({ initialView }: { initialView?: LandingAction 
                           placeholder="••••••••"
                           value={regPassword}
                           onChange={(e) => setRegPassword(e.target.value)}
+                          minLength={8}
+                          autoComplete="new-password"
                           className="h-11 rounded-xl pr-9"
                           required
                         />
@@ -1236,6 +1317,8 @@ export default function AuthPage({ initialView }: { initialView?: LandingAction 
                           placeholder="••••••••"
                           value={regConfirmPassword}
                           onChange={(e) => setRegConfirmPassword(e.target.value)}
+                          minLength={8}
+                          autoComplete="new-password"
                           className="h-11 rounded-xl pr-9"
                           required
                         />
@@ -1255,7 +1338,7 @@ export default function AuthPage({ initialView }: { initialView?: LandingAction 
                   <Button
                     type="submit"
                     disabled={regLoading}
-                    className="w-full h-12 rounded-xl text-base font-bold bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-lg"
+                    className="h-12 w-full rounded-xl bg-brand text-base font-bold text-brand-foreground shadow-md shadow-blue-900/10 hover:bg-brand-hover"
                   >
                     {regLoading ? (
                       <>
@@ -1317,6 +1400,7 @@ export default function AuthPage({ initialView }: { initialView?: LandingAction 
                         key={r}
                         type="button"
                         onClick={() => setJoinRole(r)}
+                        aria-pressed={isSel}
                         className={`p-3 rounded-xl border flex flex-col items-center gap-1 transition-all ${
                           isSel
                             ? 'border-primary bg-primary/10 text-primary font-bold shadow-sm'
@@ -1500,6 +1584,8 @@ export default function AuthPage({ initialView }: { initialView?: LandingAction 
                       placeholder="••••••••"
                       value={joinPassword}
                       onChange={(e) => setJoinPassword(e.target.value)}
+                      minLength={8}
+                      autoComplete="new-password"
                       className="h-11 rounded-xl pr-9"
                       required
                     />
@@ -1522,6 +1608,8 @@ export default function AuthPage({ initialView }: { initialView?: LandingAction 
                       placeholder="••••••••"
                       value={joinConfirmPassword}
                       onChange={(e) => setJoinConfirmPassword(e.target.value)}
+                      minLength={8}
+                      autoComplete="new-password"
                       className="h-11 rounded-xl pr-9"
                       required
                     />
@@ -1539,7 +1627,7 @@ export default function AuthPage({ initialView }: { initialView?: LandingAction 
               <Button
                 type="submit"
                 disabled={joinLoading}
-                className="w-full h-12 rounded-xl text-base font-bold bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg"
+                className="h-12 w-full rounded-xl bg-brand text-base font-bold text-brand-foreground shadow-md shadow-blue-900/10 hover:bg-brand-hover"
               >
                 {joinLoading ? (
                   <>
@@ -1565,6 +1653,7 @@ export default function AuthPage({ initialView }: { initialView?: LandingAction 
               </button>
             </p>
           </div>
+          </section>
         </div>
       </main>
       {renderFooter()}

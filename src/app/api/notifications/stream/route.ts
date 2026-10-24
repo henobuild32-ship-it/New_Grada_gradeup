@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 import { notificationEmitter } from '@/services/notifications/notificationEmitter';
-import { verifyAccessToken, ACCESS_COOKIE } from '@/lib/auth/jwt';
+import { authenticateRequestActive, AuthError, type AuthUser } from '@/lib/auth/authenticate';
 import { db } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
@@ -15,32 +15,33 @@ export async function GET(request: NextRequest) {
     return new Response('schoolId is required', { status: 400 });
   }
 
-  // Vérifier le JWT
-  const token = request.cookies.get(ACCESS_COOKIE)?.value;
-  if (!token) {
-    return new Response('Non authentifié', { status: 401 });
+  let auth: AuthUser;
+  try {
+    auth = await authenticateRequestActive(request);
+  } catch (error) {
+    if (error instanceof AuthError) return new Response(error.message, { status: error.status });
+    return new Response('Session invalide', { status: 401 });
   }
-  const claims = verifyAccessToken(token);
-  if (!claims || claims.sub !== userId || claims.schoolId !== schoolId || claims.role !== role) {
+  if (auth.userId !== userId || auth.schoolId !== schoolId || auth.role !== role) {
     return new Response('Session invalide', { status: 401 });
   }
 
   const classIds = new Set<string>();
-  if (claims.role === 'STUDENT') {
+  if (auth.role === 'STUDENT') {
     const enrollments = await db.enrolledClass.findMany({
       where: {
-        userId: claims.sub,
-        class: { schoolId: claims.schoolId },
+        userId: auth.userId,
+        class: { schoolId: auth.schoolId, deletedAt: null },
       },
       select: { classId: true },
     });
     for (const item of enrollments) classIds.add(item.classId);
-  } else if (claims.role === 'TEACHER') {
+  } else if (auth.role === 'TEACHER') {
     const [courses, titulaireClasses] = await Promise.all([
       db.course.findMany({
         where: {
-          schoolId: claims.schoolId,
-          teacherId: claims.sub,
+          schoolId: auth.schoolId,
+          teacherId: auth.userId,
           deletedAt: null,
         },
         select: { classId: true },
@@ -48,21 +49,24 @@ export async function GET(request: NextRequest) {
       }),
       db.schoolClass.findMany({
         where: {
-          schoolId: claims.schoolId,
-          titulaireId: claims.sub,
+          schoolId: auth.schoolId,
+          titulaireId: auth.userId,
+          deletedAt: null,
         },
         select: { id: true },
       }),
     ]);
     for (const item of courses) classIds.add(item.classId);
     for (const item of titulaireClasses) classIds.add(item.id);
-  } else if (claims.role === 'PARENT') {
+  } else if (auth.role === 'PARENT') {
     const childrenEnrollments = await db.enrolledClass.findMany({
       where: {
-        class: { schoolId: claims.schoolId },
+        class: { schoolId: auth.schoolId, deletedAt: null },
         user: {
-          schoolId: claims.schoolId,
-          parentId: claims.sub,
+          schoolId: auth.schoolId,
+          parentId: auth.userId,
+          role: 'STUDENT',
+          deletedAt: null,
         },
       },
       select: { classId: true },
@@ -75,7 +79,7 @@ export async function GET(request: NextRequest) {
       const encoder = new TextEncoder();
 
       // Helper function to write SSE events
-      const sendEvent = (data: any) => {
+      const sendEvent = (data: unknown) => {
         try {
           controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
         } catch (error) {
@@ -87,13 +91,22 @@ export async function GET(request: NextRequest) {
       sendEvent({ heartbeat: true, timestamp: new Date().toISOString() });
 
       // Live notification event handler
-      const onNotification = (notification: any) => {
+      const onNotification = (notification: {
+        id?: string;
+        schoolId?: string;
+        userId?: string | null;
+        targetRole?: string | null;
+        targetClassId?: string | null;
+      }) => {
         // Multi-tenant check
         if (notification.schoolId !== schoolId) return;
 
         // Recipient filtering rules:
         // 1. Direct recipient
         const isDirectRecipient = notification.userId && notification.userId === userId;
+
+        // Administrators can review all notifications within their school.
+        const isSchoolAdministrator = auth.role === 'ADMIN';
 
         // 2. Broadcast role target (e.g. STUDENT, PARENT, TEACHER)
         const isRoleTarget = notification.targetRole && 
@@ -110,7 +123,7 @@ export async function GET(request: NextRequest) {
         const isGlobalBroadcast = (!notification.userId || notification.userId === '') && 
                                   (!notification.targetRole || notification.targetRole === 'ALL');
 
-        if (isDirectRecipient || isRoleTarget || isClassTarget || isGlobalBroadcast) {
+        if (isSchoolAdministrator || isDirectRecipient || isRoleTarget || isClassTarget || isGlobalBroadcast) {
           sendEvent(notification);
         }
       };

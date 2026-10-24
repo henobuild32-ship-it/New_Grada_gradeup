@@ -132,6 +132,16 @@ export async function mutateLocalFirst<T extends LocalRecord>(
   record: Partial<T> & { id?: string; schoolId: string },
   options: MutationOptions
 ): Promise<{ local: T; clientMutationId: string }> {
+  // Do this before touching IndexedDB. An online-only operation belongs to
+  // its direct API flow and must never leave an optimistic local mutation if
+  // enqueueAction refuses it.
+  if (options.onlineOnly) {
+    if (typeof navigator === 'undefined' || !navigator.onLine) {
+      throw new Error('Connexion requise : cette opération ne peut pas être effectuée hors ligne.');
+    }
+    throw new Error('Cette opération doit être envoyée directement à son API en ligne, sans passer par l’outbox.');
+  }
+
   let local: T;
   if (operation === 'delete') {
     const id = record.id ?? '';
@@ -165,9 +175,19 @@ export async function refreshRemote<T extends LocalRecord>(
   schoolId: string,
   extract?: (data: unknown) => Record<string, unknown>[]
 ): Promise<T[] | null> {
+  let res: Response;
   try {
-    const res = await fetch(url, { credentials: 'include' });
-    if (!res.ok) return null;
+    res = await fetch(url, { credentials: 'include' });
+  } catch {
+    // Transport indisponible : conserver la copie locale.
+    return null;
+  }
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({})) as { error?: string };
+    throw new Error(errorData.error || `Synchronisation impossible (HTTP ${res.status}).`);
+  }
+
+  try {
     const data = await res.json();
     const list = extract
       ? extract(data)
@@ -178,9 +198,9 @@ export async function refreshRemote<T extends LocalRecord>(
           : [];
     await applyRemoteList<T>(entity, list, schoolId);
     return readLocal<T>(entity, schoolId);
-  } catch {
-    // Hors ligne : conserver la copie locale.
-    return null;
+  } catch (error) {
+    if (error instanceof Error) throw error;
+    throw new Error('Réponse de synchronisation invalide.');
   }
 }
 
@@ -194,7 +214,7 @@ export async function readThrough<T extends LocalRecord>(
   const local = await readLocal<T>(entity, schoolId, filter);
   if (remoteUrl && typeof navigator !== 'undefined' && navigator.onLine) {
     // Fire-and-forget : l'UI est déjà rendue avec la copie locale.
-    void refreshRemote<T>(entity, remoteUrl, schoolId);
+    void refreshRemote<T>(entity, remoteUrl, schoolId).catch(() => null);
   }
   return local;
 }

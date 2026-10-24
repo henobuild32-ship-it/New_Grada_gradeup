@@ -1,5 +1,7 @@
 import { getLocalDB } from './db';
 import type { FlushResult, OutboxAction } from './types';
+import { canQueueOffline, computeBackoffMs } from './sync-rules';
+export { canQueueOffline, computeBackoffMs } from './sync-rules';
 
 /**
  * Outbox (file d'attente des mutations hors ligne).
@@ -10,10 +12,6 @@ import type { FlushResult, OutboxAction } from './types';
  * les erreurs permanentes (4xx) passent en `error` avec affichage manuel.
  */
 
-/** Délai de base du backoff (ms). */
-const BASE_BACKOFF_MS = 2_000;
-/** Backoff plafonné à 5 minutes. */
-const MAX_BACKOFF_MS = 5 * 60_000;
 /** Nombre max de tentatives automatiques avant passage en erreur permanente. */
 const MAX_AUTOMATIC_ATTEMPTS = 8;
 
@@ -29,11 +27,6 @@ function emit(name: string, detail?: unknown) {
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent(name, { detail }));
   }
-}
-
-/** Calcule le backoff exponentiel plafonné. */
-export function computeBackoffMs(attempts: number): number {
-  return Math.min(BASE_BACKOFF_MS * 2 ** Math.max(0, attempts - 1), MAX_BACKOFF_MS);
 }
 
 export interface EnqueueOptions {
@@ -54,7 +47,7 @@ export interface EnqueueOptions {
  * Lance une erreur si l'action est `onlineOnly` (opérations sensibles).
  */
 export async function enqueueAction(options: EnqueueOptions): Promise<string> {
-  if (options.onlineOnly) {
+  if (!canQueueOffline(options.onlineOnly ?? false)) {
     throw new Error(
       'Connexion requise : cette opération ne peut pas être effectuée hors ligne.'
     );
@@ -178,7 +171,24 @@ async function sendAction(action: OutboxAction): Promise<{ ok: boolean; status: 
   } catch {
     body = null;
   }
-  return { ok: res.ok, status: res.status, body };
+  const result = (body as {
+    results?: Array<{ clientMutationId?: string; ok?: boolean; status?: number; error?: string }>;
+  } | null)?.results?.find((item) => item.clientMutationId === action.clientMutationId);
+
+  // The push endpoint uses HTTP 207 for partial batches. `Response.ok` is
+  // still true for 207, so trust the per-mutation result, not the envelope.
+  if (result) {
+    return {
+      ok: result.ok === true,
+      status: typeof result.status === 'number' ? result.status : res.status,
+      body: { error: result.error || (result.ok ? undefined : 'Résultat de synchronisation en échec') },
+    };
+  }
+
+  if (res.ok) {
+    return { ok: false, status: 502, body: { error: 'Réponse de synchronisation invalide' } };
+  }
+  return { ok: false, status: res.status, body };
 }
 
 let flushing = false;

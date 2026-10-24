@@ -43,6 +43,7 @@ interface StudentItem {
   academicYear?: string;
   section?: string;
   photoUrl?: string;
+  classId?: string;
   cardId?: string;
   cardIssuedDate?: string;
   cardExpiryDate?: string;
@@ -60,6 +61,7 @@ interface StudentItem {
 export default function AdminCards() {
   const { user } = useAppStore();
   const [usersList, setUsersList] = useState<StudentItem[]>([]);
+  const [availableClasses, setAvailableClasses] = useState<Array<{ id: string; name: string }>>([]);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
   const [activeTab, setActiveTab] = useState<string>('ALL');
@@ -197,12 +199,25 @@ export default function AdminCards() {
     }
   }, [user?.schoolId]);
 
+  const fetchClasses = useCallback(async () => {
+    if (!user?.schoolId) return;
+    try {
+      const res = await fetch(`/api/classes?schoolId=${user.schoolId}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Impossible de charger les classes.');
+      setAvailableClasses(Array.isArray(data.classes) ? data.classes : []);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Impossible de charger les classes.');
+    }
+  }, [user?.schoolId]);
+
   useEffect(() => {
     if (user?.schoolId) {
       fetchUsersList();
       fetchSchoolLogo();
+      fetchClasses();
     }
-  }, [fetchUsersList, fetchSchoolLogo, user?.schoolId]);
+  }, [fetchUsersList, fetchSchoolLogo, fetchClasses, user?.schoolId]);
 
   const generateCards = async (action: 'generate-all' | 'generate-class' | 'generate-single', classId?: string, studentId?: string) => {
     try {
@@ -236,7 +251,7 @@ export default function AdminCards() {
       fullName: student.fullName,
       email: student.email || '',
       postName: student.postName || '',
-      gender: student.gender || 'M',
+      gender: student.gender || '',
       birthDate: student.birthDate || '',
       matricule: student.matricule || '',
       specialty: student.specialty || '',
@@ -250,6 +265,7 @@ export default function AdminCards() {
       section: student.section || '',
       photoUrl: student.photoUrl || '',
       className: student.classEnrollments?.[0]?.class?.name || '',
+      classId: student.classEnrollments?.[0]?.class?.id || '',
       bloodType: student.bloodType || '',
       nationality: student.nationality || '',
       ine: student.ine || student.cardId || '',
@@ -269,7 +285,7 @@ export default function AdminCards() {
       fullName: '',
       email: '',
       postName: '',
-      gender: 'M',
+      gender: '',
       birthDate: '',
       matricule: '',
       specialty: '',
@@ -283,6 +299,7 @@ export default function AdminCards() {
       section: '',
       photoUrl: '',
       className: '',
+      classId: '',
       bloodType: '',
       nationality: '',
       password: Math.random().toString(36).slice(-8),
@@ -345,6 +362,22 @@ export default function AdminCards() {
         toast.error('Le numéro de téléphone est obligatoire pour un professeur.');
         return;
       }
+    }
+    if (formData.gender !== 'M' && formData.gender !== 'F') {
+      toast.error('Le sexe doit être sélectionné (M ou F).');
+      return;
+    }
+    if ((cardRole === 'STUDENT' || cardRole === 'TEACHER') && !formData.birthDate?.trim()) {
+      toast.error('La date de naissance est obligatoire.');
+      return;
+    }
+    if (isCreating && !formData.email?.trim()) {
+      toast.error('L’adresse e-mail est obligatoire.');
+      return;
+    }
+    if (isCreating && cardRole === 'STUDENT' && !formData.classId) {
+      toast.error('La classe est obligatoire pour un élève.');
+      return;
     }
     setSubmitting(true);
     try {
@@ -721,9 +754,9 @@ export default function AdminCards() {
             </div>
             
             <div className="space-y-2">
-              <Label>Sexe</Label>
-              <Select value={formData.gender || 'M'} onValueChange={(v) => setFormData({...formData, gender: v})}>
-                <SelectTrigger><SelectValue/></SelectTrigger>
+              <Label>Sexe *</Label>
+              <Select value={formData.gender || ''} onValueChange={(v) => setFormData({...formData, gender: v})}>
+                <SelectTrigger><SelectValue placeholder="Sélectionner M ou F" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="M">Masculin</SelectItem>
                   <SelectItem value="F">Féminin</SelectItem>
@@ -842,12 +875,14 @@ export default function AdminCards() {
             </div>
             
             <div className="space-y-2">
-              <Label>Classe</Label>
-              <Input 
-                value={formData.className || ''} 
-                onChange={(e) => setFormData({...formData, className: e.target.value})} 
-                placeholder="Ex: 6ème A"
-              />
+              <Label>Classe {cardRole === 'STUDENT' ? '*' : ''}</Label>
+              <Select value={formData.classId || ''} onValueChange={(value) => {
+                const selectedClass = availableClasses.find((item) => item.id === value);
+                setFormData({ ...formData, classId: value, className: selectedClass?.name || '' });
+              }}>
+                <SelectTrigger><SelectValue placeholder="Sélectionner une classe" /></SelectTrigger>
+                <SelectContent>{availableClasses.map((item) => <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>)}</SelectContent>
+              </Select>
             </div>
             
             <div className="space-y-2">

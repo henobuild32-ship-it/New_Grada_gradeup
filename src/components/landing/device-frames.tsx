@@ -68,12 +68,6 @@ function StatCard({ label, value, hint }: { label: string; value: string; hint?:
 /** Tableau de bord direction (desktop). */
 export function DashboardScreen() {
   const nav = ['Tableau de bord', 'Élèves', 'Classes', 'Notes', 'Paiements', 'Bulletins'];
-  const rows = [
-    ['Nadège Mbuyi', '4e Humanités A', '14,6/20', '2e'],
-    ['Patrick Ilunga', '3e EB B', '11,2/20', '17e'],
-    ['Grâce Tshibangu', '6e EB A', '16,1/20', '1er'],
-    ['Emmanuel Kanku', '4e Humanités A', '9,8/20', '31e'],
-  ];
   return (
     <div className="flex min-h-[240px] text-left sm:min-h-[300px]">
       {/* Barre latérale */}
@@ -101,7 +95,7 @@ export function DashboardScreen() {
         <div className="mb-3 flex items-center justify-between">
           <div>
             <p className="text-[13px] font-semibold leading-tight text-foreground">Tableau de bord</p>
-            <p className="text-[9.5px] text-muted-foreground">Lycée La Grâce · Année 2025-2026</p>
+            <p className="text-[9.5px] text-muted-foreground">Vue de synthèse · Votre établissement</p>
           </div>
           <span className="rounded-full border border-line px-2 py-0.5 text-[9px] text-muted-foreground">
             Direction
@@ -109,29 +103,19 @@ export function DashboardScreen() {
         </div>
 
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-          <StatCard label="Élèves inscrits" value="486" hint="+12 ce trimestre" />
-          <StatCard label="Enseignants" value="27" hint="Tous actifs" />
-          <StatCard label="Minerval encaissé" value="72 %" hint="Sur 3 échéances" />
-          <StatCard label="Présence du jour" value="94 %" hint="486 élèves" />
+          <StatCard label="Élèves inscrits" value="—" hint="Données de l’établissement" />
+          <StatCard label="Enseignants" value="—" hint="Données de l’établissement" />
+          <StatCard label="Minerval encaissé" value="—" hint="Données de l’établissement" />
+          <StatCard label="Présence du jour" value="—" hint="Données de l’établissement" />
         </div>
 
         <div className="mt-3 overflow-hidden rounded-lg border border-line">
           <div className="flex items-center justify-between border-b border-line bg-muted/40 px-2.5 py-1.5">
-            <p className="text-[9.5px] font-semibold text-foreground">Meilleures moyennes du trimestre</p>
-            <p className="text-[9px] text-muted-foreground">Rang</p>
+            <p className="text-[9.5px] font-semibold text-foreground">Résultats scolaires</p>
           </div>
-          <table className="w-full text-[9.5px]">
-            <tbody>
-              {rows.map(([name, cls, note, rank]) => (
-                <tr key={name} className="border-b border-line/70 last:border-0">
-                  <td className="px-2.5 py-1.5 font-medium text-foreground">{name}</td>
-                  <td className="px-2 py-1.5 text-muted-foreground">{cls}</td>
-                  <td className="px-2 py-1.5 text-foreground">{note}</td>
-                  <td className="px-2.5 py-1.5 text-right text-muted-foreground">{rank}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <p className="px-2.5 py-5 text-center text-[9.5px] text-muted-foreground">
+            Les résultats s’affichent à partir des données réelles de votre établissement.
+          </p>
         </div>
       </div>
     </div>
@@ -141,29 +125,29 @@ export function DashboardScreen() {
 /** Bulletin scolaire (desktop). */
 export function BulletinScreen() {
   const rows: [string, string, string, string][] = [
-    ['Mathématiques', '15,5 / 20', 'Très bien', '4,65'],
-    ['Physique-Chimie', '13,0 / 20', 'Assez bien', '3,90'],
-    ['Français', '16,0 / 20', 'Très bien', '4,80'],
-    ['Histoire-Géographie', '12,5 / 20', 'Passable', '2,50'],
-    ['Anglais', '14,5 / 20', 'Bien', '4,35'],
-    ['SVT', '15,0 / 20', 'Très bien', '3,00'],
+    ['Mathématiques', '—', '—', '—'],
+    ['Physique-Chimie', '—', '—', '—'],
+    ['Français', '—', '—', '—'],
+    ['Histoire-Géographie', '—', '—', '—'],
+    ['Anglais', '—', '—', '—'],
+    ['SVT', '—', '—', '—'],
   ];
   return (
     <div className="min-h-[240px] p-3 text-left sm:min-h-[300px] sm:p-4">
       <div className="mb-3 flex items-start justify-between gap-3">
         <div>
-          <p className="text-[13px] font-semibold leading-tight text-foreground">Bulletin — 1er trimestre</p>
-          <p className="text-[9.5px] text-muted-foreground">Nadège Mbuyi · Matricule MAT-2025-1042 · 4e Humanités A</p>
+          <p className="text-[13px] font-semibold leading-tight text-foreground">Bulletin scolaire</p>
+          <p className="text-[9.5px] text-muted-foreground">Élève et période sélectionnés</p>
         </div>
         <span className="rounded-md bg-signal/10 px-1.5 py-0.5 text-[9px] font-semibold text-signal">
-          Publié
+          Après validation
         </span>
       </div>
 
       <div className="mb-3 grid grid-cols-3 gap-2">
-        <StatCard label="Moyenne générale" value="14,6 / 20" hint="Assez bien" />
-        <StatCard label="Rang" value="2e" hint="sur 42 élèves" />
-        <StatCard label="Absences" value="2 h" hint="Justifiées" />
+        <StatCard label="Moyenne générale" value="—" hint="Calculée depuis les notes" />
+        <StatCard label="Rang" value="—" hint="Classe sélectionnée" />
+        <StatCard label="Absences" value="—" hint="Présences enregistrées" />
       </div>
 
       <div className="overflow-hidden rounded-lg border border-line">
@@ -191,7 +175,7 @@ export function BulletinScreen() {
 
       <div className="mt-3 flex items-end justify-between gap-2">
         <p className="text-[9px] text-muted-foreground">
-          Appréciation du titulaire : « Trimestre sérieux, bons résultats. »
+          Appréciation du titulaire
         </p>
         <span className="rounded-md border border-dashed border-line px-2 py-1 text-[8.5px] text-muted-foreground">
           Signature direction
@@ -203,19 +187,13 @@ export function BulletinScreen() {
 
 /** Cahier de cotation (desktop). */
 export function CahierScreen() {
-  const students = [
-    { name: 'Nadège Mbuyi', marks: ['15', '14', '16', '15', '14'] },
-    { name: 'Patrick Ilunga', marks: ['11', '12', '10', '13', '11'] },
-    { name: 'Grâce Tshibangu', marks: ['17', '16', '15', '17', '16'] },
-    { name: 'Emmanuel Kanku', marks: ['9', '10', '11', '9', '10'] },
-    { name: 'Sarah Luboya', marks: ['13', '14', '13', '15', '14'] },
-  ];
+  const students = ['Élève', 'Élève', 'Élève', 'Élève', 'Élève'];
   return (
     <div className="min-h-[240px] p-3 text-left sm:min-h-[300px] sm:p-4">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div>
           <p className="text-[13px] font-semibold leading-tight text-foreground">Cahier de cotation</p>
-          <p className="text-[9.5px] text-muted-foreground">Mathématiques · 4e Humanités A · 1er trimestre</p>
+          <p className="text-[9.5px] text-muted-foreground">Matière · classe · période sélectionnées</p>
         </div>
         <div className="flex gap-1">
           {['C1', 'C2', 'Devoir', 'C3', 'Examen'].map((label) => (
@@ -240,19 +218,16 @@ export function CahierScreen() {
             </tr>
           </thead>
           <tbody>
-            {students.map((student) => {
-              const avg = (
-                student.marks.reduce((sum, mark) => sum + Number(mark), 0) / student.marks.length
-              ).toFixed(1);
+            {students.map((student, rowIndex) => {
               return (
-                <tr key={student.name} className="border-b border-line/70 last:border-0">
-                  <td className="px-2.5 py-1.5 font-medium text-foreground">{student.name}</td>
-                  {student.marks.map((mark, index) => (
+                <tr key={rowIndex} className="border-b border-line/70 last:border-0">
+                  <td className="px-2.5 py-1.5 font-medium text-foreground">{student}</td>
+                  {Array.from({ length: 5 }, (_, index) => (
                     <td key={index} className="px-1.5 py-1.5 text-center text-muted-foreground">
-                      {mark}
+                      —
                     </td>
                   ))}
-                  <td className="px-2.5 py-1.5 text-right font-semibold text-foreground">{avg}</td>
+                  <td className="px-2.5 py-1.5 text-right font-semibold text-foreground">—</td>
                 </tr>
               );
             })}
@@ -261,9 +236,9 @@ export function CahierScreen() {
       </div>
 
       <div className="mt-3 flex items-center justify-between gap-2">
-        <p className="text-[9px] text-muted-foreground">Moyenne de la classe : 13,4 / 20</p>
-        <span className="rounded-md bg-brand px-2 py-1 text-[9px] font-semibold text-brand-foreground">
-          Envoyer au titulaire
+        <p className="text-[9px] text-muted-foreground">Les moyennes suivent les règles de cotation de l’établissement.</p>
+        <span className="rounded-md border border-line px-2 py-1 text-[9px] font-medium text-muted-foreground">
+          Validation par le titulaire
         </span>
       </div>
     </div>
@@ -272,41 +247,38 @@ export function CahierScreen() {
 
 /** Notes d'un élève (desktop). */
 export function GradesScreen() {
-  const subjects: [string, number][] = [
-    ['Mathématiques', 15.5],
-    ['Français', 16],
-    ['Anglais', 14.5],
-    ['Physique', 13],
-    ['Histoire-Géo', 12.5],
-    ['SVT', 15],
+  const subjects = [
+    'Mathématiques',
+    'Français',
+    'Anglais',
+    'Physique',
+    'Histoire-Géographie',
+    'Sciences de la vie et de la Terre',
   ];
   return (
     <div className="min-h-[240px] p-3 text-left sm:min-h-[300px] sm:p-4">
       <div className="mb-3">
         <p className="text-[13px] font-semibold leading-tight text-foreground">Mes notes</p>
-        <p className="text-[9.5px] text-muted-foreground">1er trimestre · 4e Humanités A</p>
+        <p className="text-[9.5px] text-muted-foreground">Notes par matière et par période</p>
       </div>
       <div className="grid gap-2 sm:grid-cols-2">
-        {subjects.map(([name, note]) => (
+        {subjects.map((name) => (
           <div key={name} className="rounded-lg border border-line bg-surface p-2.5">
             <div className="flex items-baseline justify-between gap-2">
               <span className="text-[10.5px] font-medium text-foreground">{name}</span>
               <span className="text-[11px] font-semibold text-foreground">
-                {String(note).replace('.', ',')}<span className="text-[9px] font-normal text-muted-foreground"> / 20</span>
+                —<span className="text-[9px] font-normal text-muted-foreground"> / 20</span>
               </span>
             </div>
             <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-muted">
-              <div
-                className={`h-full rounded-full ${note >= 10 ? 'bg-brand' : 'bg-[#b91c1c]'}`}
-                style={{ width: `${(note / 20) * 100}%` }}
-              />
+              <div className="h-full w-0 rounded-full bg-brand" />
             </div>
           </div>
         ))}
       </div>
       <div className="mt-3 flex items-center justify-between rounded-lg border border-line bg-muted/40 px-2.5 py-2">
         <span className="text-[9.5px] text-muted-foreground">Moyenne générale</span>
-        <span className="text-[12px] font-semibold text-foreground">14,4 / 20</span>
+        <span className="text-[12px] font-semibold text-foreground">— / 20</span>
       </div>
     </div>
   );
@@ -319,10 +291,10 @@ export function ParentPhoneScreen() {
       <div className="flex items-center justify-between border-b border-line px-3 py-2.5">
         <div>
           <p className="text-[11px] font-semibold leading-tight text-foreground">Mon enfant</p>
-          <p className="text-[8.5px] text-muted-foreground">Lycée La Grâce</p>
+          <p className="text-[8.5px] text-muted-foreground">Établissement</p>
         </div>
         <span className="grid size-5 place-items-center rounded-full bg-brand text-[9px] font-semibold text-white">
-          NM
+          —
         </span>
       </div>
 
@@ -330,30 +302,30 @@ export function ParentPhoneScreen() {
         <div className="rounded-xl border border-line p-3">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-[11px] font-semibold text-foreground">Nadège Mbuyi</p>
-              <p className="text-[8.5px] text-muted-foreground">4e Humanités A · MAT-2025-1042</p>
+              <p className="text-[11px] font-semibold text-foreground">Dossier de l’élève</p>
+              <p className="text-[8.5px] text-muted-foreground">Classe · matricule</p>
             </div>
             <span className="rounded-md bg-signal/10 px-1.5 py-0.5 text-[8.5px] font-semibold text-signal">
-              Bulletin publié
+              Bulletins
             </span>
           </div>
 
           <div className="mt-2.5 grid grid-cols-2 gap-2">
             <div className="rounded-lg bg-muted/60 p-2">
               <p className="text-[8.5px] text-muted-foreground">Moyenne</p>
-              <p className="text-[13px] font-semibold leading-tight text-foreground">14,6</p>
+              <p className="text-[13px] font-semibold leading-tight text-foreground">—</p>
             </div>
             <div className="rounded-lg bg-muted/60 p-2">
               <p className="text-[8.5px] text-muted-foreground">Rang</p>
-              <p className="text-[13px] font-semibold leading-tight text-foreground">2e / 42</p>
+              <p className="text-[13px] font-semibold leading-tight text-foreground">—</p>
             </div>
           </div>
 
           <div className="mt-2.5 flex gap-2">
-            <span className="flex-1 rounded-lg bg-brand px-2 py-1.5 text-center text-[9.5px] font-semibold text-brand-foreground">
-              Voir le bulletin
+            <span className="flex-1 rounded-lg bg-muted px-2 py-1.5 text-center text-[9.5px] font-medium text-muted-foreground">
+              Bulletin publié
             </span>
-            <span className="rounded-lg border border-line px-2 py-1.5 text-[9.5px] font-medium text-foreground">
+            <span className="rounded-lg border border-line px-2 py-1.5 text-[9.5px] font-medium text-muted-foreground">
               PDF
             </span>
           </div>
@@ -362,14 +334,14 @@ export function ParentPhoneScreen() {
         <div className="rounded-xl border border-line p-3">
           <div className="flex items-center justify-between">
             <p className="text-[10.5px] font-semibold text-foreground">Minerval</p>
-            <span className="text-[9.5px] text-muted-foreground">3e échéance</span>
+            <span className="text-[9.5px] text-muted-foreground">Échéances</span>
           </div>
           <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-muted">
-            <div className="h-full w-2/3 rounded-full bg-brand" />
+            <div className="h-full w-0 rounded-full bg-brand" />
           </div>
           <div className="mt-1.5 flex items-center justify-between text-[9px]">
-            <span className="text-muted-foreground">Payé : 200 USD</span>
-            <span className="font-medium text-foreground">Reste : 100 USD</span>
+            <span className="text-muted-foreground">Payé : —</span>
+            <span className="font-medium text-foreground">Solde : —</span>
           </div>
         </div>
 
@@ -378,11 +350,11 @@ export function ParentPhoneScreen() {
           <ul className="mt-1.5 space-y-1.5 text-[9px] text-muted-foreground">
             <li className="flex gap-1.5">
               <span className="mt-1 size-1 shrink-0 rounded-full bg-brand" />
-              Conseil de classe le 12 décembre à 14 h.
+              Les événements de l’établissement s’affichent ici.
             </li>
             <li className="flex gap-1.5">
               <span className="mt-1 size-1 shrink-0 rounded-full bg-brand" />
-              Absence enregistrée le 3 novembre (2 h).
+              Les présences et notifications sont liées au dossier de l’élève.
             </li>
           </ul>
         </div>

@@ -17,8 +17,11 @@ export async function GET(req: NextRequest) {
 
     // Visibilité par rôle
     if (auth.role === 'STUDENT' || auth.role === 'PARENT') {
-      const sid = auth.role === 'PARENT' ? (await childrenIds(auth.userId))[0] : auth.userId;
-      const enrollments = await db.enrolledClass.findMany({ where: { userId: sid }, select: { classId: true } });
+      const studentIds = auth.role === 'PARENT' ? await childrenIds(auth.userId) : [auth.userId];
+      const enrollments = await db.enrolledClass.findMany({
+        where: { userId: { in: studentIds }, class: { schoolId: auth.schoolId, deletedAt: null } },
+        select: { classId: true },
+      });
       const classIds = enrollments.map((e) => e.classId);
       const tit = await db.schoolClass.findMany({ where: { titulaireId: auth.userId }, select: { id: true } });
       const allowed = [...new Set([...classIds, ...tit.map((t) => t.id)])];

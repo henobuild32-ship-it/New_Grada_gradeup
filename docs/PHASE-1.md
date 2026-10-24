@@ -1,6 +1,6 @@
 # PHASE 1 — Fondations mobile-first
 
-> Date : 2026-10-15 · Règles appliquées : mobile-first 360–400 px, cibles tactiles ≥ 44 px, bottom nav, tables→cartes < 768 px, zéro scroll horizontal, zéro bouton mort, TypeScript strict, a11y, FR, clair/sombre, améliorer sans réécrire.
+> Date : 2026-10-15, reprise : 2026-10-23 · État : en cours. Règles : mobile-first 360–400 px, cibles ≥ 44 px, navigation adaptative, tables→cartes < 768 px, zéro scroll horizontal, formulaires validés, français, clair/sombre.
 
 ## Objectif
 Refondre les fondations UI de GradeUp sans changer la logique métier : design system partagé, navigation unique pour 4 rôles adaptative (mobile / tablette / desktop), tables converties en cartes sous 768 px, formulaires zod + react-hook-form, états standard, i18n prête.
@@ -41,6 +41,9 @@ Refondre les fondations UI de GradeUp sans changer la logique métier : design s
 
 - Bottom nav primaire : ADMIN [Accueil, Classes, Paiements, Profil], TEACHER [Accueil, Notes, Devoirs, Profil], STUDENT [Accueil, Notes, Devoirs, Profil], PARENT [Accueil, Suivi, Paiements, Profil].
 - `src/app/layout.tsx` : viewport corrigé — `width: "device-width"`, `initialScale: 1`, `maximumScale: 1`, `viewportFit: "cover"`.
+- La palette de commandes lit désormais exactement la navigation partagée (y compris les filtres titulaire), au lieu de maintenir une seconde liste de rôles.
+- L’écran CAISSIER possède une boîte de réception dédiée ; la cloche utilise une route typée par rôle et le GET serveur limite les lignes visibles aux notifications personnelles, CAISSIER et ALL. L’ADMIN peut cibler explicitement l’équipe de caisse. La sélection d'une autre interface a été retirée du menu profil, car elle ne changeait pas la session et envoyait vers une page refusée.
+- Les cibles du shell tablette ont une taille minimale de 44 px. La barre supérieure ajoute la zone de sécurité au-dessus de ses 56 px au lieu de réduire la zone des commandes sur les appareils avec encoche.
 
 ## 5. Tables → cartes sous 768 px
 Double rendu systématique (`hidden md:block` pour le tableau desktop inchangé, `md:hidden` pour les cartes) :
@@ -74,33 +77,33 @@ Déjà responsives sans travail : `parent-payments`, `teacher-reports` (cards), 
 ## 8. Config build
 - `next.config.ts` : `typescript.ignoreBuildErrors` supprimé (Phase 0/1) — le build échoue sur toute erreur de type.
 
-## Vérifications automatisées de fin de phase
-- [x] `npx tsc --noEmit` → **0 erreur**
-- [x] `npm run lint` → **0 erreur**
-- [x] `npm run build` → **EXIT 0** (Prisma + next build + standalone OK)
-- [x] Serveur dev relancé, `http://localhost:3000/` → 200
+## Vérifications effectuées pendant la reprise — 2026-10-23
+- [x] npx tsc --noEmit → exit 0.
+- [x] npm run lint → exit 0.
+- [x] npm run build → exit 0 ; Prisma signale sa configuration package.json dépréciée et Next sa convention middleware dépréciée (avertissements non bloquants).
+- [x] Navigateur intégré, origine propre : page d’accueil testée à 360×640, 390×844, 768×1024 et 1280×800, sans débordement horizontal.
+- [x] Connexion et inscription testées aux mêmes tailles : aucun débordement ; champs texte/date/téléphone de 16 px et 44 px de haut ; le sexe reste non sélectionné par défaut ; les champs requis enseignant apparaissent.
+- [x] Maquette marketing du tableau de bord contrôlée : aucun effectif, nom d’élève, note ou pourcentage fictif.
+- [x] Sur une origine navigateur propre, aucun avertissement ni erreur console après hydratation. L’enregistrement du service worker est désormais fait par un composant client après hydratation.
+- [ ] Les écrans authentifiés (navigation, classes, paiements, tables par rôle) restent à vérifier en UI. `/api/health` a répondu HTTP 200 avec une base PostgreSQL de développement isolée sous le serveur dev; le serveur standalone lancé sans `.env.local` a utilisé la base distante configurée dans `.env`, inaccessible depuis ce poste.
+- [ ] Le navigateur intégré signale encore « Local browser use is disabled in Work settings » après activation annoncée par l’utilisateur. Le script CDP sans dépendance externe s’arrête aussi avec un crash GPU (2147483651) avant la recette des rôles.
+- [x] Test d'autorisations backend relancé contre le serveur et le seed locaux : 79/79 contrôles, incluant génération, transmission/validation/publication protégées, filtres de notifications, visibilité publiée élève/parent, horaires, cours, leçons, notes et listes utilisateurs bornés par rôle.
+- [ ] Contrôle UI après l'ajout de la boîte de réception CAISSIER impossible tant que le navigateur local reste désactivé dans Work ; l'écran compile et la portée serveur est couverte par le lint/typecheck/build, pas encore par un parcours connecté CAISSIER.
 
-## Recette QA automatisée — `.zscripts/qa-phase1.js` (puppeteer-core + Chrome)
-**96/96 checks OK** — 4 rôles (user factice injecté dans `gradeup-storage`, `hydrateSession` ne supprime pas sur 401) × 4 viewports :
-| Check | 360×640 | 390×844 | 768×1024 | 1280×800 |
-|---|---|---|---|---|
-| Pas de scroll horizontal (clair + sombre) | OK ×4 rôles | OK ×4 | OK ×4 | OK ×4 |
-| Bottom nav présente, 5 entrées, cibles ≥ ~44 px (min-dimension 56 px) | OK ×4 | OK ×4 | n/a | n/a |
-| Tiroir « Plus » s'ouvre | OK ×4 | OK ×4 | n/a | n/a |
-| Bottom nav absente ≥ 768 px + sidebar présente | n/a | n/a | OK ×4 | OK ×4 |
-| Thème sombre appliqué (`html.dark` + bg CIELAB L*≈3) | OK ×4 | OK ×4 | OK ×4 | OK ×4 |
+## Checklist restante
+- [ ] Refaire le shell authentifié pour les quatre rôles sur 360×640, 390×844, 768×1024 et 1280×800.
+- [ ] Parcourir toutes les pages pour contrôler les cartes mobiles, le scroll horizontal, les états et les boutons actifs.
+- [ ] Migrer les formulaires encore contrôlés par état vers zod + react-hook-form, avec erreurs inline et action collante mobile.
+- [ ] Contrôler mode avion, contraste AA, navigation clavier et annonce VoiceOver/TalkBack (cache complet en Phase 2).
 
-Captures : `.zscripts/qa-shots/{ROLE}-{viewport}-{light|dark|plus}.png` + `results.json`.
+## Mise à jour du backend local — 2026-10-23
 
-## Checklist manuelle restante (DevTools / appareil)
-- [ ] Admin → Utilisateurs : ouvrir Créer, valider à vide → erreurs zod inline en français ; créer un USER ok (toast)
-- [ ] Mode avion : pages déjà visitées lisibles (généralisation outbox/IndexedDB → Phase 2)
-- [ ] Contrastes AA spot-check sur badges statut (clair/sombre)
-- [ ] VoiceOver/TalkBack : bottom nav annoncée « Navigation principale », onglet actif `aria-current`
-
+- PostgreSQL de développement isolé prêt sur `127.0.0.1:5433`; le schéma Prisma et le seed sont chargés. Cette base n’est ni la base distante ni la production.
+- Les formulaires et le shell authentifié ne sont pas encore validés par parcours manuel multi-rôle. Le navigateur intégré est désactivé côté Work et Chrome headless échoue avant le parcours.
+- Le test backend crée un bulletin de test à partir des notes seedées; il confirme le refus de publication directe avant validation.
 ## Fichiers modifiés / créés
-**Créés** : `src/lib/navigation.config.ts`, `src/lib/i18n/fr.ts`, `src/lib/forms/schemas.ts`, `src/components/ui/{bottom-sheet,icon-button,fab,page-header,search-bar,status-badge,date-picker,card-list,empty-state,error-state,scrollable-tabs,form-field}.tsx`, `.zscripts/qa-phase1.js`
-**Modifiés** : `src/app/layout.tsx` (viewport + SonnerToaster), `src/components/gradeup/app-layout.tsx` (3 paliers + navigation.config + BottomSheet), `src/components/gradeup/ui-states.tsx` (shim), `src/components/gradeup/admin-dashboard.tsx`, `admin-users.tsx` (cartes + formulaire RHF/zod), `admin-payments.tsx`, `admin-conferences.tsx`, `admin-cotation-rules.tsx`, `auto-report-sync-panel.tsx`, `parent-dashboard.tsx`, `parent-grades.tsx`, `student-grades.tsx`, `teacher-attendance.tsx`, `next.config.ts`
+**Créés** : `src/lib/navigation.config.ts`, `src/lib/i18n/fr.ts`, `src/lib/forms/schemas.ts`, `src/components/ui/{bottom-sheet,icon-button,fab,page-header,search-bar,status-badge,date-picker,card-list,empty-state,error-state,scrollable-tabs,form-field}.tsx`, `src/components/gradeup/cashier-notifications.tsx`, `.zscripts/qa-phase1.js`
+**Modifiés** : `src/app/layout.tsx` (viewport + SonnerToaster), `src/app/page.tsx` (route notifications caissier), `src/components/gradeup/app-layout.tsx` (3 paliers + navigation.config + BottomSheet + commandes ≥44 px), `src/components/gradeup/command-palette.tsx` (source de navigation unique), `src/components/gradeup/parent-notifications.tsx` (boîte partagée parent/caissier), `src/components/gradeup/admin-notifications.tsx` (ciblage de la caisse), `src/components/gradeup/admin-schedules.tsx` (annonce de classe), `src/services/notifications/notificationListener.ts` (SSE authentifié), `src/components/gradeup/ui-states.tsx` (shim), `src/components/gradeup/admin-dashboard.tsx`, `admin-users.tsx` (cartes + formulaire RHF/zod), `admin-payments.tsx`, `admin-conferences.tsx`, `admin-cotation-rules.tsx`, `auto-report-sync-panel.tsx`, `parent-dashboard.tsx`, `parent-grades.tsx`, `student-grades.tsx`, `teacher-attendance.tsx`, `src/lib/types.ts`, `src/lib/navigation.config.ts`, `src/app/api/notifications/route.ts`, `src/app/api/notifications/stream/route.ts`, `scripts/rbac-check.mjs`, `docs/API.md`, `docs/PHASE-3.md`, `next.config.ts`
 **Docs** : `docs/AUDIT.md`, `docs/PLAN.md`, `docs/PHASE-1.md` (ce document)
 
 ## Suite (Phase 2)

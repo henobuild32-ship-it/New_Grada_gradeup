@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useAppStore } from '@/lib/store';
-import type { NotificationInfo } from '@/lib/types';
+import type { NotificationInfo, UserRole } from '@/lib/types';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -10,11 +10,13 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Bell, BellOff, CheckCheck, Clock, CircleDot, MessageSquare, AlertCircle, Info } from 'lucide-react';
 import { toast } from 'sonner';
+import { ErrorBanner, ErrorState } from '@/components/ui/error-state';
 
-export default function ParentNotifications() {
+export function RoleNotificationInbox({ targetRole }: { targetRole: UserRole }) {
   const { user } = useAppStore();
   const [notifications, setNotifications] = useState<NotificationInfo[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [markingId, setMarkingId] = useState<string | null>(null);
   const schoolId = user?.schoolId || '';
 
@@ -24,23 +26,22 @@ export default function ParentNotifications() {
       return;
     }
     setLoading(true);
+    setError(null);
     try {
-      const res = await fetch(`/api/notifications?schoolId=${schoolId}&targetRole=PARENT`);
-      if (res.ok) { 
-        const data = await res.json();
-        // Safe, flexible parsing supporting both flat array and object formats
-        const rawList = Array.isArray(data) ? data : (Array.isArray(data?.notifications) ? data.notifications : []);
-        setNotifications(rawList);
-      } else {
-        setNotifications([]);
-      }
-    } catch { 
-      toast.error('Erreur lors du chargement des notifications');
-      setNotifications([]);
+      const res = await fetch(`/api/notifications?schoolId=${encodeURIComponent(schoolId)}&targetRole=${targetRole}`);
+      if (!res.ok) throw new Error('Impossible de charger les notifications. Réessayez.');
+      const data = await res.json();
+      // Safe, flexible parsing supporting both flat array and object formats
+      const rawList = Array.isArray(data) ? data : (Array.isArray(data?.notifications) ? data.notifications : []);
+      setNotifications(rawList);
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : 'Erreur lors du chargement des notifications.';
+      setError(message);
+      toast.error(message);
     } finally { 
       setLoading(false);
     }
-  }, [schoolId]);
+  }, [schoolId, targetRole]);
 
   useEffect(() => { fetchNotifications(); }, [fetchNotifications]);
 
@@ -67,7 +68,7 @@ export default function ParentNotifications() {
         toast.success('Notification marquée comme lue'); 
         // Notify layout bell count badge to decrement
         window.dispatchEvent(new CustomEvent('gradeup-notification-read'));
-      }
+      } else throw new Error('Impossible de marquer cette notification comme lue.');
     } catch { 
       toast.error('Erreur lors de la mise à jour'); 
     } finally { 
@@ -79,11 +80,12 @@ export default function ParentNotifications() {
     const unread = Array.isArray(notifications) ? notifications.filter(n => !n.read) : [];
     if (unread.length === 0) return;
     try {
-      await Promise.all(unread.map(n => fetch(`/api/notifications/${n.id}`, { 
+      const responses = await Promise.all(unread.map(n => fetch(`/api/notifications/${n.id}`, {
         method: 'PUT', 
         headers: { 'Content-Type': 'application/json' }, 
         body: JSON.stringify({ read: true }) 
       })));
+      if (responses.some((response) => !response.ok)) throw new Error('Certaines notifications n’ont pas pu être mises à jour.');
       setNotifications(prev => Array.isArray(prev) ? prev.map(n => ({ ...n, read: true })) : []);
       toast.success(`${unread.length} notification(s) marquée(s) comme lue(s)`);
       // Notify layout bell count badge to reset
@@ -140,6 +142,10 @@ export default function ParentNotifications() {
         </div>
       </div>
 
+      {error && notifications.length > 0 && (
+        <ErrorBanner message={error} onRetry={() => { void fetchNotifications(); }} />
+      )}
+
       {/* Summary badges */}
       <div className="flex gap-3 flex-wrap">
         <Badge variant="outline" className="gap-1.5 py-1.5 px-3 border-blue-200 text-blue-600">
@@ -157,7 +163,9 @@ export default function ParentNotifications() {
         <div className="space-y-3">
           {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-24 w-full" />)}
         </div>
-      ) : !Array.isArray(notifications) || notifications.length === 0 ? (
+      ) : error && notifications.length === 0 ? (
+        <ErrorState title="Notifications indisponibles" description={error} onRetry={() => { void fetchNotifications(); }} />
+      ) : notifications.length === 0 ? (
         <div className="text-center py-20">
           <div className="mx-auto w-24 h-24 rounded-full bg-muted/50 flex items-center justify-center mb-4">
             <BellOff className="h-12 w-12 text-muted-foreground/50" />
@@ -223,4 +231,8 @@ export default function ParentNotifications() {
       )}
     </div>
   );
+}
+
+export default function ParentNotifications() {
+  return <RoleNotificationInbox targetRole="PARENT" />;
 }

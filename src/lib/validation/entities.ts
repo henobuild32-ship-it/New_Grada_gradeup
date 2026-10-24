@@ -173,6 +173,7 @@ export const paymentSchema = z.object({
   studentId: idSchema,
   amount: z.coerce.number().positive('Montant positif.').max(10_000_000),
   currency: currencySchema.optional(),
+  installmentId: idSchema.optional(),
   month: z.string().max(40).optional(),
   method: z.enum(['cash', 'mobile', 'virement', 'cheque'], { message: 'Méthode invalide. ' }).optional(),
   status: z.enum(['pending', 'paid', 'late', 'cancelled'], { message: 'Statut invalide. ' }).optional(),

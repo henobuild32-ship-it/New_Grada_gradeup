@@ -27,9 +27,9 @@ interface TransitionTable {
 }
 
 const TRANSITIONS: TransitionTable = {
-  DRAFT: { submit: 'PENDING_TITULAIRE' },
+  DRAFT: { submit: 'PENDING_TITULAIRE', validate_titulaire: 'VALIDATED_TITULAIRE' },
   PENDING_TITULAIRE: { validate_titulaire: 'VALIDATED_TITULAIRE', reopen: 'DRAFT' },
-  VALIDATED_TITULAIRE: { submit: 'PENDING_ADMIN' },
+  VALIDATED_TITULAIRE: { submit: 'PENDING_ADMIN', validate_admin: 'VALIDATED_ADMIN' },
   PENDING_ADMIN: { validate_admin: 'VALIDATED_ADMIN', reopen: 'VALIDATED_TITULAIRE' },
   VALIDATED_ADMIN: { publish: 'PUBLISHED' },
   PUBLISHED: { reopen: 'VALIDATED_ADMIN' },
@@ -142,7 +142,13 @@ export async function applyBulletinTransition(
     // Snapshot des notes à la publication (trace officielle).
     if (isPublish) {
       const grades = await tx.grade.findMany({
-        where: { schoolId: auth.schoolId, studentId: bulletin.studentId, trimester: String(bulletin.term), deletedAt: null },
+        where: {
+          schoolId: auth.schoolId,
+          studentId: bulletin.studentId,
+          trimester: String(bulletin.term),
+          deletedAt: null,
+          course: { is: { classId: bulletin.classId } },
+        },
         include: { course: { select: { id: true, coefficient: true, maxScore: true } } },
       });
       for (const g of grades) {

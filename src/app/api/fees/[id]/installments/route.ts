@@ -4,6 +4,7 @@ import { requireAuth, assertSchool } from '@/lib/api/rbac';
 import { handleApiError, ApiError, assertFound } from '@/lib/api/errors';
 import { list, created } from '@/lib/api/response';
 import { installmentSchema, parseOrThrow } from '@/lib/validation/entities';
+import { auditFromRequest } from '@/lib/api/audit';
 
 export const runtime = 'nodejs';
 
@@ -50,10 +51,18 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         throw new ApiError('feeId du corps différent de l’URL.', 400, 'BAD_REQUEST');
       }
       const student = await db.user.findFirst({
-        where: { id: data.studentId, schoolId: auth.schoolId, deletedAt: null },
-        select: { id: true },
+        where: { id: data.studentId, schoolId: auth.schoolId, role: 'STUDENT', deletedAt: null },
+        select: { id: true, classEnrollments: { select: { classId: true } } },
       });
       if (!student) throw new ApiError('Élève introuvable dans l’établissement.', 404, 'NOT_FOUND');
+      if (fee.classId && !student.classEnrollments.some((enrollment) => enrollment.classId === fee.classId)) {
+        throw new ApiError('Les frais ne s’appliquent pas à la classe de cet élève.', 400, 'CLASS_MISMATCH');
+      }
+      const duplicate = await db.installment.findFirst({
+        where: { schoolId: auth.schoolId, feeId: id, studentId: data.studentId, label: data.label, dueDate: data.dueDate, deletedAt: null },
+        select: { id: true },
+      });
+      if (duplicate) throw new ApiError('Cette tranche existe déjà pour cet élève.', 409, 'DUPLICATE_INSTALLMENT');
 
       createdRows.push(
         await db.installment.create({
@@ -68,6 +77,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           },
         })
       );
+      await auditFromRequest(req, {
+        schoolId: auth.schoolId,
+        userId: auth.userId,
+        action: 'INSTALLMENT_CREATE',
+        entity: 'Installment',
+        entityId: createdRows[createdRows.length - 1].id,
+        after: createdRows[createdRows.length - 1],
+      });
     }
 
     return created('installment', createdRows);

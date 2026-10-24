@@ -1,50 +1,78 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useAppStore } from '@/lib/store';
 import type { CourseInfo, LessonInfo } from '@/lib/types';
+import type { LocalRecord } from '@/lib/offline/types';
+import { useEntityListState } from '@/lib/offline/hooks';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { BookOpen, User, GraduationCap, FileText, ChevronLeft, BookOpenCheck } from 'lucide-react';
+import { ErrorState } from '@/components/ui/error-state';
+import { BookOpen, User, GraduationCap, FileText, ChevronLeft, BookOpenCheck, RefreshCw } from 'lucide-react';
+
+type LocalCourse = CourseInfo & LocalRecord;
+type LocalLesson = LessonInfo & LocalRecord;
+
+function extractCourses(data: unknown): Record<string, unknown>[] {
+  if (!data || typeof data !== 'object') return [];
+  const courses = (data as { courses?: unknown }).courses;
+  return Array.isArray(courses) ? courses as Record<string, unknown>[] : [];
+}
+
+function extractLessons(data: unknown): Record<string, unknown>[] {
+  if (!data || typeof data !== 'object') return [];
+  const lessons = (data as { lessons?: unknown }).lessons;
+  return Array.isArray(lessons) ? lessons as Record<string, unknown>[] : [];
+}
 
 export default function StudentCourses() {
   const user = useAppStore((s) => s.user);
-  const [courses, setCourses] = useState<CourseInfo[]>([]);
-  const [loading, setLoading] = useState(true);
   const [selectedCourse, setSelectedCourse] = useState<CourseInfo | null>(null);
-  const [lessons, setLessons] = useState<LessonInfo[]>([]);
-  const [loadingLessons, setLoadingLessons] = useState(false);
-
   const classId = user?.classEnrollments?.[0]?.classId;
-
-  useEffect(() => {
-    if (!user?.schoolId || !classId) return;
-    const fetchCourses = async () => {
-      setLoading(true);
-      try {
-        const res = await fetch(`/api/courses?schoolId=${user.schoolId}&classId=${classId}`);
-        if (!res.ok) throw new Error();
-        const data = await res.json();
-        setCourses(Array.isArray(data.courses) ? data.courses : []);
-      } catch { /* ignore */ } finally { setLoading(false); }
-    };
-    fetchCourses();
-  }, [user?.schoolId, classId]);
-
-  const handleViewCourse = async (course: CourseInfo) => {
-    setSelectedCourse(course);
-    setLoadingLessons(true);
-    try {
-      const res = await fetch(`/api/lessons?schoolId=${user!.schoolId}&courseId=${course.id}`);
-      if (!res.ok) throw new Error();
-      const data = await res.json();
-      const sorted = (Array.isArray(data.lessons) ? data.lessons : []).sort((a: LessonInfo, b: LessonInfo) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-      setLessons(sorted);
-    } catch { setLessons([]); } finally { setLoadingLessons(false); }
-  };
+  const courseFilter = useCallback(
+    (record: LocalRecord) => (record as LocalCourse).classId === classId,
+    [classId]
+  );
+  const courseQuery = classId && user?.schoolId
+    ? new URLSearchParams({ schoolId: user.schoolId, classId }).toString()
+    : null;
+  const { data: cachedCourses, loading, refreshing: refreshingCourses, error: courseError, refresh: refreshCourses } = useEntityListState<LocalCourse>(
+    'courses',
+    user?.schoolId,
+    {
+      remoteUrl: courseQuery ? `/api/courses?${courseQuery}` : undefined,
+      extract: extractCourses,
+      filter: courseFilter,
+    }
+  );
+  const courses = cachedCourses;
+  const selectedCourseId = selectedCourse?.id;
+  const lessonFilter = useCallback(
+    (record: LocalRecord) => (record as LocalLesson).courseId === selectedCourseId,
+    [selectedCourseId]
+  );
+  const lessonQuery = selectedCourseId && user?.schoolId
+    ? new URLSearchParams({ schoolId: user.schoolId, courseId: selectedCourseId }).toString()
+    : null;
+  const { data: cachedLessons, loading: loadingLessons, refreshing: refreshingLessons, error: lessonError, refresh: refreshLessons } = useEntityListState<LocalLesson>(
+    'lessons',
+    user?.schoolId,
+    {
+      remoteUrl: lessonQuery ? `/api/lessons?${lessonQuery}` : undefined,
+      extract: extractLessons,
+      filter: lessonFilter,
+    }
+  );
+  const lessons = useMemo(
+    () => [...cachedLessons].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()),
+    [cachedLessons]
+  );
+  const refreshing = refreshingCourses || refreshingLessons;
+  const refreshAll = () => { void Promise.all([refreshCourses(), refreshLessons()]); };
+  const handleViewCourse = (course: CourseInfo) => { setSelectedCourse(course); };
 
   const formatDate = (dateStr: string) => new Date(dateStr).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' });
 
@@ -59,12 +87,21 @@ export default function StudentCourses() {
     );
   }
 
+  if (courseError && courses.length === 0) {
+    return <ErrorState title="Cours indisponibles" description={courseError} onRetry={refreshAll} />;
+  }
+
   if (selectedCourse) {
     return (
       <div className="space-y-6 animate-fade-in">
-        <Button variant="ghost" size="sm" onClick={() => setSelectedCourse(null)} className="hover:scale-[1.02] active:scale-[0.98] transition-all gap-1 text-blue-600 hover:text-blue-700">
-          <ChevronLeft className="h-4 w-4" />Retour aux cours
-        </Button>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <Button variant="ghost" size="sm" onClick={() => setSelectedCourse(null)} className="min-h-11 gap-1 text-blue-600 hover:text-blue-700">
+            <ChevronLeft className="h-4 w-4" />Retour aux cours
+          </Button>
+          <Button type="button" variant="outline" className="min-h-11 gap-2" onClick={refreshAll} disabled={refreshing}>
+            <RefreshCw className={`size-4 ${refreshing ? 'animate-spin' : ''}`} /> Actualiser
+          </Button>
+        </div>
 
         <Card className="shadow-sm border-blue-100">
           <CardHeader>
@@ -86,6 +123,8 @@ export default function StudentCourses() {
           <h3 className="text-lg font-semibold mb-3">Leçons du cours</h3>
           {loadingLessons ? (
             <div className="space-y-3">{[...Array(3)].map((_, i) => <Skeleton key={i} className="h-20 rounded-lg" />)}</div>
+          ) : lessonError && lessons.length === 0 ? (
+            <ErrorState title="Leçons indisponibles" description={lessonError} onRetry={refreshAll} />
           ) : lessons.length === 0 ? (
             <div className="text-center py-16">
               <div className="mx-auto w-20 h-20 rounded-full bg-muted/50 flex items-center justify-center mb-4"><FileText className="h-10 w-10 text-muted-foreground/50" /></div>
@@ -122,9 +161,22 @@ export default function StudentCourses() {
     <div className="space-y-6 animate-fade-in">
       {/* Page Header */}
       <div className="mb-6 rounded-xl bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/30 dark:to-indigo-950/30 p-6">
-        <h1 className="text-2xl font-bold">Mes cours</h1>
-        <p className="text-sm text-muted-foreground mt-1">{courses.length} cours dans votre classe</p>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h1 className="text-2xl font-bold">Mes cours</h1>
+            <p className="text-sm text-muted-foreground mt-1">{courses.length} cours dans votre classe</p>
+          </div>
+          <Button type="button" variant="outline" className="min-h-11 self-start gap-2" onClick={refreshAll} disabled={refreshing}>
+            <RefreshCw className={`size-4 ${refreshing ? 'animate-spin' : ''}`} /> Actualiser
+          </Button>
+        </div>
       </div>
+
+      {courseError && courses.length > 0 && (
+        <div role="status" className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100">
+          Affichage des données enregistrées sur cet appareil. {courseError}
+        </div>
+      )}
 
       {courses.length === 0 ? (
         <div className="text-center py-20">

@@ -51,6 +51,9 @@ import {
   Wallet,
   CircleDollarSign,
   Receipt,
+  Download,
+  Share2,
+  Loader2,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -61,6 +64,9 @@ interface PaymentItem {
   status: string;
   month: string;
   method: string;
+  currency?: string;
+  receiptNumber?: string | null;
+  academicYear?: string;
   createdAt: string;
   student?: { id: string; fullName: string; classEnrollments?: Array<{ class: { id: string; name: string } }> };
 }
@@ -75,6 +81,7 @@ const statusConfig: Record<string, { label: string; color: string; icon: typeof 
   paid: { label: 'Payé', color: 'bg-emerald-100 text-emerald-700 border-emerald-200', icon: CheckCircle },
   pending: { label: 'En attente', color: 'bg-amber-100 text-amber-700 border-amber-200', icon: Clock },
   overdue: { label: 'En retard', color: 'bg-red-100 text-red-700 border-red-200', icon: AlertTriangle },
+  late: { label: 'En retard', color: 'bg-red-100 text-red-700 border-red-200', icon: AlertTriangle },
 };
 
 const months = [
@@ -101,6 +108,23 @@ export default function AdminPayments() {
   const [formMonth, setFormMonth] = useState('');
   const [formStatus, setFormStatus] = useState('pending');
   const [formMethod, setFormMethod] = useState('cash');
+  const schoolCurrency = user?.school?.currency || 'USD';
+  const [formCurrency, setFormCurrency] = useState(schoolCurrency);
+  const [receiptActionId, setReceiptActionId] = useState<string | null>(null);
+  const [offlineReceipts, setOfflineReceipts] = useState<Array<{ url: string; fileName?: string | null; blob: Blob; size: number; downloadedAt: number; schoolId: string }>>([]);
+
+  const loadOfflineReceipts = useCallback(async () => {
+    if (!user?.schoolId) return;
+    try {
+      const { getLocalDB } = await import('@/lib/offline/db');
+      const files = await getLocalDB().offlineFiles.where('schoolId').equals(user.schoolId).toArray();
+      setOfflineReceipts(files.filter((file) => file.url.startsWith(`gradeup-receipt:${user.schoolId}:`)));
+    } catch {
+      setOfflineReceipts([]);
+    }
+  }, [user?.schoolId]);
+
+  useEffect(() => { void loadOfflineReceipts(); }, [loadOfflineReceipts]);
 
   const fetchPayments = useCallback(async () => {
     try {
@@ -157,6 +181,7 @@ export default function AdminPayments() {
     setFormMonth('');
     setFormStatus('pending');
     setFormMethod('cash');
+    setFormCurrency(schoolCurrency);
   };
 
   const selectStudent = (studentId: string) => {
@@ -187,6 +212,8 @@ export default function AdminPayments() {
           month: formMonth,
           status: formStatus,
           method: formMethod,
+          currency: formCurrency,
+          academicYear: user?.school?.academicYear || '',
         }),
       });
       const data = await res.json();
@@ -200,6 +227,82 @@ export default function AdminPayments() {
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const handleReceipt = async (payment: PaymentItem, mode: 'download' | 'share') => {
+    if (payment.status !== 'paid') {
+      toast.error('Le reçu officiel est disponible après confirmation du paiement.');
+      return;
+    }
+    if (!payment.receiptNumber) {
+      toast.error('Ce paiement ne possède pas de numéro de reçu attribué par le serveur.');
+      return;
+    }
+    if (!user?.schoolId) return;
+    setReceiptActionId(payment.id);
+    try {
+      const { getLocalDB } = await import('@/lib/offline/db');
+      const db = getLocalDB();
+      const cacheUrl = `gradeup-receipt:${user.schoolId}:${payment.id}`;
+      let blob = (await db.offlineFiles.get(cacheUrl))?.blob;
+      let fileName = `recu-${payment.receiptNumber}.pdf`;
+      if (!blob) {
+        const { jsPDF } = await import('jspdf');
+        const pdf = new jsPDF({ unit: 'mm', format: 'a4' });
+        const currency = payment.currency || schoolCurrency;
+        pdf.setFont('helvetica', 'bold');
+        pdf.setFontSize(18);
+        pdf.text(user.school?.name || 'Établissement scolaire', 20, 22);
+        pdf.setFontSize(15);
+        pdf.text('REÇU OFFICIEL DE PAIEMENT', 20, 42);
+        pdf.setFont('helvetica', 'normal');
+        pdf.setFontSize(11);
+        pdf.text(`N° ${payment.receiptNumber}`, 20, 52);
+        pdf.text(`Élève : ${payment.student?.fullName || '—'}`, 20, 66);
+        pdf.text(`Classe : ${payment.student?.classEnrollments?.[0]?.class.name || '—'}`, 20, 74);
+        pdf.text(`Motif / période : ${payment.month || 'Frais scolaires'}`, 20, 82);
+        pdf.text(`Montant reçu : ${Number(payment.amount).toLocaleString('fr-FR')} ${currency}`, 20, 96);
+        pdf.text(`Mode de paiement : ${payment.method || '—'}`, 20, 104);
+        pdf.text(`Date : ${payment.createdAt ? new Date(payment.createdAt).toLocaleDateString('fr-FR') : '—'}`, 20, 112);
+        pdf.text(`Année scolaire : ${payment.academicYear || user.school?.academicYear || '—'}`, 20, 120);
+        pdf.setDrawColor(180);
+        pdf.line(20, 142, 190, 142);
+        pdf.setFontSize(10);
+        pdf.text('Document généré par GradeUp. Conservez ce reçu pour vos dossiers.', 20, 151);
+        blob = pdf.output('blob');
+        await db.offlineFiles.put({ url: cacheUrl, fileName, blob, size: blob.size, downloadedAt: Date.now(), schoolId: user.schoolId });
+        await loadOfflineReceipts();
+      }
+
+      if (mode === 'share' && typeof navigator !== 'undefined' && navigator.share) {
+        const file = new File([blob], fileName, { type: 'application/pdf' });
+        if (!navigator.canShare || navigator.canShare({ files: [file] })) {
+          await navigator.share({ title: `Reçu ${payment.receiptNumber}`, files: [file] });
+          return;
+        }
+      }
+      const objectUrl = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = objectUrl;
+      anchor.download = fileName;
+      anchor.click();
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+      toast.success(mode === 'share' ? 'Le partage de fichier n’est pas disponible ici; le reçu a été téléchargé.' : 'Reçu téléchargé et conservé hors ligne.');
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') return;
+      toast.error(error instanceof Error ? error.message : 'Impossible de générer le reçu.');
+    } finally {
+      setReceiptActionId(null);
+    }
+  };
+
+  const downloadCachedReceipt = async (file: (typeof offlineReceipts)[number]) => {
+    const objectUrl = URL.createObjectURL(file.blob);
+    const anchor = document.createElement('a');
+    anchor.href = objectUrl;
+    anchor.download = file.fileName || 'recu-gradeup.pdf';
+    anchor.click();
+    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
   };
 
   const handleUpdateStatus = async (paymentId: string, newStatus: string) => {
@@ -228,16 +331,18 @@ export default function AdminPayments() {
     return matchesSearch;
   });
 
-  const totalPaid = payments
-    .filter((p) => p.status === 'paid')
-    .reduce((sum, p) => sum + p.amount, 0);
-  const totalPending = payments
-    .filter((p) => p.status === 'pending')
-    .reduce((sum, p) => sum + p.amount, 0);
-  const totalOverdue = payments
-    .filter((p) => p.status === 'overdue')
-    .reduce((sum, p) => sum + p.amount, 0);
-  const totalAll = totalPaid + totalPending + totalOverdue;
+  const totalsByCurrency = (rows: PaymentItem[]) => {
+    const totals = new Map<string, number>();
+    rows.forEach((payment) => {
+      const currency = payment.currency || schoolCurrency;
+      totals.set(currency, (totals.get(currency) || 0) + Number(payment.amount || 0));
+    });
+    return totals.size ? [...totals.entries()].map(([currency, amount]) => `${amount.toLocaleString('fr-FR')} ${currency}`).join(' · ') : `0 ${schoolCurrency}`;
+  };
+  const totalPaid = totalsByCurrency(payments.filter((payment) => payment.status === 'paid'));
+  const totalPending = totalsByCurrency(payments.filter((payment) => payment.status === 'pending'));
+  const totalOverdue = totalsByCurrency(payments.filter((payment) => ['late', 'overdue'].includes(payment.status)));
+  const totalAll = totalsByCurrency(payments.filter((payment) => payment.status !== 'cancelled'));
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -264,7 +369,7 @@ export default function AdminPayments() {
             </div>
             <div>
               <p className="text-xs text-muted-foreground font-medium">Total</p>
-              <p className="text-xl font-bold text-blue-600">{totalAll.toLocaleString()} USD</p>
+              <p className="text-sm font-bold text-blue-600">{totalAll}</p>
             </div>
           </CardContent>
         </Card>
@@ -275,7 +380,7 @@ export default function AdminPayments() {
             </div>
             <div>
               <p className="text-xs text-muted-foreground font-medium">Payé</p>
-              <p className="text-xl font-bold text-emerald-600">{totalPaid.toLocaleString()} USD</p>
+              <p className="text-sm font-bold text-emerald-600">{totalPaid}</p>
             </div>
           </CardContent>
         </Card>
@@ -286,7 +391,7 @@ export default function AdminPayments() {
             </div>
             <div>
               <p className="text-xs text-muted-foreground font-medium">En attente</p>
-              <p className="text-xl font-bold text-amber-600">{totalPending.toLocaleString()} USD</p>
+              <p className="text-sm font-bold text-amber-600">{totalPending}</p>
             </div>
           </CardContent>
         </Card>
@@ -297,7 +402,7 @@ export default function AdminPayments() {
             </div>
             <div>
               <p className="text-xs text-muted-foreground font-medium">En retard</p>
-              <p className="text-xl font-bold text-red-600">{totalOverdue.toLocaleString()} USD</p>
+              <p className="text-sm font-bold text-red-600">{totalOverdue}</p>
             </div>
           </CardContent>
         </Card>
@@ -407,7 +512,7 @@ export default function AdminPayments() {
                           )}
                         </TableCell>
                         <TableCell className="font-bold">
-                          {Number(p.amount).toLocaleString()} <span className="text-muted-foreground font-normal">USD</span>
+                          {Number(p.amount).toLocaleString('fr-FR')} <span className="text-muted-foreground font-normal">{p.currency || schoolCurrency}</span>
                         </TableCell>
                         <TableCell>{p.month || '—'}</TableCell>
                         <TableCell>
@@ -436,9 +541,16 @@ export default function AdminPayments() {
                                 <Clock className="h-4 w-4 mr-2 text-amber-600" />
                                 Marquer en attente
                               </DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => handleUpdateStatus(p.id, 'overdue')}>
+                              <DropdownMenuItem onClick={() => handleUpdateStatus(p.id, 'late')}>
                                 <AlertTriangle className="h-4 w-4 mr-2 text-red-600" />
                                 Marquer en retard
+                              </DropdownMenuItem>
+                              <DropdownMenuItem disabled={p.status !== 'paid' || receiptActionId === p.id} onClick={() => void handleReceipt(p, 'download')}>
+                                {receiptActionId === p.id ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Receipt className="mr-2 h-4 w-4" />}
+                                Télécharger le reçu
+                              </DropdownMenuItem>
+                              <DropdownMenuItem disabled={p.status !== 'paid' || receiptActionId === p.id} onClick={() => void handleReceipt(p, 'share')}>
+                                <Share2 className="mr-2 h-4 w-4" /> Partager le reçu
                               </DropdownMenuItem>
                             </DropdownMenuContent>
                           </DropdownMenu>
@@ -474,7 +586,7 @@ export default function AdminPayments() {
                     </div>
                     <div className="flex items-center justify-between gap-2">
                       <p className="font-bold">
-                        {Number(p.amount).toLocaleString()} <span className="text-muted-foreground font-normal text-sm">USD</span>
+                        {Number(p.amount).toLocaleString('fr-FR')} <span className="text-muted-foreground font-normal text-sm">{p.currency || schoolCurrency}</span>
                         {p.month && <span className="ml-2 text-sm font-normal text-muted-foreground">· {p.month}</span>}
                       </p>
                       <p className="text-xs text-muted-foreground">
@@ -483,6 +595,10 @@ export default function AdminPayments() {
                     </div>
                     <div className="flex items-center justify-between gap-2">
                       <p className="text-xs capitalize text-muted-foreground">{p.method || '—'}</p>
+                      <div className="flex gap-2">
+                      <Button variant="outline" size="sm" className="min-h-11" disabled={p.status !== 'paid' || receiptActionId === p.id} onClick={() => void handleReceipt(p, 'share')} aria-label="Partager ou télécharger le reçu">
+                        {receiptActionId === p.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Share2 className="h-4 w-4" />}
+                      </Button>
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                           <Button variant="outline" size="sm" className="min-h-[44px] px-3 gap-1.5">
@@ -499,12 +615,13 @@ export default function AdminPayments() {
                             <Clock className="h-4 w-4 mr-2 text-amber-600" />
                             Marquer en attente
                           </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => handleUpdateStatus(p.id, 'overdue')}>
+                          <DropdownMenuItem onClick={() => handleUpdateStatus(p.id, 'late')}>
                             <AlertTriangle className="h-4 w-4 mr-2 text-red-600" />
                             Marquer en retard
                           </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
+                      </div>
                     </div>
                   </div>
                 );
@@ -552,7 +669,7 @@ export default function AdminPayments() {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="pay-amount">Montant (USD) *</Label>
+              <Label htmlFor="pay-amount">Montant *</Label>
               <Input
                 id="pay-amount"
                 type="number"
@@ -563,6 +680,13 @@ export default function AdminPayments() {
                 placeholder="0.00"
                 className="focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
               />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="pay-currency">Devise</Label>
+              <Select value={formCurrency} onValueChange={setFormCurrency}>
+                <SelectTrigger id="pay-currency"><SelectValue /></SelectTrigger>
+                <SelectContent><SelectItem value="USD">USD — Dollar américain</SelectItem><SelectItem value="CDF">CDF — Franc congolais</SelectItem><SelectItem value="EUR">EUR — Euro</SelectItem></SelectContent>
+              </Select>
             </div>
             <div className="space-y-2">
               <Label htmlFor="pay-month">Mois</Label>
@@ -587,7 +711,7 @@ export default function AdminPayments() {
                   <SelectContent>
                     <SelectItem value="pending">En attente</SelectItem>
                     <SelectItem value="paid">Payé</SelectItem>
-                    <SelectItem value="overdue">En retard</SelectItem>
+                    <SelectItem value="late">En retard</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -620,6 +744,11 @@ export default function AdminPayments() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {offlineReceipts.length > 0 && <Card>
+        <CardHeader className="pb-2"><CardTitle className="flex items-center gap-2 text-base"><Receipt className="h-4 w-4" /> Reçus enregistrés hors ligne</CardTitle></CardHeader>
+        <CardContent className="space-y-2">{offlineReceipts.map((file) => <div key={file.url} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border p-3"><div><p className="font-medium">{file.fileName || 'Reçu GradeUp'}</p><p className="text-xs text-muted-foreground">Enregistré le {new Date(file.downloadedAt).toLocaleDateString('fr-FR')} · {(file.size / 1024).toFixed(0)} Ko</p></div><Button variant="outline" className="min-h-11" onClick={() => void downloadCachedReceipt(file)}><Download className="mr-2 h-4 w-4" /> Télécharger</Button></div>)}</CardContent>
+      </Card>}
     </div>
   );
 }
