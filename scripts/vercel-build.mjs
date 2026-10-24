@@ -1,10 +1,10 @@
 import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
 
-function run(command, args, label) {
+function run(command, args, label, env = process.env) {
   const result = spawnSync(command, args, {
     cwd: process.cwd(),
-    env: process.env,
+    env,
     stdio: 'inherit',
     shell: false,
   });
@@ -29,6 +29,10 @@ if (process.env.VERCEL_ENV === 'production') {
     process.execPath,
     [resolve('node_modules/prisma/build/index.js'), 'migrate', 'deploy'],
     'Production database migration',
+    // The configured direct Supabase endpoint is IPv6-only and unreachable from
+    // Vercel's build network. DATABASE_URL uses Supavisor session mode (5432),
+    // which keeps a stable session and supports Prisma migrations.
+    { ...process.env, DIRECT_URL: process.env.DATABASE_URL },
   );
 }
 
