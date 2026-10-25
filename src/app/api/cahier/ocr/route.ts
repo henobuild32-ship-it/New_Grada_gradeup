@@ -119,6 +119,17 @@ async function recognizeImage(image: Buffer) {
   return { ...local, provider: 'tesseract' };
 }
 
+async function recognizePages(pageImages: Buffer[]) {
+  const pages: Awaited<ReturnType<typeof recognizeImage>>[] = [];
+  for (const image of pageImages) pages.push(await recognizeImage(image));
+  return {
+    text: pages.map((page) => page.text).filter(Boolean).join('\n\n'),
+    lines: pages.flatMap((page) => page.lines),
+    confidence: pages.length ? pages.reduce((sum, page) => sum + page.confidence, 0) / pages.length : 0,
+    provider: pages[0]?.provider || 'tesseract',
+  };
+}
+
 export async function POST(request: NextRequest) {
   try {
     const auth = await authenticateRequestActive(request);
@@ -177,31 +188,38 @@ export async function POST(request: NextRequest) {
     await uploadPrivateFile(original, storedPath, file.type || 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
 
     let result: { text: string; lines: OcrLine[]; confidence: number | null; provider: string };
-    if (process.env.GLM_API_KEY || process.env.GLM_API_TOKEN) {
+    if (extractedText) {
+      result = { text: extractedText, lines: textLines(extractedText, 0), confidence: null, provider: 'pdf-text' };
+    } else if (process.env.GLM_API_KEY || process.env.GLM_API_TOKEN) {
       try {
         const signedUrl = await createPrivateFileUrl(storedPath, 180);
         const glm = await recognizeWithGLMOcr(signedUrl);
-        if (glm) result = { ...glm, provider: 'glm-ocr' };
-        else throw new Error('GLM-OCR is not configured.');
-      } catch (error) {
-        await deletePrivateFile(storedPath);
-        throw error;
+        if (!glm) throw new Error('GLM-OCR is not configured.');
+        result = { ...glm, provider: 'glm-ocr' };
+      } catch (providerError) {
+        console.warn('[Cahier OCR] GLM-OCR unavailable; using the configured fallback OCR provider.');
+        if (!pageImages.length) {
+          await deletePrivateFile(storedPath);
+          throw providerError;
+        }
+        try {
+          const fallback = await recognizePages(pageImages);
+          result = { ...fallback, provider: `${fallback.provider}-fallback` };
+        } catch (fallbackError) {
+          await deletePrivateFile(storedPath);
+          throw fallbackError;
+        }
       }
-    } else if (extractedText) {
-      result = { text: extractedText, lines: textLines(extractedText, 0), confidence: null, provider: 'pdf-text' };
     } else {
-      if (!pageImages.length) return NextResponse.json({ error: 'Aucun contenu lisible détecté dans le document.' }, { status: 422 });
-      const pages: Awaited<ReturnType<typeof recognizeImage>>[] = [];
-      for (const image of pageImages) pages.push(await recognizeImage(image));
-      result = {
-        text: pages.map((page) => page.text).filter(Boolean).join('\n\n'),
-        lines: pages.flatMap((page) => page.lines),
-        confidence: pages.reduce((sum, page) => sum + page.confidence, 0) / pages.length,
-        provider: pages[0]?.provider || 'tesseract',
-      };
+      if (!pageImages.length) {
+        await deletePrivateFile(storedPath);
+        return NextResponse.json({ error: 'Aucun contenu lisible détecté dans le document.' }, { status: 422 });
+      }
+      result = await recognizePages(pageImages);
     }
 
     if (!result.text) {
+      await deletePrivateFile(storedPath);
       return NextResponse.json({ error: 'Aucun texte n’a pu être reconnu. Essayez une photo plus nette et bien cadrée.' }, { status: 422 });
     }
     return NextResponse.json({
