@@ -8,6 +8,7 @@ import {
   SessionClaims,
   ACCESS_COOKIE,
   REFRESH_COOKIE,
+  refreshCookieMaxAge,
 } from './jwt';
 import type { UserInfo } from '@/lib/types';
 
@@ -74,7 +75,7 @@ export function setAuthCookies(response: NextResponse, user: any, school: any): 
     authVersion: user.authVersion ?? 0,
   };
   response.cookies.set(ACCESS_COOKIE, signAccessToken(claims), cookieOptions(15 * 60));
-  response.cookies.set(REFRESH_COOKIE, signRefreshToken(claims), cookieOptions(7 * 24 * 60 * 60));
+  response.cookies.set(REFRESH_COOKIE, signRefreshToken(claims), cookieOptions(refreshCookieMaxAge(user.role)));
 }
 
 export function clearAuthCookies(response: NextResponse): void {
@@ -99,6 +100,13 @@ export async function getSessionUser(req: NextRequest): Promise<UserInfo | null>
   });
   if (!user || !user.active) return null;
   if ((claims.authVersion ?? 0) !== (user.authVersion ?? 0)) return null;
+
+  if (!user.lastActivityAt || user.lastActivityAt.getTime() < Date.now() - 2 * 60 * 1000) {
+    void db.user.updateMany({
+      where: { id: user.id, active: true, authVersion: user.authVersion, OR: [{ lastActivityAt: null }, { lastActivityAt: { lt: new Date(Date.now() - 2 * 60 * 1000) } }] },
+      data: { lastActivityAt: new Date() },
+    }).catch(() => undefined);
+  }
 
   return serializeUser(user, user.school);
 }

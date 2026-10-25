@@ -4,8 +4,8 @@ import type { AuthUser } from '@/lib/auth/authenticate';
 import { db } from '@/lib/db';
 import { ApiError } from './errors';
 
-export type Role = 'ADMIN' | 'TEACHER' | 'STUDENT' | 'PARENT' | 'CAISSIER';
-export const ALL_ROLES: Role[] = ['ADMIN', 'TEACHER', 'STUDENT', 'PARENT', 'CAISSIER'];
+export type Role = 'ADMIN' | 'TEACHER' | 'STUDENT' | 'PARENT' | 'CAISSIER' | 'LECTEUR';
+export const ALL_ROLES: Role[] = ['ADMIN', 'TEACHER', 'STUDENT', 'PARENT', 'CAISSIER', 'LECTEUR'];
 
 /**
  * Garde d'autorisation centralisée (RBAC + multi-tenant + propriété).

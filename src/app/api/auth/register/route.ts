@@ -5,9 +5,17 @@ import { hashPassword } from '@/lib/password';
 import { setAuthCookies } from '@/lib/auth/session';
 import { clientIp, rateLimitResponse } from '@/lib/api/rate-limit';
 import { persistentRateLimit } from '@/lib/api/persistent-rate-limit';
+import { requestMeta } from '@/lib/api/audit';
 import { normalizeInviteCode, normalizeStudentCode } from '@/lib/code-format';
 import { generateReadableCode } from '@/lib/code-generation';
 import { notifyUser } from '@/services/notifications/notificationEngine';
+import {
+  CONFIDENTIAL_CODE_FULL,
+  CONFIDENTIAL_CODE_INVALID,
+  CONFIDENTIAL_CODE_RATE_LIMIT,
+  confidentialRole,
+  registerConfidentialUser,
+} from '@/lib/confidential-access';
 
 const registerSchema = z.object({
   gender: z.enum(['M', 'F'], { error: 'Le sexe est obligatoire (M ou F).' }),
@@ -23,8 +31,10 @@ const joinSchoolSchema = z.object({
   fullName: z.string().trim().min(3, 'Le nom complet doit contenir au moins 3 caractères.').max(120),
   email: z.union([z.string().trim().email('Adresse e-mail invalide.'), z.literal('')]).optional(),
   password: z.string().min(8).max(128),
+  confidentialCode: z.string().max(80).optional(),
+  deviceId: z.string().max(128).optional(),
   inviteCode: z.string().trim().min(1),
-  role: z.enum(['STUDENT', 'TEACHER', 'PARENT', 'CAISSIER']),
+  role: z.enum(['STUDENT', 'TEACHER', 'PARENT', 'CAISSIER', 'LECTEUR']),
   classIds: z.array(z.string().trim().min(1)).optional(),
   parentCode: z.string().optional(),
   gender: z.enum(['M', 'F'], { error: 'Le sexe (M ou F) est obligatoire.' }),
@@ -33,11 +43,11 @@ const joinSchoolSchema = z.object({
   phone: z.string().optional(),
   qualification: z.string().optional(),
 }).superRefine((value, ctx) => {
-  if (value.role === 'CAISSIER' && !value.email) {
-    ctx.addIssue({ code: 'custom', path: ['email'], message: 'Une adresse e-mail est obligatoire pour la récupération du mot de passe.' });
-  }
   if (value.role === 'STUDENT' && !value.classIds?.length) {
     ctx.addIssue({ code: 'custom', path: ['classIds'], message: 'La classe est obligatoire pour un élève.' });
+  }
+  if (value.role === 'STUDENT' && (value.classIds?.length || 0) > 1) {
+    ctx.addIssue({ code: 'custom', path: ['classIds'], message: 'Un élève ne peut s’inscrire que dans une seule classe.' });
   }
   if (value.role === 'TEACHER') {
     if (!value.dateOfBirth || Number.isNaN(new Date(value.dateOfBirth).getTime())) {
@@ -71,6 +81,64 @@ async function generateUniqueParentCode(): Promise<string> {
     code = generateReadableCode('P');
   }
   return code;
+}
+
+async function auditConfidentialSignup(request: NextRequest, schoolId: string, role: 'LECTEUR' | 'CAISSIER', action: string, reason?: string, userId?: string, generation?: number) {
+  try {
+    const actorId = userId || (await db.user.findFirst({ where: { schoolId, role: 'ADMIN' }, select: { id: true } }))?.id;
+    if (!actorId) return;
+    const meta = requestMeta(request);
+    await db.auditLog.create({
+      data: {
+        schoolId,
+        userId: actorId,
+        action,
+        entity: 'ConfidentialAccessCode',
+        entityId: role,
+        after: { role, ...(reason ? { reason } : {}), ...(generation ? { generation } : {}) },
+        ip: meta.ip,
+        userAgent: meta.userAgent,
+      },
+    });
+  } catch {
+    // Ne jamais inclure ni relayer le code présenté dans les journaux.
+  }
+}
+
+async function alertConfidentialAdmins(schoolId: string, title: string, message: string, senderId?: string) {
+  const admins = await db.user.findMany({ where: { schoolId, role: 'ADMIN', active: true }, select: { id: true } });
+  await Promise.allSettled(admins.map(({ id }) => notifyUser({
+    schoolId,
+    senderId: senderId || id,
+    userId: id,
+    targetRole: 'ADMIN',
+    title,
+    message,
+    type: 'SYSTEM',
+    priority: 'HIGH',
+    metadata: { logo: '/logo-gradeup.png' },
+  })));
+}
+
+async function confidentialRateLimit(request: NextRequest, schoolId: string, role: 'LECTEUR' | 'CAISSIER', deviceId?: string) {
+  const identity = `${schoolId}:${role}:${clientIp(request)}:${deviceId || 'no-device-id'}`;
+  const attempts = await persistentRateLimit(`confidential-register:${identity}`, 5, 15 * 60 * 1000);
+  if (attempts.ok) return null;
+
+  let retryAfterSeconds = attempts.retryAfterSeconds;
+  const hourEscalation = await persistentRateLimit(`confidential-register-hour:${identity}`, 1, 60 * 60 * 1000);
+  if (!hourEscalation.ok) {
+    retryAfterSeconds = Math.max(retryAfterSeconds, 60 * 60);
+    const dayEscalation = await persistentRateLimit(`confidential-register-day:${identity}`, 1, 24 * 60 * 60 * 1000);
+    if (!dayEscalation.ok) retryAfterSeconds = Math.max(retryAfterSeconds, dayEscalation.retryAfterSeconds);
+  }
+
+  const alertWindow = await persistentRateLimit(`confidential-register-alert:${schoolId}:${clientIp(request)}`, 1, 60 * 60 * 1000);
+  if (alertWindow.ok) {
+    await alertConfidentialAdmins(schoolId, 'Tentatives d’inscription inhabituelles', `Plusieurs tentatives d’utilisation d’un code de confidentialité ont été bloquées pour le rôle ${role}.`);
+  }
+  await auditConfidentialSignup(request, schoolId, role, 'CONFIDENTIAL_CODE_REGISTER_FAILED', 'RATE_LIMITED');
+  return retryAfterSeconds;
 }
 
 export async function POST(request: NextRequest) {
@@ -157,7 +225,7 @@ export async function POST(request: NextRequest) {
           { status: 400 }
         );
       }
-      const { fullName, email, password, inviteCode, role, classIds, parentCode, gender, dateOfBirth, specialty, phone, qualification } = parsedJoin.data;
+      const { fullName, email, password, inviteCode, role, classIds, parentCode, gender, dateOfBirth, specialty, phone, qualification, confidentialCode, deviceId } = parsedJoin.data;
       const cleanFullName = (fullName || '').trim();
       const cleanEmail = (email || '').trim().toLowerCase();
       const cleanInviteCode = normalizeInviteCode(inviteCode);
@@ -247,6 +315,13 @@ export async function POST(request: NextRequest) {
         );
       }
 
+      if (confidentialRole(role)) {
+        const retryAfter = await confidentialRateLimit(request, school.id, role, deviceId);
+        if (retryAfter !== null) {
+          return NextResponse.json({ error: CONFIDENTIAL_CODE_RATE_LIMIT }, { status: 429, headers: { 'Retry-After': String(retryAfter) } });
+        }
+      }
+
       // Validate class membership before creating the account. Invalid or
       // cross-school class IDs must never result in a partially enrolled user.
       const requestedClassIds = [...new Set(classIds || [])];
@@ -262,14 +337,14 @@ export async function POST(request: NextRequest) {
 
       // Check if user already exists (case-insensitive name comparison)
       const existingUsers = await db.user.findMany({
-        where: { schoolId: school.id, role },
+        where: { schoolId: school.id, role, ...(confidentialRole(role) ? { active: true, deletedAt: null } : {}) },
       });
       const nameExists = cleanFullName
         ? existingUsers.some(
             (u) => u.fullName.trim().toLowerCase() === cleanFullName.toLowerCase()
           )
         : false;
-      if (nameExists) {
+      if (nameExists && !confidentialRole(role)) {
         return NextResponse.json(
           { error: 'Un utilisateur avec ce nom et ce rôle existe déjà dans cette école.' },
           { status: 409 }
@@ -278,14 +353,70 @@ export async function POST(request: NextRequest) {
 
       if (cleanEmail) {
         const existingEmail = await db.user.findFirst({
-          where: { schoolId: school.id, email: cleanEmail },
+          where: { schoolId: school.id, email: cleanEmail, ...(confidentialRole(role) ? { active: true, deletedAt: null } : {}) },
         });
-        if (existingEmail) {
+        if (existingEmail && !confidentialRole(role)) {
           return NextResponse.json(
             { error: 'Un utilisateur avec cet email existe déjà dans cette école.' },
             { status: 409 }
           );
         }
+      }
+
+      if (confidentialRole(role)) {
+        const codePassword = await hashPassword(password);
+        const parentCodeVal = await generateUniqueParentCode();
+        const now = new Date();
+        const result = await db.$transaction((tx) => registerConfidentialUser(tx, {
+          schoolId: school.id,
+          role,
+          code: confidentialCode || '',
+          fullName: cleanFullName,
+          email: cleanEmail,
+          passwordHash: codePassword,
+          parentCode: parentCodeVal,
+          gender: g as 'M' | 'F',
+          now,
+        }));
+
+        if ('error' in result) {
+          const reason = result.error === 'FULL' ? 'CAPACITY_REACHED' : result.error === 'DUPLICATE' ? 'DUPLICATE_ACCOUNT' : 'INVALID_OR_REPLACED';
+          await auditConfidentialSignup(request, school.id, role, 'CONFIDENTIAL_CODE_REGISTER_FAILED', reason);
+          if (result.error === 'FULL') {
+            return NextResponse.json({ error: CONFIDENTIAL_CODE_FULL }, { status: 409 });
+          }
+          if (result.error === 'DUPLICATE') {
+            return NextResponse.json({ error: 'Un compte actif avec ce nom ou cette adresse e-mail existe déjà dans cette école.' }, { status: 409 });
+          }
+          return NextResponse.json({ error: CONFIDENTIAL_CODE_INVALID }, { status: 400 });
+        }
+
+        const response = NextResponse.json({ user: formatUser(result.user, school) }, { status: 201 });
+        setAuthCookies(response, result.user, school);
+        const admins = await db.user.findMany({ where: { schoolId: school.id, role: 'ADMIN', active: true }, select: { id: true } });
+        const notices = admins.flatMap(({ id }) => [notifyUser({
+          schoolId: school.id,
+          senderId: result.user.id,
+          userId: id,
+          targetRole: 'ADMIN',
+          title: 'Nouveau compte confidentiel',
+          message: `${cleanFullName} a rejoint l’école avec le rôle ${role === 'LECTEUR' ? 'Lecteur' : 'Caissier(ère)'}.`,
+          type: 'SYSTEM',
+          priority: 'NORMAL',
+          metadata: { logo: '/logo-gradeup.png', role, userId: result.user.id },
+        }), ...(result.total === 2 ? [notifyUser({
+          schoolId: school.id,
+          senderId: result.user.id,
+          userId: id,
+          targetRole: 'ADMIN',
+          title: 'Code de confidentialité suspendu',
+          message: `La limite de deux comptes est atteinte pour le rôle ${role === 'LECTEUR' ? 'Lecteur' : 'Caissier(ère)'}. Réinitialisez le code pour libérer les places.`,
+          type: 'SYSTEM',
+          priority: 'HIGH',
+          metadata: { logo: '/logo-gradeup.png', role },
+        })] : [])]);
+        await Promise.allSettled(notices);
+        return response;
       }
 
       const parentCodeVal = await generateUniqueParentCode();
@@ -301,7 +432,7 @@ export async function POST(request: NextRequest) {
         gender: g,
         // Cashier membership grants access to payment collection. The school
         // invite code alone is not sufficient approval for that capability.
-        active: role === 'CAISSIER' ? false : true,
+        active: true,
       };
       if (birthDateValue) userData.birthDate = birthDateValue;
       if (matriculeValue) userData.matricule = matriculeValue;
@@ -394,23 +525,6 @@ export async function POST(request: NextRequest) {
       });
 
       const finalUserData = finalUser || user;
-      if (role === 'CAISSIER') {
-        notifyUser({
-          schoolId: school.id,
-          senderId: user.id,
-          targetRole: 'ADMIN',
-          title: 'Demande d’accès à la caisse',
-          message: `${cleanFullName} demande à rejoindre l’équipe de caisse. Vérifiez son profil puis activez son compte.`,
-          type: 'SYSTEM',
-          priority: 'HIGH',
-          metadata: { userId: user.id, role: 'CAISSIER' },
-        }).catch((error) => console.error('[Register] Notification de demande caissier impossible:', error));
-        return NextResponse.json({
-          user: formatUser(finalUser || user, school),
-          pendingApproval: true,
-          message: 'Votre demande a été envoyée à la direction. L’accès à la caisse sera activé après validation.',
-        }, { status: 201 });
-      }
       const response = NextResponse.json({
         user: finalUser ? formatUser(finalUser, school) : formatUser(user, school),
       }, { status: 201 });

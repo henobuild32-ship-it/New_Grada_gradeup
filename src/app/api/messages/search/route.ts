@@ -9,6 +9,7 @@ export const runtime = 'nodejs';
 export async function GET(request: NextRequest) {
   try {
     const auth = await requireAuth(request);
+    if (auth.role === 'LECTEUR') return NextResponse.json({ error: 'Utilisez la conversation dédiée avec l’administrateur.' }, { status: 403 });
     const { searchParams } = new URL(request.url);
     const userId = searchParams.get('userId');
     const q = searchParams.get('q');

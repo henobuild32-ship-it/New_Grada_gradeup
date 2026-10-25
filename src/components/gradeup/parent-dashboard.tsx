@@ -177,7 +177,7 @@ export default function ParentDashboard() {
       const [gradesRes, attendanceRes, paymentsRes] = await Promise.all([
         fetch(`/api/grades?schoolId=${childSchoolId}&studentId=${childId}`),
         fetch(`/api/attendance?schoolId=${childSchoolId}&studentId=${childId}`),
-        fetch(`/api/payments?schoolId=${childSchoolId}&studentId=${childId}`),
+        fetch(`/api/receipts?studentId=${childId}`),
       ]);
 
       if (gradesRes.ok) {
@@ -301,6 +301,8 @@ export default function ParentDashboard() {
   const pendingPayments = safePayments.filter(p => p.status === 'pending' || p.status === 'overdue').length;
 
   const childClass = selectedChild?.classEnrollments?.[0]?.class?.name || 'Non assigné';
+  const selectedClass = selectedChild?.classEnrollments?.[0]?.class;
+  const isKindergarten = selectedClass?.level?.toLowerCase().includes('maternelle') || selectedClass?.cycle?.toLowerCase().includes('maternelle');
   const courseCount = [...new Set(safeGrades.map(g => g.courseId))].length;
   const recentGrades = [...safeGrades].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).slice(0, 5);
   const recentNotifications = [...safeNotifications].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).slice(0, 5);
@@ -485,6 +487,20 @@ export default function ParentDashboard() {
               <span className="text-xs font-bold text-muted-foreground">Ajouter</span>
             </button>
           </div>
+
+          {isKindergarten && (
+            <Card className="border-amber-200 bg-amber-50/70 dark:border-amber-900 dark:bg-amber-950/20">
+              <CardContent className="flex items-start gap-3 p-4">
+                <Shield className="mt-0.5 h-5 w-5 shrink-0 text-amber-700 dark:text-amber-300" />
+                <div>
+                  <p className="text-sm font-semibold text-amber-950 dark:text-amber-100">Suivi accompagné par le parent</p>
+                  <p className="mt-1 text-xs leading-relaxed text-amber-900/80 dark:text-amber-200/80">
+                    {selectedChild?.fullName} est en maternelle ({childClass}). Vous pouvez consulter ici ses informations et l’accompagner dans ses démarches scolaires.
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+          )}
 
           {/* Child Link Dialog for story block */}
           <Dialog open={linkDialogOpen} onOpenChange={setLinkDialogOpen}>

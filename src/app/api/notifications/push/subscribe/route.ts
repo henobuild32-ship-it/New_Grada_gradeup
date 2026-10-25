@@ -5,7 +5,8 @@ import { authenticateRequest, AuthError } from '@/lib/auth/authenticate';
 export async function POST(request: NextRequest) {
   try {
     // Sécurité : l'utilisateur connecté doit correspondre au userId fourni
-    const auth = authenticateRequest(request);
+    const auth = await authenticateRequest(request);
+    if (auth.role === 'LECTEUR') return NextResponse.json({ error: 'Le compte Lecteur ne peut pas modifier ses réglages.' }, { status: 403 });
     const body = await request.json();
     const { userId, subscription } = body;
 

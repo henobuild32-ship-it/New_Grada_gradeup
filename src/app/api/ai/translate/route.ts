@@ -7,7 +7,7 @@ export const runtime = 'nodejs';
 // POST /api/ai/translate – traduit un message via GLM
 export async function POST(request: NextRequest) {
   try {
-    authenticateRequest(request);
+    await authenticateRequest(request);
     const { text, targetLang } = await request.json();
 
     if (!text || !text.trim()) {

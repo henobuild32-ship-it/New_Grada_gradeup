@@ -7,6 +7,7 @@ import { handleApiError, ApiError } from '@/lib/api/errors';
 export async function GET(request: NextRequest) {
   try {
     const auth = await requireAuth(request);
+    if (auth.role === 'LECTEUR') return NextResponse.json({ error: 'Utilisez la conversation dédiée avec l’administrateur.' }, { status: 403 });
     const { searchParams } = new URL(request.url);
     const userId1 = searchParams.get('userId1');
     const userId2 = searchParams.get('userId2');

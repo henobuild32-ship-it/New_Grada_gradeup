@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { authenticateRequest, AuthError } from '@/lib/auth/authenticate';
+import { authenticateRequest, authenticateRequestActive, AuthError } from '@/lib/auth/authenticate';
 
 export const runtime = 'nodejs';
 
 // GET /api/passages?studentId=&classId=&year=&result=
 export async function GET(req: NextRequest) {
   try {
-    const auth = authenticateRequest(req);
+    const auth = await authenticateRequestActive(req);
     const { searchParams } = new URL(req.url);
     const schoolId = auth.schoolId;
     const studentId = searchParams.get('studentId') || '';
@@ -27,8 +27,14 @@ export async function GET(req: NextRequest) {
       const children = await db.user.findMany({ where: { schoolId, parentId: auth.userId, role: 'STUDENT' }, select: { id: true } });
       where.studentId = { in: children.map(child => child.id) };
     }
-    if (auth.role !== 'ADMIN' && auth.role !== 'TEACHER' && auth.role !== 'STUDENT' && auth.role !== 'PARENT') {
+    if (auth.role !== 'ADMIN' && auth.role !== 'LECTEUR' && auth.role !== 'TEACHER' && auth.role !== 'STUDENT' && auth.role !== 'PARENT') {
       return NextResponse.json({ error: 'Accès refusé.' }, { status: 403 });
+    }
+    if (auth.role === 'TEACHER') {
+      const assigned = await db.course.findMany({ where: { schoolId, teacherId: auth.userId, deletedAt: null }, select: { classId: true }, distinct: ['classId'] });
+      const allowedClassIds = assigned.map((item) => item.classId);
+      if (sourceClassId && !allowedClassIds.includes(sourceClassId)) return NextResponse.json({ error: 'Cette classe ne vous est pas attribuée.' }, { status: 403 });
+      where.OR = [{ sourceClassId: { in: allowedClassIds } }, { targetClassId: { in: allowedClassIds } }];
     }
 
     const passages = await db.passageHistorique.findMany({

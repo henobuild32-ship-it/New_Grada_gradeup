@@ -6,6 +6,7 @@ import { handleApiError } from '@/lib/api/errors';
 export async function GET(request: NextRequest) {
   try {
     const auth = await requireAuth(request);
+    if (auth.role === 'LECTEUR') return NextResponse.json({ count: 0 });
     const { searchParams } = new URL(request.url);
     const userId = searchParams.get('userId');
 

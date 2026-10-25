@@ -62,6 +62,7 @@ export const useAppStore = create<AppState>()(
                   STUDENT: 'student-dashboard',
                   PARENT: 'parent-dashboard',
                   CAISSIER: 'caisse',
+                  LECTEUR: 'reader-dashboard',
                 };
                 set({ currentPage: (dashMap[data.user.role] || 'admin-dashboard') as any });
               }
@@ -81,6 +82,7 @@ export const useAppStore = create<AppState>()(
                   STUDENT: 'student-dashboard',
                   PARENT: 'parent-dashboard',
                   CAISSIER: 'caisse',
+                  LECTEUR: 'reader-dashboard',
                 };
                 set({ currentPage: (dashMap[data.user.role] || 'admin-dashboard') as any });
               }

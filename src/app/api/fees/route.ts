@@ -10,7 +10,7 @@ export const runtime = 'nodejs';
 
 export async function GET(req: NextRequest) {
   try {
-    const auth = await requireAuth(req);
+    const auth = await requireAuth(req, ['CAISSIER', 'LECTEUR']);
     const { searchParams } = new URL(req.url);
     const pagination = parseListParams(searchParams);
 
@@ -37,9 +37,13 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const auth = await requireAuth(req, ['ADMIN']);
+    const auth = await requireAuth(req, ['CAISSIER']);
     const body = await req.json();
     const data = parseOrThrow(feeSchema, body);
+    if (data.classId) {
+      const schoolClass = await db.schoolClass.findFirst({ where: { id: data.classId, schoolId: auth.schoolId, deletedAt: null }, select: { id: true } });
+      if (!schoolClass) return new Response(JSON.stringify({ error: 'Classe introuvable dans votre école.' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
+    }
 
     const fee = await db.fee.create({
       data: {

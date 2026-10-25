@@ -19,6 +19,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Requête invalide.' }, { status: 400 });
     }
     const identity = body as Record<string, unknown>;
+    if (typeof identity.email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(identity.email.trim())) {
+      return NextResponse.json({ error: 'Saisissez l’adresse e-mail enregistrée sur votre compte.' }, { status: 400 });
+    }
     const ipLimit = await persistentRateLimit(`password-reset:ip:${clientIp(request)}`, 5, 15 * 60 * 1000);
     const identityKey = getRecoveryIdentityKey(identity);
     const identityLimit = await persistentRateLimit(`password-reset:identity:${identityKey}`, 5, 15 * 60 * 1000);

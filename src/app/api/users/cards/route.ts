@@ -3,6 +3,8 @@ import { db } from '@/lib/db';
 import { authenticateRequest, authenticateRequestActive, AuthError } from '@/lib/auth/authenticate';
 import { notifyUser } from '@/services/notifications/notificationEngine';
 
+const CARD_PAYMENT_LABEL = 'Carte scolaire';
+
 async function generateUniqueCardId(fullName: string) {
   const firstLetter = fullName.trim().charAt(0).toUpperCase() || 'X';
   const now = new Date();
@@ -37,10 +39,16 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Accès non autorisé. Action réservée aux administrateurs.' }, { status: 403 });
     }
 
+    const school = await db.school.findFirst({ where: { id: auth.schoolId, deletedAt: null }, select: { studentCardPriceCdf: true } });
+    if (!school) return NextResponse.json({ error: 'École introuvable.' }, { status: 404 });
+    const cardPriceCdf = school.studentCardPriceCdf;
+
     if (action === 'generate-all' || (action === 'generate-class' && classId)) {
       const whereClause: Record<string, any> = {
         schoolId,
         role: 'STUDENT',
+        active: true,
+        deletedAt: null,
         cardId: null, // generate only for those who don't have it
       };
       
@@ -48,14 +56,22 @@ export async function POST(request: NextRequest) {
         if (classId === 'unassigned') {
           whereClause.classEnrollments = { none: {} };
         } else {
+          const schoolClass = await db.schoolClass.findFirst({ where: { id: classId, schoolId, deletedAt: null }, select: { id: true } });
+          if (!schoolClass) return NextResponse.json({ error: 'Classe introuvable dans votre école.' }, { status: 404 });
           whereClause.classEnrollments = { some: { classId } };
         }
       }
 
       const students = await db.user.findMany({ where: whereClause });
-      
+      const paidStudentIds = cardPriceCdf === 0 ? new Set(students.map((student) => student.id)) : new Set((await db.payment.findMany({
+        where: { schoolId, studentId: { in: students.map((student) => student.id) }, month: CARD_PAYMENT_LABEL, status: 'paid', amount: cardPriceCdf, currency: 'CDF', deletedAt: null },
+        select: { studentId: true },
+        distinct: ['studentId'],
+      })).map((payment) => payment.studentId));
+      const eligibleStudents = students.filter((student) => paidStudentIds.has(student.id));
+      const skippedUnpaid = students.length - eligibleStudents.length;
       let generatedCount = 0;
-      for (const student of students) {
+      for (const student of eligibleStudents) {
         const newCardId = await generateUniqueCardId(student.fullName);
         const issued = new Date().toISOString().slice(0, 10);
         const expiry = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
@@ -94,19 +110,27 @@ export async function POST(request: NextRequest) {
 
         generatedCount++;
       }
-      return NextResponse.json({ success: true, generatedCount });
+      return NextResponse.json({ success: true, generatedCount, skippedUnpaid });
     } else if (action === 'generate-single') {
       if (!userId) return NextResponse.json({ error: 'userId is required' }, { status: 400 });
-      const student = await db.user.findUnique({ where: { id: userId } });
+      const student = await db.user.findFirst({ where: { id: userId, schoolId, role: 'STUDENT', active: true, deletedAt: null } });
       if (!student) return NextResponse.json({ error: 'Student not found' }, { status: 404 });
-      if (student.schoolId !== schoolId) {
-        return NextResponse.json({ error: 'Élève introuvable dans votre établissement.' }, { status: 403 });
+      if (student.cardId) return NextResponse.json({ error: 'Une carte existe déjà pour cet élève.' }, { status: 409 });
+      if (cardPriceCdf > 0) {
+        const confirmedPayment = await db.payment.findFirst({
+          where: { schoolId, studentId: student.id, month: CARD_PAYMENT_LABEL, status: 'paid', amount: cardPriceCdf, currency: 'CDF', deletedAt: null },
+          select: { id: true },
+        });
+        if (!confirmedPayment) return NextResponse.json({ error: 'Le paiement complet de la carte doit être enregistré par la caisse avant son émission.' }, { status: 409 });
       }
 
       const newCardId = await generateUniqueCardId(student.fullName);
+      const issued = new Date().toISOString().slice(0, 10);
+      const expiry = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
       const updated = await db.user.update({
         where: { id: userId },
-        data: { cardId: newCardId }
+        data: { cardId: newCardId, cardIssuedDate: issued, cardExpiryDate: expiry },
+        select: { id: true, fullName: true, role: true, cardId: true, cardIssuedDate: true, cardExpiryDate: true },
       });
 
       // 1. Notify Student in real-time

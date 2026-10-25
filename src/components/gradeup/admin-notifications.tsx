@@ -1,5 +1,6 @@
 'use client';
 
+import Image from 'next/image';
 import { useEffect, useState, useCallback } from 'react';
 import { useAppStore } from '@/lib/store';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -383,8 +384,8 @@ export default function AdminNotifications() {
                       className="p-4 rounded-lg border hover:bg-muted/30 hover:shadow-sm transition-all"
                     >
                       <div className="flex items-start gap-3">
-                        <div className={`p-2.5 rounded-lg shrink-0 ${targetBgColors[n.targetRole] || 'bg-gray-100 text-gray-600'}`}>
-                          <TargetIcon className="h-4 w-4" />
+                        <div className="flex size-10 shrink-0 items-center justify-center rounded-lg border bg-white">
+                          <Image src="/logo-gradeup.png" alt="GradeUp" width={28} height={28} className="size-7 object-contain" />
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 mb-1 flex-wrap">

@@ -29,7 +29,7 @@ export async function GET(request: NextRequest) {
   let schoolId = '';
   let authenticatedParent = false;
   try {
-    const auth = authenticateRequest(request);
+    const auth = await authenticateRequest(request);
     if (auth.role !== 'PARENT') {
       return NextResponse.json({ valid: false, error: 'Accès non autorisé.' }, { status: 403 });
     }

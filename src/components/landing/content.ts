@@ -179,12 +179,23 @@ export const profiles = {
   title: 'Un espace adapté à chaque profil',
   tabs: [
     {
+      key: 'reader' as const,
+      label: 'Lecteur',
+      tasks: [
+        'Consulter les modules et l’activité de toute l’école en lecture seule',
+        'Voir les classes, les présences et le suivi des paiements',
+        'Écrire à l’administrateur sans modifier les données',
+      ],
+      cta: 'Rejoindre une école',
+      screen: 'reader' as const,
+    },
+    {
       key: 'admin' as const,
       label: 'Direction',
       tasks: [
-        'Créer les classes et inscrire les élèves',
-        'Suivre les paiements du minerval par classe',
-        'Valider et publier les bulletins du trimestre',
+        'Configurer les classes, sections et options',
+        'Attribuer les cours aux professeurs et suivre les présences',
+        'Gérer les comptes, cartes et bulletins de l’école',
       ],
       cta: 'Commencer',
       screen: 'dashboard' as const,

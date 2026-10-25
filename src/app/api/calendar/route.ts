@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { authenticateRequest, AuthError } from '@/lib/auth/authenticate';
+import { authenticateRequest, authenticateRequestActive, AuthError } from '@/lib/auth/authenticate';
 
 export const runtime = 'nodejs';
 
@@ -70,7 +70,7 @@ const MONTH_NAMES = [
 
 export async function GET(req: NextRequest) {
   try {
-    const auth = authenticateRequest(req);
+    const auth = await authenticateRequestActive(req);
     const { searchParams } = new URL(req.url);
     // Tenant forcé à la session : le paramètre schoolId du client est ignoré
     const schoolId = auth.schoolId;

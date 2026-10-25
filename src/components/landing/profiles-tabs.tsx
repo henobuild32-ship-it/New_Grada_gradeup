@@ -15,6 +15,20 @@ import {
 } from './device-frames';
 
 const SCREENS = {
+  reader: { title: 'Vue en lecture seule de l’école', render: () => (
+    <div className="space-y-3 p-4">
+      <div className="flex items-center justify-between rounded-xl bg-brand/10 p-3">
+        <div><p className="text-sm font-bold">Vue d’ensemble</p><p className="text-xs text-muted-foreground">Activité de l’établissement</p></div>
+        <Icon name="EyeOff" className="size-5 text-brand" />
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        {['Classes', 'Présences', 'Paiements', 'Communiqués'].map((label) => (
+          <div key={label} className="rounded-xl border border-line bg-surface p-3 text-xs font-semibold">{label}<p className="mt-1 font-normal text-muted-foreground">Consultation</p></div>
+        ))}
+      </div>
+      <div className="rounded-xl border border-line p-3 text-xs text-muted-foreground">Journal d’activité · accès en lecture seule</div>
+    </div>
+  ) },
   dashboard: { title: 'Tableau de bord de la direction', render: () => <DashboardScreen /> },
   cashier: { title: 'Espace caisse de l’établissement', render: () => <CashierScreen /> },
   grading: { title: 'Cahier de cotation de l’enseignant', render: () => <CahierScreen /> },
@@ -34,7 +48,7 @@ export function ProfilesTabs({ onRegister }: { onRegister: () => void }) {
 
         <Reveal delay={80} className="mt-10">
           <Tabs defaultValue={profiles.tabs[0].key} className="w-full">
-            <TabsList className="grid h-auto w-full grid-cols-2 gap-1 sm:grid-cols-5">
+            <TabsList className="grid h-auto w-full grid-cols-2 gap-1 sm:grid-cols-3 lg:grid-cols-6">
               {profiles.tabs.map((tab) => (
                 <TabsTrigger key={tab.key} value={tab.key} className="h-11 text-sm">
                   {tab.label}

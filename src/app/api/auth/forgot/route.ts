@@ -28,6 +28,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Requête invalide.' }, { status: 400 });
     }
     const identity = body as Record<string, unknown>;
+    if (typeof identity.email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(identity.email.trim())) {
+      return NextResponse.json({ error: 'Saisissez l’adresse e-mail enregistrée sur votre compte. Sans e-mail, ajoutez-en un dans votre profil ou contactez l’administration.' }, { status: 400 });
+    }
     const identityKey = getRecoveryIdentityKey(identity);
     if (identityKey.endsWith(':')) {
       return NextResponse.json(

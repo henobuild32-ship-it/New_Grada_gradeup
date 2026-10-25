@@ -6,7 +6,7 @@ import { ApiError, handleApiError } from '@/lib/api/errors';
 
 export async function GET(request: NextRequest) {
   try {
-    const auth = authenticateRequest(request);
+    const auth = await authenticateRequest(request);
     const { searchParams } = new URL(request.url);
     const homeworkId = searchParams.get('homeworkId');
 
@@ -44,7 +44,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const auth = authenticateRequest(request);
+    const auth = await authenticateRequest(request);
     const body = await request.json();
     const { homeworkId, studentId: studentIdBody, fileUrl, fileName, content } = body;
 

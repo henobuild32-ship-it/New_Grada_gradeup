@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import Image from 'next/image';
 import { useAppStore } from '@/lib/store';
 import type { NotificationInfo } from '@/lib/types';
 import { Card, CardContent } from '@/components/ui/card';
@@ -8,7 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Bell, BellOff, CheckCheck, Clock, BookOpen, FileText, CheckCircle2, MessageSquare, AlertCircle } from 'lucide-react';
+import { Bell, BellOff, CheckCheck, Clock } from 'lucide-react';
 import { toast } from 'sonner';
 
 export default function TeacherNotifications() {
@@ -75,16 +76,6 @@ export default function TeacherNotifications() {
     if (diffHours < 24) return `Il y a ${diffHours}h`;
     if (diffDays < 7) return `Il y a ${diffDays}j`;
     return new Date(dateStr).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' });
-  };
-
-  const getNotifIcon = (type?: string) => {
-    switch (type) {
-      case 'MESSAGE': return <MessageSquare className="h-5 w-5 text-blue-500" />;
-      case 'HOMEWORK_SUBMISSION': return <FileText className="h-5 w-5 text-indigo-500" />;
-      case 'LESSON': return <BookOpen className="h-5 w-5 text-emerald-500" />;
-      case 'ATTENDANCE': return <AlertCircle className="h-5 w-5 text-amber-500" />;
-      default: return <Bell className="h-5 w-5 text-blue-500" />;
-    }
   };
 
   const filteredNotifications = notifications.filter((n) => {
@@ -174,7 +165,7 @@ export default function TeacherNotifications() {
               >
                 <CardContent className="p-4 flex items-start gap-3.5">
                   <div className={`p-2.5 rounded-xl shrink-0 ${notif.read ? 'bg-muted' : 'bg-blue-100 dark:bg-blue-900/40'}`}>
-                    {getNotifIcon((notif as any).type)}
+                    <Image src="/logo-gradeup.png" alt="GradeUp" width={28} height={28} className="size-7 object-contain" />
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-start justify-between gap-2">

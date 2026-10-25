@@ -11,7 +11,7 @@ export const runtime = 'nodejs';
 /** GET /api/fees/[id]/installments?studentId=... — tranches d'un frais (optionnellement par élève). */
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const auth = await requireAuth(req, ['ADMIN', 'TEACHER']);
+    const auth = await requireAuth(req, ['CAISSIER', 'LECTEUR']);
     const { id } = await params;
     const { searchParams } = new URL(req.url);
 
@@ -35,7 +35,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
  */
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const auth = await requireAuth(req, ['ADMIN']);
+    const auth = await requireAuth(req, ['CAISSIER']);
     const { id } = await params;
 
     const fee = assertFound(await db.fee.findUnique({ where: { id } }), 'Frais introuvable.');

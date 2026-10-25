@@ -9,7 +9,7 @@ const BULLETIN_STATUSES = Object.values(BulletinStatus);
 /** GET /api/bulletins — canonique, école-scopé et filtré par ownership. */
 export async function GET(req: NextRequest) {
   try {
-    const auth = await requireActiveAuth(req, ['ADMIN', 'TEACHER', 'STUDENT', 'PARENT']);
+    const auth = await requireActiveAuth(req, ['ADMIN', 'LECTEUR', 'TEACHER', 'STUDENT', 'PARENT']);
     const { searchParams } = new URL(req.url);
     const requestedSchoolId = searchParams.get('schoolId');
     if (requestedSchoolId && requestedSchoolId !== auth.schoolId) throw new ApiError('École invalide.', 403, 'TENANT_FORBIDDEN');
@@ -54,7 +54,7 @@ export async function GET(req: NextRequest) {
     const bulletins = await db.bulletin.findMany({
       where,
       include: {
-        student: { select: { id: true, fullName: true, email: true, gender: true, matricule: true, photoUrl: true, parentId: true } },
+        student: { select: { id: true, fullName: true, gender: true, matricule: true, photoUrl: true } },
         class: { select: { id: true, name: true, level: true, titulaireId: true, titulaire: { select: { id: true, fullName: true } } } },
         validatedByTitulaire: { select: { id: true, fullName: true } },
         validatedByAdmin: { select: { id: true, fullName: true } },

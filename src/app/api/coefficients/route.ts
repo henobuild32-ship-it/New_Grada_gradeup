@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { authenticateRequest, AuthError } from '@/lib/auth/authenticate';
+import { authenticateRequest, authenticateRequestActive, AuthError } from '@/lib/auth/authenticate';
 
 export const runtime = 'nodejs';
 
 // GET /api/coefficients?classId=&section=&schoolYearId=&courseId=
 export async function GET(req: NextRequest) {
   try {
-    const auth = authenticateRequest(req);
+    const auth = await authenticateRequestActive(req);
     // Tenant forcé à la session : le paramètre schoolId du client est ignoré
     const schoolId = auth.schoolId;
     const { searchParams } = new URL(req.url);
@@ -17,7 +17,22 @@ export async function GET(req: NextRequest) {
     const courseId = searchParams.get('courseId') || '';
 
     const where: Record<string, unknown> = { schoolId, isActive: true };
-    if (classId) where.classId = classId;
+    if (auth.role === 'TEACHER') {
+      const assigned = await db.course.findMany({ where: { schoolId, teacherId: auth.userId, deletedAt: null }, select: { classId: true }, distinct: ['classId'] });
+      const allowedClassIds = assigned.map((item) => item.classId);
+      if (classId && !allowedClassIds.includes(classId)) return NextResponse.json({ error: 'Cette classe ne vous est pas attribuée.' }, { status: 403 });
+      where.classId = classId || { in: allowedClassIds };
+    } else if (auth.role === 'STUDENT' || auth.role === 'PARENT') {
+      const studentIds = auth.role === 'STUDENT' ? [auth.userId] : (await db.user.findMany({ where: { schoolId, parentId: auth.userId, role: 'STUDENT', active: true, deletedAt: null }, select: { id: true } })).map((item) => item.id);
+      const enrolled = await db.enrolledClass.findMany({ where: { userId: { in: studentIds }, class: { schoolId, deletedAt: null } }, select: { classId: true }, distinct: ['classId'] });
+      const allowedClassIds = enrolled.map((item) => item.classId);
+      if (classId && !allowedClassIds.includes(classId)) return NextResponse.json({ error: 'Cette classe ne fait pas partie de votre périmètre.' }, { status: 403 });
+      where.classId = classId || { in: allowedClassIds };
+    } else if (auth.role === 'ADMIN' || auth.role === 'LECTEUR') {
+      if (classId) where.classId = classId;
+    } else {
+      return NextResponse.json({ error: 'Accès non autorisé.' }, { status: 403 });
+    }
     if (section) where.section = section;
     if (schoolYearId) where.schoolYearId = schoolYearId;
     if (courseId) where.courseId = courseId;

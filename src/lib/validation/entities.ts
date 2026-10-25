@@ -35,7 +35,7 @@ export const currencySchema = z.enum(['USD', 'CDF'], {
 });
 
 /** Rôle utilisateur. */
-export const roleSchema = z.enum(['ADMIN', 'TEACHER', 'STUDENT', 'PARENT', 'CAISSIER'], {
+export const roleSchema = z.enum(['ADMIN', 'TEACHER', 'STUDENT', 'PARENT', 'CAISSIER', 'LECTEUR'], {
   message: 'Rôle invalide.',
 });
 

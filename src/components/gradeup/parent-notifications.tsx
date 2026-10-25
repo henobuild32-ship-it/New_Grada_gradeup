@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import Image from 'next/image';
 import { useAppStore } from '@/lib/store';
 import type { NotificationInfo, UserRole } from '@/lib/types';
 import { Card, CardContent } from '@/components/ui/card';
@@ -8,7 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Bell, BellOff, CheckCheck, Clock, CircleDot, MessageSquare, AlertCircle, Info } from 'lucide-react';
+import { Bell, BellOff, CheckCheck, Clock, CircleDot } from 'lucide-react';
 import { toast } from 'sonner';
 import { ErrorBanner, ErrorState } from '@/components/ui/error-state';
 
@@ -114,15 +115,6 @@ export function RoleNotificationInbox({ targetRole }: { targetRole: UserRole }) 
 
   const formatTime = (dateStr: string) => new Date(dateStr).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
 
-  const getNotifIcon = (message: string) => {
-    const lower = message.toLowerCase();
-    if (lower.includes('urgent') || lower.includes('important') || lower.includes('retard')) 
-      return <AlertCircle className="size-4 text-red-500" />;
-    if (lower.includes('info') || lower.includes('rappel') || lower.includes('annonce')) 
-      return <Info className="size-4 text-blue-500" />;
-    return <MessageSquare className="size-4 text-muted-foreground" />;
-  };
-
   if (!user) return null;
 
   return (
@@ -189,7 +181,7 @@ export function RoleNotificationInbox({ targetRole }: { targetRole: UserRole }) 
                     </div>
                     <div className="flex-1 min-w-0 space-y-2">
                       <div className="flex items-start gap-2">
-                        {getNotifIcon(notif.message)}
+                        <Image src="/logo-gradeup.png" alt="GradeUp" width={28} height={28} className="size-7 shrink-0 object-contain" />
                         <p className={`text-sm leading-relaxed break-words ${notif.read ? 'text-muted-foreground' : 'text-foreground font-medium'}`}>
                           {notif.message}
                         </p>

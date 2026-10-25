@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Image from 'next/image';
 import { useAppStore } from '@/lib/store';
 import { usePWAInstall } from '@/hooks/use-pwa-install';
@@ -63,6 +63,7 @@ import {
   Moon,
   Lightbulb,
   LayoutGrid,
+  ChevronUp,
 } from 'lucide-react';
 
 interface AppLayoutProps {
@@ -255,6 +256,8 @@ export default function AppLayout({ children }: AppLayoutProps) {
   const [moreOpen, setMoreOpen] = useState(false);
   const [touchStart, setTouchStart] = useState<number | null>(null);
   const [touchEnd, setTouchEnd] = useState<number | null>(null);
+  const mainScrollRef = useRef<HTMLElement | null>(null);
+  const [scrollPosition, setScrollPosition] = useState({ canUp: false, canDown: false });
 
   const minSwipeDistance = 50;
 
@@ -315,7 +318,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
   }, []);
 
   const fetchUnreadNotifications = async () => {
-    if (!user) return;
+    if (!user || user.role === 'LECTEUR') return;
     try {
       const roleParam = user.role !== 'ADMIN' ? `&targetRole=${user.role}` : '';
       const res = await fetch(`/api/notifications?schoolId=${user.schoolId}${roleParam}`);
@@ -334,10 +337,9 @@ export default function AppLayout({ children }: AppLayoutProps) {
 
   // Real-time notifications SSE subscription + push re-registration
   useEffect(() => {
-    if (!user) return;
+    if (!user || user.role === 'LECTEUR') return;
 
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    fetchUnreadNotifications();
+    const initialFetch = window.setTimeout(() => { void fetchUnreadNotifications(); }, 0);
 
     // Register background PWA Web Push + welcome notification on every login
     if (typeof window !== 'undefined' && window.location.protocol === 'https:') {
@@ -353,19 +355,10 @@ export default function AppLayout({ children }: AppLayoutProps) {
         // Increment unread count
         setUnreadNotificationsCount((prev) => prev + 1);
 
-        // Customize the emoji icon in premium toast
-        let icon = '🔔';
-        if (notif.type === 'CONFERENCE') icon = '🎥';
-        else if (notif.type === 'MESSAGE') icon = '💬';
-        else if (notif.type === 'CLASS') icon = '🏫';
-        else if (notif.type === 'CARD') icon = '🆔';
-        else if (notif.type === 'PROFILE') icon = '👤';
-        else if (notif.type === 'GRADE') icon = '📝';
-
         // Show premium animated toast with Sonner
         toast(notif.title || 'Notification GradeUp', {
           description: notif.message,
-          icon: <span className="text-lg animate-bounce">{icon}</span>,
+          icon: <Image src="/logo-gradeup.png" alt="GradeUp" width={28} height={28} className="rounded-md object-contain" />,
           duration: 6000,
           className: 'bg-card border border-border shadow-2xl rounded-xl p-4',
         });
@@ -380,6 +373,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
     window.addEventListener('gradeup-notification', handleEvents);
 
     return () => {
+      window.clearTimeout(initialFetch);
       unsubscribe();
       window.removeEventListener('gradeup-notification-read', handleEvents);
       window.removeEventListener('gradeup-notification', handleEvents);
@@ -393,7 +387,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
 
   // Fetch unread message count
   useEffect(() => {
-    if (!user) return;
+    if (!user || user.role === 'LECTEUR') return;
     const fetchUnread = async () => {
       try {
         const res = await fetch(`/api/messages/unread-count?userId=${user.id}`);
@@ -410,9 +404,25 @@ export default function AppLayout({ children }: AppLayoutProps) {
     return () => clearInterval(interval);
   }, [user]);
 
-  if (!user) return null;
-
   const isAiPage = ['admin-ai', 'teacher-ai', 'student-ai', 'parent-ai'].includes(currentPage);
+
+  useEffect(() => {
+    const element = mainScrollRef.current;
+    if (!element || isAiPage) return;
+    const update = () => {
+      setScrollPosition({ canUp: element.scrollTop > 12, canDown: element.scrollTop + element.clientHeight < element.scrollHeight - 12 });
+    };
+    element.scrollTo({ top: 0, behavior: 'instant' });
+    const firstUpdate = window.requestAnimationFrame(update);
+    element.addEventListener('scroll', update, { passive: true });
+    window.addEventListener('resize', update);
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(update);
+    if (element.firstElementChild) observer?.observe(element.firstElementChild);
+    observer?.observe(element);
+    return () => { window.cancelAnimationFrame(firstUpdate); element.removeEventListener('scroll', update); window.removeEventListener('resize', update); observer?.disconnect(); };
+  }, [currentPage, isAiPage]);
+
+  if (!user) return null;
 
   const handleLogout = () => {
     setShowLogoutDialog(true);
@@ -481,7 +491,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
 
               {/* Right Side: notifications + profile */}
               <div className="flex items-center gap-0.5 z-10">
-                <Button
+                {user.role !== 'LECTEUR' && <Button
                   variant="ghost"
                   size="icon"
                   aria-label={unreadNotificationsCount > 0 ? `Notifications (${unreadNotificationsCount} non lues)` : 'Notifications'}
@@ -494,7 +504,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
                       {unreadNotificationsCount > 99 ? '99+' : unreadNotificationsCount}
                     </span>
                   )}
-                </Button>
+                </Button>}
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button variant="ghost" className="flex items-center justify-center h-11 w-11 p-0 rounded-full hover:bg-muted transition-all duration-200" aria-label="Menu du compte">
@@ -521,11 +531,11 @@ export default function AppLayout({ children }: AppLayoutProps) {
                       </div>
                     </DropdownMenuLabel>
                     <DropdownMenuSeparator />
-                    <DropdownMenuItem onClick={() => handleNavigate('profile')} className="cursor-pointer">
+                    {user.role !== 'LECTEUR' && <DropdownMenuItem onClick={() => handleNavigate('profile')} className="cursor-pointer">
                       <User className="mr-2 h-4 w-4" />
                       Mon profil
-                    </DropdownMenuItem>
-                    <DropdownMenuSeparator />
+                    </DropdownMenuItem>}
+                    {user.role !== 'LECTEUR' && <DropdownMenuSeparator />}
                     <DropdownMenuItem
                       onClick={handleLogout}
                       className="cursor-pointer text-red-600 focus:text-red-600 focus:bg-red-50 dark:focus:bg-red-950/30"
@@ -581,7 +591,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
 
               <div className="flex items-center gap-2">
                 {/* Notification bell */}
-                <Tooltip>
+                {user.role !== 'LECTEUR' && <Tooltip>
                   <TooltipTrigger asChild>
                     <Button
                       variant="ghost"
@@ -600,10 +610,10 @@ export default function AppLayout({ children }: AppLayoutProps) {
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent>Notifications</TooltipContent>
-                </Tooltip>
+                </Tooltip>}
 
                 {/* Messages shortcut with unread badge */}
-                <Tooltip>
+                {user.role !== 'LECTEUR' && <Tooltip>
                   <TooltipTrigger asChild>
                     <Button
                       variant="ghost"
@@ -620,7 +630,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent>Messagerie{unreadMessages > 0 ? ` (${unreadMessages})` : ''}</TooltipContent>
-                </Tooltip>
+                </Tooltip>}
 
                 {/* Dark mode toggle */}
                 <Tooltip>
@@ -673,10 +683,10 @@ export default function AppLayout({ children }: AppLayoutProps) {
                     </DropdownMenuLabel>
                     
                     <DropdownMenuSeparator />
-                    <DropdownMenuItem onClick={() => handleNavigate('profile')} className="cursor-pointer">
+                    {user.role !== 'LECTEUR' && <DropdownMenuItem onClick={() => handleNavigate('profile')} className="cursor-pointer">
                       <User className="mr-2 h-4 w-4" />
                       Mon profil
-                    </DropdownMenuItem>
+                    </DropdownMenuItem>}
                     <DropdownMenuSeparator />
                     <DropdownMenuItem
                       onClick={handleLogout}
@@ -694,6 +704,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
 
         {/* ✅ Main content: overflow-y-auto pour le scroll, min-h-0 pour flexibilité */}
         <main 
+          ref={mainScrollRef}
           className={`flex-1 overflow-x-hidden min-h-0 overscroll-contain ${isAiPage ? 'flex flex-col overflow-y-hidden' : 'overflow-y-auto'} ${isMobile ? 'pb-[calc(4.5rem+env(safe-area-inset-bottom))]' : ''}`}
           onTouchStart={onTouchStart}
           onTouchMove={onTouchMove}
@@ -702,7 +713,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
         >
           {/* ✅ Conteneur de page: flex-1 min-h-0 pour que les enfants puissent scroller */}
           <div className={`${isAiPage ? 'flex flex-1 min-h-0 flex-col overflow-hidden' : 'p-3 sm:p-4 lg:p-6'} animate-fade-in`} key={currentPage}>
-            <NotificationPermissionBanner />
+            {user.role !== 'LECTEUR' && <NotificationPermissionBanner />}
             {children}
           </div>
         </main>
@@ -753,6 +764,11 @@ export default function AppLayout({ children }: AppLayoutProps) {
           </div>
         </footer>
       </div>
+
+      {!isAiPage && (scrollPosition.canUp || scrollPosition.canDown) && <div className={`fixed right-3 z-30 flex flex-col gap-2 ${isMobile ? 'bottom-[calc(4.75rem+env(safe-area-inset-bottom))]' : 'bottom-6'}`}>
+        {scrollPosition.canUp && <Button type="button" size="icon" variant="secondary" aria-label="Remonter en haut de la page" title="Haut de page" onClick={() => mainScrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' })} className="size-10 rounded-full border bg-card/95 shadow-lg"><ChevronUp className="size-5" /></Button>}
+        {scrollPosition.canDown && <Button type="button" size="icon" variant="secondary" aria-label="Descendre en bas de la page" title="Bas de page" onClick={() => { const element = mainScrollRef.current; element?.scrollTo({ top: element.scrollHeight, behavior: 'smooth' }); }} className="size-10 rounded-full border bg-card/95 shadow-lg"><ChevronDown className="size-5" /></Button>}
+      </div>}
 
       {/* Command Palette */}
       <CommandPalette />

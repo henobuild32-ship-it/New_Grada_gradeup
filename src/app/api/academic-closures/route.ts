@@ -6,7 +6,7 @@ const ALLOWED = new Set(['DAY', 'WEEK', 'MONTH', 'SEMESTER', 'TRIMESTER', 'YEAR'
 
 export async function GET(req: NextRequest) {
   try {
-    const auth = authenticateRequest(req);
+    const auth = await authenticateRequest(req);
     const { searchParams } = new URL(req.url);
     const schoolYearId = searchParams.get('schoolYearId');
     if (!schoolYearId) return NextResponse.json({ error: 'schoolYearId requis' }, { status: 400 });
@@ -20,7 +20,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const auth = authenticateRequest(req);
+    const auth = await authenticateRequest(req);
     if (!['ADMIN', 'TEACHER'].includes(auth.role)) return NextResponse.json({ error: 'Action réservée aux administrateurs et enseignants.' }, { status: 403 });
     const { schoolYearId, scope, key } = await req.json();
     if (!schoolYearId || !ALLOWED.has(scope) || !key) return NextResponse.json({ error: 'schoolYearId, scope et key sont requis.' }, { status: 400 });
@@ -40,7 +40,7 @@ export async function POST(req: NextRequest) {
 
 export async function DELETE(req: NextRequest) {
   try {
-    const auth = authenticateRequest(req);
+    const auth = await authenticateRequest(req);
     if (auth.role !== 'ADMIN') return NextResponse.json({ error: 'Action réservée aux administrateurs.' }, { status: 403 });
     const { searchParams } = new URL(req.url);
     const id = searchParams.get('id');

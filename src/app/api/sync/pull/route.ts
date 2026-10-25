@@ -52,7 +52,7 @@ async function teacherClassIds(teacherId: string, schoolId: string): Promise<str
 
 export async function GET(request: NextRequest) {
   try {
-    const auth = authenticateRequest(request);
+    const auth = await authenticateRequest(request);
     const { searchParams } = new URL(request.url);
     const since = parseSince(searchParams.get('since'));
     const cursor = new Date();

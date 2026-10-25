@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import Image from 'next/image';
 import { useAppStore } from '@/lib/store';
 import type { NotificationInfo } from '@/lib/types';
 import { Card, CardContent } from '@/components/ui/card';
@@ -8,7 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Bell, BellOff, CheckCheck, Clock } from 'lucide-react';
+import { BellOff, CheckCheck, Clock } from 'lucide-react';
 import { toast } from 'sonner';
 
 export default function StudentNotifications() {
@@ -123,7 +124,7 @@ export default function StudentNotifications() {
               >
                 <CardContent className="flex items-start gap-4">
                   <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${notif.read ? 'bg-muted' : 'bg-gradient-to-br from-blue-400 to-blue-600 shadow-sm shadow-blue-500/25'}`}>
-                    <Bell className={`h-5 w-5 ${notif.read ? 'text-muted-foreground' : 'text-white'}`} />
+                    <Image src="/logo-gradeup.png" alt="GradeUp" width={28} height={28} className="size-7 object-contain" />
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-start justify-between gap-2">

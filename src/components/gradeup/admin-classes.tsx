@@ -105,6 +105,22 @@ interface CourseInClass {
   teacher?: { fullName: string };
 }
 
+interface HumanitiesSectionItem { id: string; name: string; options: { id: string; name: string }[] }
+interface HumanitiesAffectedClass {
+  id: string;
+  name: string;
+  level: string;
+  section: string;
+  option: string;
+  _count: { enrollments: number };
+}
+interface HumanitiesConflict {
+  kind: 'section' | 'option';
+  name: string;
+  message: string;
+  classes: HumanitiesAffectedClass[];
+}
+
 const levelColors: Record<string, string> = {
   Maternelle: 'bg-pink-100 text-pink-700 border-pink-200',
   Primaire: 'bg-blue-100 text-blue-700 border-blue-200',
@@ -129,34 +145,17 @@ const levelIconBg: Record<string, string> = {
   Secondaire: 'bg-emerald-100 text-emerald-600',
 };
 
-const HUMANITES_SECTIONS = [
-  'Scientifique',
-  'Pédagogique',
-  'Commerciale & Gestion',
-  'Littéraire',
-  'Technique',
-  'Agricole',
-  'Sociale',
-  'Arts',
-];
-
-const HUMANITES_OPTIONS: Record<string, string[]> = {
-  Scientifique: ['Math-Physique', 'Bio-Chimie'],
-  Pédagogique: ['Pédagogie générale', 'Éducation physique'],
-  'Commerciale & Gestion': ['Comptabilité', 'Gestion', 'Secrétariat'],
-  Littéraire: ['Latin-Philo', 'Latin-Grec', 'Littéraire'],
-  Technique: ['Électricité', 'Mécanique', 'Construction', 'Électronique', 'Informatique', 'Coupe et couture'],
-  Agricole: ['Agriculture', 'Vétérinaire'],
-  Sociale: ['Sciences sociales'],
-  Arts: ['Arts plastiques', 'Musique'],
-};
-
 export default function AdminClasses() {
   const { user } = useAppStore();
   const [classes, setClasses] = useState<ClassItem[]>([]);
   const [teachers, setTeachers] = useState<TeacherItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [isOffline, setIsOffline] = useState(false);
+  const isReadOnly = user?.role === 'LECTEUR';
+  const [humanitiesSections, setHumanitiesSections] = useState<HumanitiesSectionItem[]>([]);
+  const [humanitiesConflict, setHumanitiesConflict] = useState<HumanitiesConflict | null>(null);
+  const [newSectionName, setNewSectionName] = useState('');
+  const [newOptionNames, setNewOptionNames] = useState<Record<string, string>>({});
 
   // Dialogue Création / Modification
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -241,12 +240,37 @@ export default function AdminClasses() {
     }
   }, [user?.schoolId]);
 
+  const fetchHumanitiesStructure = useCallback(async () => {
+    if (!user?.schoolId) return;
+    const response = await fetch('/api/admin/humanities-structure');
+    if (!response.ok) return;
+    const data = await response.json();
+    setHumanitiesSections(Array.isArray(data.sections) ? data.sections : []);
+  }, [user?.schoolId]);
+
   useEffect(() => {
     if (user?.schoolId) {
       fetchClasses();
       fetchTeachers();
+      fetchHumanitiesStructure();
     }
-  }, [fetchClasses, fetchTeachers, user?.schoolId]);
+  }, [fetchClasses, fetchTeachers, fetchHumanitiesStructure, user?.schoolId]);
+
+  const saveStructure = async (method: 'POST' | 'PATCH' | 'DELETE', body: Record<string, unknown>) => {
+    const response = await fetch('/api/admin/humanities-structure', { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw Object.assign(new Error(result.error || 'Impossible de modifier la configuration.'), { status: response.status, classes: result.classes });
+    await fetchHumanitiesStructure();
+    if (method === 'PATCH') await fetchClasses();
+  };
+
+  const addSection = async () => {
+    try {
+      await saveStructure('POST', { action: 'create-section', name: newSectionName });
+      setNewSectionName('');
+      toast.success('Section ajoutée.');
+    } catch (error) { toast.error(error instanceof Error ? error.message : 'Erreur.'); }
+  };
 
   const resetForm = () => {
     setFormName('');
@@ -274,6 +298,20 @@ export default function AdminClasses() {
     setFormFees(String(c.fees || 0));
     setFormTitulaireId(c.titulaireId || c.titulaire?.id || 'none');
     setDialogOpen(true);
+  };
+
+  const removeHumanitiesItem = async (kind: 'section' | 'option', item: { id: string; name: string }) => {
+    try {
+      await saveStructure('DELETE', { kind, id: item.id });
+      toast.success(`${kind === 'section' ? 'Section' : 'Option'} « ${item.name} » supprimée.`);
+    } catch (error) {
+      const details = error as Error & { status?: number; classes?: HumanitiesAffectedClass[] };
+      if (details.status === 409) {
+        setHumanitiesConflict({ kind, name: item.name, message: details.message, classes: Array.isArray(details.classes) ? details.classes : [] });
+        return;
+      }
+      toast.error(details.message || 'Impossible de supprimer cet élément. Réessayez.');
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -442,15 +480,76 @@ export default function AdminClasses() {
               Structure pédagogique, titulariat, frais et effectifs ({classes.length} classes)
             </p>
           </div>
-          <Button
+          {!isReadOnly && <Button
             onClick={openCreateDialog}
             className="bg-white text-blue-700 hover:bg-blue-50 font-bold shadow-md min-h-[44px]"
           >
             <FolderPlus className="h-4 w-4 mr-2" />
             Créer une classe
-          </Button>
+          </Button>}
         </div>
       </div>
+
+      {isReadOnly && <div className="rounded-xl border border-sky-200 bg-sky-50 p-3 text-sm text-sky-900">Consultation en lecture seule : les modifications de classes et de structure sont réservées à l’administration.</div>}
+
+      {!isReadOnly && <Card className="rounded-2xl">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">Sections et options des Humanités</CardTitle>
+          <CardDescription>Configuration propre à l’école, réutilisée pour les classes et les inscriptions.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <Input value={newSectionName} onChange={(event) => setNewSectionName(event.target.value)} placeholder="Nom de la nouvelle section" maxLength={80} />
+            <Button onClick={() => void addSection()} disabled={!newSectionName.trim()} className="min-h-11 shrink-0"><Plus className="mr-2 size-4" />Ajouter une section</Button>
+          </div>
+          {humanitiesSections.map((section) => <div key={section.id} className="rounded-xl border p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h3 className="font-semibold">{section.name}</h3>
+              <div className="flex gap-2">
+                <Button size="sm" variant="outline" onClick={() => { const name = window.prompt('Nouveau nom de la section', section.name); if (name?.trim()) void saveStructure('PATCH', { kind: 'section', id: section.id, name }).then(() => toast.success('Section modifiée.')).catch((error) => toast.error(error.message)); }}><Pencil className="mr-1 size-3.5" />Renommer</Button>
+                <Button size="sm" variant="outline" className="min-h-10 text-red-600" onClick={() => void removeHumanitiesItem('section', section)}><Trash2 className="mr-1 size-3.5" />Supprimer</Button>
+              </div>
+            </div>
+            <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+              <Input value={newOptionNames[section.id] || ''} onChange={(event) => setNewOptionNames((previous) => ({ ...previous, [section.id]: event.target.value }))} placeholder={`Nouvelle option pour ${section.name}`} maxLength={80} />
+              <Button size="sm" variant="secondary" className="min-h-11 shrink-0" disabled={!(newOptionNames[section.id] || '').trim()} onClick={() => void saveStructure('POST', { action: 'create-option', sectionId: section.id, name: newOptionNames[section.id] }).then(() => { setNewOptionNames((previous) => ({ ...previous, [section.id]: '' })); toast.success('Option ajoutée.'); }).catch((error) => toast.error(error.message))}><Plus className="mr-1 size-3.5" />Ajouter</Button>
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2">{section.options.map((option) => <Badge key={option.id} variant="secondary" className="gap-1.5 py-1">
+              {option.name}
+              <button aria-label={`Renommer ${option.name}`} className="text-muted-foreground hover:text-foreground" onClick={() => { const name = window.prompt('Nouveau nom de l’option', option.name); if (name?.trim()) void saveStructure('PATCH', { kind: 'option', id: option.id, name }).then(() => toast.success('Option modifiée.')).catch((error) => toast.error(error.message)); }}><Pencil className="size-3" /></button>
+              <button type="button" aria-label={`Supprimer ${option.name}`} className="inline-flex min-h-8 min-w-8 items-center justify-center rounded text-red-600 hover:bg-red-50" onClick={() => void removeHumanitiesItem('option', option)}><Trash2 className="size-3" /></button>
+            </Badge>)}</div>
+          </div>)}
+          {humanitiesSections.length === 0 && <p className="text-sm text-muted-foreground">Aucune section configurée. Ajoutez d’abord une section, puis ses options.</p>}
+        </CardContent>
+      </Card>}
+
+      <Dialog open={Boolean(humanitiesConflict)} onOpenChange={(open) => { if (!open) setHumanitiesConflict(null); }}>
+        <DialogContent className="max-h-[90dvh] overflow-y-auto rounded-2xl sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>{humanitiesConflict?.kind === 'section' ? 'Section encore utilisée' : 'Option encore utilisée'}</DialogTitle>
+            <DialogDescription>{humanitiesConflict?.message} Modifiez la structure de chaque classe concernée avant de supprimer cet élément.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            {humanitiesConflict?.classes.map((affected) => {
+              const localClass = classes.find((item) => item.id === affected.id);
+              return <div key={affected.id} className="flex flex-col gap-3 rounded-xl border p-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="min-w-0">
+                  <p className="font-semibold">{affected.name}</p>
+                  <p className="text-xs text-muted-foreground">{affected.level} · {affected.section} · {affected.option} · {affected._count.enrollments} élève(s) inscrit(s)</p>
+                </div>
+                {localClass && <Button type="button" variant="outline" className="min-h-10 shrink-0" onClick={() => {
+                  setHumanitiesConflict(null);
+                  openEditDialog(localClass);
+                }}><Pencil className="mr-2 size-4" />Modifier cette classe</Button>}
+              </div>;
+            })}
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" className="min-h-11" onClick={() => setHumanitiesConflict(null)}>Fermer</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Grille des classes */}
       {loading ? (
@@ -468,10 +567,10 @@ export default function AdminClasses() {
           <p className="text-xs text-muted-foreground max-w-sm mx-auto mb-5">
             Créez votre première classe (ex: 6ème A, 1ère Maternelle) pour inscrire des élèves et planifier des cours.
           </p>
-          <Button onClick={openCreateDialog} className="min-h-[44px]">
+          {!isReadOnly && <Button onClick={openCreateDialog} className="min-h-[44px]">
             <Plus className="h-4 w-4 mr-2" />
             Créer ma première classe
-          </Button>
+          </Button>}
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -509,7 +608,7 @@ export default function AdminClasses() {
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-1">
+                    {!isReadOnly && <div className="flex items-center gap-1">
                       <Button
                         variant="ghost"
                         size="icon"
@@ -531,7 +630,7 @@ export default function AdminClasses() {
                       >
                         <Trash2 className="h-3.5 w-3.5 text-red-500" />
                       </Button>
-                    </div>
+                    </div>}
                   </div>
                 </CardHeader>
 
@@ -568,7 +667,7 @@ export default function AdminClasses() {
                   </div>
 
                   {/* Action Transfert d'Élèves */}
-                  <div className="pt-1">
+                  {!isReadOnly && <div className="pt-1">
                     <Button
                       variant="outline"
                       size="sm"
@@ -578,7 +677,7 @@ export default function AdminClasses() {
                       <ArrowRightLeft className="w-3.5 h-3.5" />
                       Transférer des élèves
                     </Button>
-                  </div>
+                  </div>}
                 </CardContent>
               </Card>
             );
@@ -658,37 +757,26 @@ export default function AdminClasses() {
             {formLevel === 'Secondaire' && formCycle === 'Humanites' && (
               <div className="grid gap-4 rounded-xl border border-blue-100 bg-blue-50/60 p-3 sm:grid-cols-2 dark:border-blue-900/50 dark:bg-blue-950/20">
                 <div className="space-y-1.5">
-                  <Label htmlFor="class-section">Section des Humanités</Label>
-                  <Input
-                    id="class-section"
-                    list="humanites-section-options"
-                    placeholder="Ex. Scientifique"
-                    value={formSection}
-                    onChange={(event) => {
-                      setFormSection(event.target.value);
-                      setFormOption('');
-                    }}
-                    className="h-11 bg-background"
-                  />
-                  <datalist id="humanites-section-options">
-                    {HUMANITES_SECTIONS.map((section) => <option key={section} value={section} />)}
-                  </datalist>
+                  <Label>Section des Humanités *</Label>
+                  <Select value={formSection || 'none'} onValueChange={(value) => { setFormSection(value === 'none' ? '' : value); setFormOption(''); }}>
+                    <SelectTrigger className="h-11 bg-background"><SelectValue placeholder="Choisir une section" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Choisir une section</SelectItem>
+                      {humanitiesSections.map((section) => <SelectItem key={section.id} value={section.name}>{section.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div className="space-y-1.5">
-                  <Label htmlFor="class-option">Option des Humanités</Label>
-                  <Input
-                    id="class-option"
-                    list="humanites-option-options"
-                    placeholder={formSection ? `Ex. ${HUMANITES_OPTIONS[formSection]?.[0] || 'option'}` : 'Choisir la section d’abord'}
-                    value={formOption}
-                    onChange={(event) => setFormOption(event.target.value)}
-                    className="h-11 bg-background"
-                  />
-                  <datalist id="humanites-option-options">
-                    {(HUMANITES_OPTIONS[formSection] || []).map((option) => <option key={option} value={option} />)}
-                  </datalist>
+                  <Label>Option des Humanités *</Label>
+                  <Select value={formOption || 'none'} onValueChange={(value) => setFormOption(value === 'none' ? '' : value)} disabled={!formSection}>
+                    <SelectTrigger className="h-11 bg-background"><SelectValue placeholder={formSection ? 'Choisir une option' : 'Choisir d’abord une section'} /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Choisir une option</SelectItem>
+                      {humanitiesSections.find((section) => section.name === formSection)?.options.map((option) => <SelectItem key={option.id} value={option.name}>{option.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
                 </div>
-                <p className="-mt-2 text-[11px] text-muted-foreground sm:col-span-2">Ces champs concernent uniquement les classes d&apos;Humanités. Vous pouvez sélectionner une suggestion ou saisir une appellation personnalisée.</p>
+                <p className="-mt-2 text-[11px] text-muted-foreground sm:col-span-2">Les options dépendent de la section configurée par l&apos;école. Ajoutez les listes depuis le haut de cette page.</p>
               </div>
             )}
 
@@ -951,13 +1039,15 @@ export default function AdminClasses() {
               Supprimer la classe &quot;{deletingClass?.name}&quot;
             </AlertDialogTitle>
             <AlertDialogDescription>
-              Êtes-vous sûr de vouloir supprimer cette classe ? Les inscriptions associées seront réinitialisées.
+              {((deletingClass?._count?.enrollments || 0) + (deletingClass?._count?.courses || 0)) > 0
+                ? `Cette classe contient ${deletingClass?._count?.enrollments || 0} élève(s) et ${deletingClass?._count?.courses || 0} cours. Transférez d’abord les élèves avec l’action « Transférer des élèves » et réaffectez les cours. Le serveur bloquera toute suppression tant que des éléments liés existent.`
+                : 'Vérification de toutes les données liées avant suppression. Si un frais, un cours, un bulletin ou une inscription utilise encore cette classe, la suppression sera refusée avec les éléments à traiter.'}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel className="min-h-[44px]">Annuler</AlertDialogCancel>
-            <AlertDialogAction onClick={handleDelete} className="min-h-[44px] bg-red-600 hover:bg-red-700 text-white font-bold">
-              Supprimer définitivement
+            <AlertDialogAction onClick={handleDelete} disabled={Boolean((deletingClass?._count?.enrollments || 0) + (deletingClass?._count?.courses || 0))} className="min-h-[44px] bg-red-600 hover:bg-red-700 text-white font-bold disabled:opacity-50">
+              Vérifier et supprimer
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

@@ -38,7 +38,7 @@ export default function StudentPayments() {
     'payments',
     user?.schoolId,
     {
-      remoteUrl: params ? `/api/payments?${params}` : undefined,
+      remoteUrl: params ? `/api/receipts?${params}` : undefined,
       extract: extractPayments,
       filter: paymentFilter,
     }

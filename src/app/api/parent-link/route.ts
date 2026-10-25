@@ -9,7 +9,7 @@ const INVALID_CODE_MESSAGE = 'Le code n’est pas valide.';
 
 export async function POST(request: NextRequest) {
   try {
-    const auth = authenticateRequest(request);
+    const auth = await authenticateRequest(request);
     if (auth.role !== 'PARENT') {
       return NextResponse.json({ error: 'Seul un parent peut lier un enfant.' }, { status: 403 });
     }

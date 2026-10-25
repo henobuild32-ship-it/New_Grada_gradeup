@@ -31,7 +31,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     }
 
     if (user.id !== auth.userId) {
-      if (auth.role !== 'ADMIN') {
+      if (auth.role !== 'ADMIN' && auth.role !== 'LECTEUR') {
         throw new ApiError('Accès refusé : carte réservée au propriétaire ou à l’administration.', 403, 'OWNERSHIP_FORBIDDEN');
       }
       assertSchool(auth, user.schoolId);

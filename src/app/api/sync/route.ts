@@ -18,7 +18,8 @@ function isAllowedPath(pathname: string): boolean {
 
 export async function POST(request: NextRequest) {
   try {
-    authenticateRequest(request);
+    const auth = await authenticateRequest(request);
+    if (auth.role === 'LECTEUR') return NextResponse.json({ error: 'La synchronisation d’écritures est désactivée pour le Lecteur.' }, { status: 403 });
     const operation = (await request.json()) as SyncOperation;
     const target = new URL(operation.url, request.url);
 

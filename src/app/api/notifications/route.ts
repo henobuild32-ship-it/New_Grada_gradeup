@@ -42,7 +42,14 @@ export async function GET(request: NextRequest) {
 
     const where: Record<string, unknown> = { schoolId };
 
-    if (auth.role === 'STUDENT') {
+    if (auth.role === 'LECTEUR') {
+      // The Reader may consult only notices addressed to Readers, the whole
+      // school, or directly to their account. Query parameters cannot widen it.
+      where.OR = [
+        { userId: auth.userId },
+        { userId: null, targetRole: { in: ['ALL', 'LECTEUR'] } },
+      ];
+    } else if (auth.role === 'STUDENT') {
       const enrollments = await db.enrolledClass.findMany({
         where: { userId: auth.userId, class: { schoolId, deletedAt: null } },
         select: { classId: true },

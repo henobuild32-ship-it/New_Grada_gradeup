@@ -56,7 +56,7 @@ export default function ParentPayments() {
   );
   const paymentsState = useEntityListState<PaymentRecord>('payments', schoolId, {
     remoteUrl: selectedChildId
-      ? `/api/payments?schoolId=${encodeURIComponent(schoolId)}&studentId=${encodeURIComponent(selectedChildId)}`
+      ? `/api/receipts?studentId=${encodeURIComponent(selectedChildId)}`
       : undefined,
     extract: extractPayments,
     filter: paymentFilter,

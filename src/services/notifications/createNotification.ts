@@ -19,9 +19,17 @@ export async function createNotification(input: CreateNotificationInput) {
     targetClassId = '',
   } = input;
 
-  const metadataString = typeof metadata === 'string' 
-    ? metadata 
-    : JSON.stringify(metadata || {});
+  let metadataValue: Record<string, unknown> = {};
+  if (typeof metadata === 'string') {
+    try {
+      const parsed = JSON.parse(metadata);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) metadataValue = parsed;
+    } catch { /* conserve une métadonnée non JSON sans la traiter comme une instruction */ }
+  } else if (metadata && typeof metadata === 'object' && !Array.isArray(metadata)) {
+    metadataValue = metadata as Record<string, unknown>;
+  }
+  metadataValue.logo = '/logo-gradeup.png';
+  const metadataString = JSON.stringify(metadataValue);
 
   // 1. Save to SQLite database
   const notification = await db.notification.create({

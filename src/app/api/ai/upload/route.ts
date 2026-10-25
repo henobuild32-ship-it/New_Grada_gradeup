@@ -84,6 +84,7 @@ async function generateSummary(
 export async function POST(request: NextRequest) {
   try {
     const auth = await requireAuth(request);
+    if (auth.role === 'LECTEUR') return NextResponse.json({ error: 'L’accès à Gradie IA n’est pas disponible pour le rôle Lecteur.' }, { status: 403 });
     const formData = await request.formData();
     const file = formData.get('file') as File | null;
     const conversationId = formData.get('conversationId') as string | null;

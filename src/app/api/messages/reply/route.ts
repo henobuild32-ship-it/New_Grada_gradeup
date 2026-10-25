@@ -10,6 +10,7 @@ export const runtime = 'nodejs';
 export async function POST(request: NextRequest) {
   try {
     const auth = await requireAuth(request);
+    if (auth.role === 'LECTEUR') return NextResponse.json({ error: 'Envoyez votre message depuis la conversation dédiée avec l’administrateur.' }, { status: 403 });
     const { senderId, recipientId, content, schoolId, replyToId } = await request.json();
     if (!senderId || !recipientId || !content?.trim() || !schoolId || !replyToId) {
       return NextResponse.json(

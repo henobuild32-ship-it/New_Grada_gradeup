@@ -1,49 +1,31 @@
-import { NextRequest } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { requireAuth } from '@/lib/api/rbac';
-import { handleApiError } from '@/lib/api/errors';
-import { parseListParams, list } from '@/lib/api/response';
+import { AuthError, authenticateRequest } from '@/lib/auth/authenticate';
 
-export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
-export async function GET(req: NextRequest) {
+export async function GET(request: NextRequest) {
   try {
-    const auth = await requireAuth(req, ['ADMIN']);
-    const { searchParams } = new URL(req.url);
-    const pagination = parseListParams(searchParams, { createdAt: 'desc' });
-
-    const where: any = { schoolId: auth.schoolId };
-    const entity = searchParams.get('entity');
-    if (entity) where.entity = entity;
-    const action = searchParams.get('action');
-    if (action) where.action = action;
-    const userId = searchParams.get('userId');
-    if (userId) where.userId = userId;
-    const from = searchParams.get('from');
-    if (from) where.createdAt = { ...(where.createdAt ?? {}), gte: new Date(from) };
-    const to = searchParams.get('to');
-    if (to) where.createdAt = { ...(where.createdAt ?? {}), lte: new Date(to) };
-
-    const [total, rows] = await Promise.all([
-      db.auditLog.count({ where }),
-      db.auditLog.findMany({
-        where,
-        orderBy: pagination.orderBy,
-        skip: pagination.skip,
-        take: pagination.take,
-        include: {
-          user: { select: { id: true, fullName: true, role: true } },
-        },
-      }),
-    ]);
-
-    return list('auditLog', rows, {
-      page: pagination.page,
-      pageSize: pagination.pageSize,
-      total,
-      totalPages: Math.max(1, Math.ceil(total / pagination.pageSize)),
+    const auth = await authenticateRequest(request);
+    if (auth.role !== 'ADMIN' && auth.role !== 'LECTEUR') {
+      return NextResponse.json({ error: 'Accès réservé à la direction et aux lecteurs.' }, { status: 403 });
+    }
+    const pageSize = Math.min(100, Math.max(1, Number(new URL(request.url).searchParams.get('limit') || 50)));
+    const logs = await db.auditLog.findMany({
+      where: { schoolId: auth.schoolId },
+      orderBy: { createdAt: 'desc' },
+      take: pageSize,
+      select: {
+        id: true,
+        action: true,
+        entity: true,
+        createdAt: true,
+        user: { select: { id: true, fullName: true, role: true } },
+      },
     });
-  } catch (e) {
-    return handleApiError(e);
+    return NextResponse.json({ logs }, { headers: { 'Cache-Control': 'private, no-store, max-age=0' } });
+  } catch (error) {
+    if (error instanceof AuthError) return NextResponse.json({ error: error.message }, { status: error.status });
+    return NextResponse.json({ error: 'Impossible de charger le journal.' }, { status: 500 });
   }
 }

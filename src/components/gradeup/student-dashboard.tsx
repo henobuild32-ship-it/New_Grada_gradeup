@@ -70,7 +70,7 @@ export default function StudentDashboard() {
             : Promise.resolve([]),
           handleRes(`/api/grades?${params}&studentId=${user.id}`),
           handleRes(`/api/attendance?${params}&studentId=${user.id}`),
-          handleRes(`/api/payments?${params}&studentId=${user.id}`),
+          handleRes(`/api/receipts?${params}&studentId=${user.id}`),
           handleRes(`/api/notifications?${params}&targetRole=STUDENT`).catch(() => []),
         ]);
 

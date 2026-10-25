@@ -13,6 +13,7 @@ export async function GET(
   const { id } = await params;
   try {
     const auth = await requireAuth(request);
+    if (auth.role === 'LECTEUR') return NextResponse.json({ error: 'Utilisez la conversation dédiée avec l’administrateur.' }, { status: 403 });
     const message = await db.message.findUnique({
       where: { id },
       include: {
@@ -56,6 +57,7 @@ export async function PATCH(
   const { id } = await params;
   try {
     const auth = await requireAuth(request);
+    if (auth.role === 'LECTEUR') return NextResponse.json({ error: 'Le Lecteur ne peut pas modifier les messages.' }, { status: 403 });
     const body = await request.json();
     const { content, userId } = body;
 
@@ -96,6 +98,7 @@ export async function DELETE(
   const { id } = await params;
   try {
     const auth = await requireAuth(request);
+    if (auth.role === 'LECTEUR') return NextResponse.json({ error: 'Le Lecteur ne peut pas supprimer les messages.' }, { status: 403 });
     const { searchParams } = new URL(request.url);
     const userId = searchParams.get('userId');
 

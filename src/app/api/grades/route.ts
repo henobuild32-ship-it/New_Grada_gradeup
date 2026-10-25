@@ -53,7 +53,7 @@ function applyTimeFilter(where: Record<string, unknown>, groupBy: string | null,
 
 export async function GET(request: NextRequest) {
   try {
-    const auth = authenticateRequest(request);
+    const auth = await authenticateRequest(request);
     const { searchParams } = new URL(request.url);
     const schoolId = searchParams.get('schoolId');
     const studentId = searchParams.get('studentId');
@@ -164,7 +164,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const auth = authenticateRequest(request);
+    const auth = await authenticateRequest(request);
     if (auth.role === 'PARENT' || auth.role === 'STUDENT') {
       return NextResponse.json({ error: 'Accès non autorisé' }, { status: 403 });
     }

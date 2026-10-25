@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { authenticateRequest } from '@/lib/auth/authenticate';
+import { authenticateRequestActive, AuthError } from '@/lib/auth/authenticate';
 import { uploadFile } from '@/lib/storage';
 import { db } from '@/lib/db';
 
@@ -10,10 +10,11 @@ const ALLOWED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 
 export async function POST(req: NextRequest) {
   try {
-    const auth = authenticateRequest(req);
+    const auth = await authenticateRequestActive(req);
     if (!auth?.userId) {
       return NextResponse.json({ error: 'Non authentifié' }, { status: 401 });
     }
+    if (auth.role === 'LECTEUR') return NextResponse.json({ error: 'Le compte Lecteur est en consultation seule.' }, { status: 403 });
 
     const formData = await req.formData();
     const file = formData.get('photo') as File | null;
@@ -53,7 +54,10 @@ export async function POST(req: NextRequest) {
     }
 
     return NextResponse.json({ url });
-  } catch {
+  } catch (error) {
+    if (error instanceof AuthError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
     return NextResponse.json({ error: 'Erreur upload' }, { status: 500 });
   }
 }

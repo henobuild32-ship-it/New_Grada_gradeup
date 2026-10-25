@@ -14,7 +14,7 @@ async function loadFee(id: string) {
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const auth = await requireAuth(req);
+    const auth = await requireAuth(req, ['CAISSIER', 'LECTEUR']);
     const { id } = await params;
     const fee = await loadFee(id);
     assertSchool(auth, fee.schoolId);
@@ -26,13 +26,17 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const auth = await requireAuth(req, ['ADMIN']);
+    const auth = await requireAuth(req, ['CAISSIER']);
     const { id } = await params;
     const fee = assertFound(await db.fee.findUnique({ where: { id } }), 'Frais introuvable.');
     assertSchool(auth, fee.schoolId);
 
     const body = await req.json();
     const data = parseOrThrow(feeSchema, body);
+    if (data.classId) {
+      const schoolClass = await db.schoolClass.findFirst({ where: { id: data.classId, schoolId: auth.schoolId, deletedAt: null }, select: { id: true } });
+      if (!schoolClass) return new Response(JSON.stringify({ error: 'Classe introuvable dans votre école.' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
+    }
 
     const updated = await db.fee.update({
       where: { id },
@@ -65,7 +69,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const auth = await requireAuth(req, ['ADMIN']);
+    const auth = await requireAuth(req, ['CAISSIER']);
     const { id } = await params;
     const fee = assertFound(await db.fee.findUnique({ where: { id } }), 'Frais introuvable.');
     assertSchool(auth, fee.schoolId);

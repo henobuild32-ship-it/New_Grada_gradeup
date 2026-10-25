@@ -45,6 +45,7 @@ interface StudentItem {
   photoUrl?: string;
   classId?: string;
   cardId?: string;
+  cardPaymentConfirmed?: boolean;
   cardIssuedDate?: string;
   cardExpiryDate?: string;
   classEnrollments?: EnrolledClassInfo[];
@@ -72,6 +73,7 @@ export default function AdminCards() {
   const [schoolAcademicYear, setSchoolAcademicYear] = useState('');
   const [schoolEmail, setSchoolEmail] = useState('');
   const [schoolAddress, setSchoolAddress] = useState('');
+  const [configuredCardPrice, setConfiguredCardPrice] = useState<number | null>(null);
   const printRef = useRef<HTMLDivElement>(null);
 
   // Edit/Create State
@@ -83,78 +85,25 @@ export default function AdminCards() {
   // Form Fields
   const [formData, setFormData] = useState<Partial<StudentItem>>({});
 
-  // Payment states
-  const [showPaymentDialog, setShowPaymentDialog] = useState(false);
-  const [paymentLoading, setPaymentLoading] = useState(false);
-  const [paymentPhone, setPaymentPhone] = useState('');
-  const [mobileMoneyOperator, setMobileMoneyOperator] = useState<'orange' | 'airtel' | 'mpesa'>('orange');
-  const [paymentAuthorized, setPaymentAuthorized] = useState(false);
-
-  // Check if payment was successful on mount (from URL params)
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const params = new URLSearchParams(window.location.search);
-      const paymentStatus = params.get('payment');
-      if (paymentStatus === 'success') {
-        setPaymentAuthorized(true);
-        setShowPaymentDialog(false);
-        toast.success('✅ Paiement de 10 000 CDF réussi ! Vous pouvez maintenant créer la carte.', { duration: 5000 });
-        window.history.replaceState({}, '', window.location.pathname);
-        setTimeout(() => openCreateModal(), 300);
-      } else if (paymentStatus === 'cancel') {
-        setShowPaymentDialog(false);
-        toast.error('Paiement annulé. Vous devez payer 10 000 CDF pour créer une carte.');
-        window.history.replaceState({}, '', window.location.pathname);
-      }
-    }
+    void fetch('/api/card-pricing').then(async (response) => response.ok ? response.json() : null).then((data) => {
+      if (Number.isFinite(data?.priceCdf)) setConfiguredCardPrice(data.priceCdf);
+    }).catch(() => undefined);
   }, []);
 
-  const handleInitiatePayment = async () => {
-    if (!/^\+243\d{9}$/.test(paymentPhone.replace(/\s/g, ''))) {
-      toast.error('Saisissez un numéro congolais valide au format +243XXXXXXXXX.');
-      return;
+  // A provider return URL is never proof that a payment was captured.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const paymentStatus = params.get('payment');
+    if (paymentStatus === 'verification-required' || paymentStatus === 'success') {
+      toast.info('Le paiement doit être confirmé par le service de paiement avant toute émission de carte.');
+      window.history.replaceState({}, '', window.location.pathname);
+    } else if (paymentStatus === 'cancel') {
+      toast.error('Paiement annulé. Aucune carte n’a été émise.');
+      window.history.replaceState({}, '', window.location.pathname);
     }
-    setPaymentLoading(true);
-    try {
-      const successUrl = `${window.location.origin}/api/payments/geniuspay/success?schoolId=${user?.schoolId}&action=generate-single&userId=new-card`;
-      const cancelUrl = `${window.location.origin}/api/payments/geniuspay/cancel`;
-
-      const res = await fetch('/api/payments/geniuspay', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          amount: 10000,
-          currency: 'CDF',
-          paymentMethod: 'mobile_money',
-          mobileMoneyOperator,
-          customer: {
-            name: user?.fullName || 'Administrateur GradeUp',
-            phone: paymentPhone.replace(/\s/g, ''),
-            country: 'CD',
-          },
-          description: 'GradeUp - Création de carte d\'identité scolaire',
-          successUrl,
-          cancelUrl,
-        }),
-      });
-
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error || 'Erreur paiement');
-      }
-
-      const data = await res.json();
-      
-      if (data.redirectUrl) {
-        window.location.href = data.redirectUrl;
-      } else {
-        throw new Error('URL de paiement manquante');
-      }
-    } catch (e: any) {
-      toast.error(e.message || 'Erreur lors de l\'initialisation du paiement');
-      setPaymentLoading(false);
-    }
-  };
+  }, []);
 
   const fetchUsersList = useCallback(async () => {
     if (!user?.schoolId) {
@@ -235,8 +184,9 @@ export default function AdminCards() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      toast.success(action === 'generate-single' ? 'Carte générée avec succès !' : `${data.generatedCount || 0} carte(s) générée(s) avec succès !`);
-      fetchUsersList();
+      toast.success(action === 'generate-single' ? 'Carte générée avec succès !' : `${data.generatedCount || 0} carte(s) générée(s) après vérification du paiement.`);
+      if (data.skippedUnpaid > 0) toast.info(`${data.skippedUnpaid} carte(s) en attente du paiement complet à la caisse.`);
+      await fetchUsersList();
     } catch (e: any) {
       toast.error(e.message || 'Erreur lors de la génération');
     } finally {
@@ -388,8 +338,6 @@ export default function AdminCards() {
           body: JSON.stringify({ 
             schoolId: user?.schoolId, 
             role: cardRole,
-            useFreeCard: !paymentAuthorized,
-            paymentAuthorized,
             ...formData 
           }),
         });
@@ -415,6 +363,10 @@ export default function AdminCards() {
   };
 
   const handlePrint = () => {
+    if (!printableStudents.length) {
+      toast.info('Aucune carte réglée et émise n’est prête à imprimer.');
+      return;
+    }
     window.print();
   };
 
@@ -442,6 +394,7 @@ export default function AdminCards() {
   const filteredStudents = cardRole === 'TEACHER' 
     ? usersList 
     : (activeTab === 'ALL' ? usersList : activeTab === 'UNASSIGNED' ? classesMap.get('UNASSIGNED')?.students || [] : classesMap.get(activeTab)?.students || []);
+  const printableStudents = filteredStudents.filter((student) => Boolean(student.cardId) && (cardRole === 'TEACHER' || student.cardPaymentConfirmed));
 
   const StudentCard = ({ student }: { student: StudentItem }) => {
     return (
@@ -511,6 +464,7 @@ export default function AdminCards() {
             background: white;
           }
           .no-print { display: none !important; }
+          .not-printable-card { display: none !important; }
           @page { 
             margin: 0.5cm;
             size: A4;
@@ -535,16 +489,13 @@ export default function AdminCards() {
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button onClick={() => setShowPaymentDialog(true)} className="bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white shadow-md">
-              <CreditCard className="w-4 h-4 mr-2" />
-              Nouvelle Carte — 10 000 CDF
-            </Button>
-            <Button variant="outline" onClick={() => generateCards('generate-all')} disabled={generating || usersList.length === 0}>
+            <div className="rounded-lg border bg-white/70 px-3 py-2 text-sm text-slate-700">Prix de la carte : <strong>{configuredCardPrice === null ? '…' : `${configuredCardPrice.toLocaleString('fr-FR')} CDF`}</strong> · configuré à la caisse</div>
+            <Button variant="outline" onClick={() => void generateCards(activeTab === 'ALL' ? 'generate-all' : 'generate-class', activeTab)} disabled={generating || cardRole !== 'STUDENT' || usersList.length === 0}>
               <RefreshCw className={`w-4 h-4 mr-2 ${generating ? 'animate-spin' : ''}`} />
-              Générer IDs
+              Émettre les cartes payées
             </Button>
-            <Button onClick={handlePrint} disabled={filteredStudents.length === 0} className="bg-blue-600 hover:bg-blue-700 text-white">
-              <Printer className="h-4 w-4 mr-2" /> Imprimer tout
+            <Button onClick={handlePrint} disabled={printableStudents.length === 0} className="bg-blue-600 hover:bg-blue-700 text-white">
+              <Printer className="h-4 w-4 mr-2" /> Imprimer ({printableStudents.length})
             </Button>
           </div>
         </div>
@@ -610,109 +561,12 @@ export default function AdminCards() {
       ) : (
         <div ref={printRef} id="print-section" className="grid grid-cols-1 lg:grid-cols-2 gap-6 content-start print:grid-cols-2 print:gap-4">
           {filteredStudents.map((student) => (
-            <StudentCard key={student.id} student={student} />
+            <div key={student.id} className={student.cardId && (cardRole === 'TEACHER' || student.cardPaymentConfirmed) ? '' : 'not-printable-card'}>
+              <StudentCard student={student} />
+            </div>
           ))}
         </div>
       )}
-
-      {/* Dialog de paiement */}
-      <Dialog open={showPaymentDialog} onOpenChange={(open) => {
-        setShowPaymentDialog(open);
-        if (open) setPaymentPhone(user?.phone || '');
-      }}>
-        <DialogContent className="sm:max-w-md max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-xl">
-              <div className="p-1.5 rounded-lg bg-emerald-50">
-                <CreditCard className="h-5 w-5 text-emerald-600" />
-              </div>
-              Paiement requis — 10 000 CDF
-            </DialogTitle>
-            <DialogDescription>
-              Un paiement de <strong>10 000 CDF</strong> est requis pour créer une nouvelle carte d'identité scolaire.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-6 py-4">
-            <div className="rounded-xl bg-gradient-to-r from-emerald-50 to-green-50 dark:from-emerald-950/30 dark:to-green-950/30 p-6 text-center border border-emerald-200">
-              <p className="text-sm text-muted-foreground mb-2">Montant à payer</p>
-              <p className="text-4xl font-bold text-emerald-600">10 000 CDF</p>
-              <p className="text-xs text-muted-foreground mt-2">Paiement annuel par élève</p>
-            </div>
-
-            <div className="space-y-2">
-              <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-950">
-                <p className="font-semibold">Paiement Mobile Money RDC</p>
-                <p className="mt-1 text-xs leading-relaxed text-blue-800 break-words">
-                  Vous payez 10 000 CDF avec Mobile Money.
-                </p>
-              </div>
-              <div className="space-y-2">
-                <Label>Mode de paiement</Label>
-                <Button type="button" variant="default" className="h-auto whitespace-normal py-2">Mobile Money RDC</Button>
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="mobile-money-operator">Opérateur Mobile Money *</Label>
-                <select id="mobile-money-operator" value={mobileMoneyOperator} onChange={(event) => setMobileMoneyOperator(event.target.value as typeof mobileMoneyOperator)} className="h-10 w-full rounded-md border bg-background px-3">
-                  <option value="orange">Orange Money</option>
-                  <option value="airtel">Airtel Money</option>
-                  <option value="mpesa">M-Pesa</option>
-                </select>
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="card-payment-phone">Numéro Mobile Money RDC *</Label>
-                <Input
-                  id="card-payment-phone"
-                  type="tel"
-                  inputMode="tel"
-                  placeholder="+243XXXXXXXXX"
-                  value={paymentPhone}
-                  onChange={(event) => setPaymentPhone(event.target.value)}
-                  disabled={paymentLoading}
-                />
-                <p className="text-xs text-muted-foreground">Format requis : +243 suivi de 9 chiffres.</p>
-              </div>
-              <div className="flex items-center gap-3 p-3 rounded-lg bg-muted/50">
-                <IdCard className="h-5 w-5 text-blue-500 shrink-0" />
-                <div>
-                  <p className="text-sm font-medium">Carte premium avec QR code</p>
-                  <p className="text-xs text-muted-foreground">Design moderne et sécurisé</p>
-                </div>
-              </div>
-              <div className="flex items-center gap-3 p-3 rounded-lg bg-muted/50">
-                <RefreshCw className="h-5 w-5 text-purple-500 shrink-0" />
-                <div>
-                  <p className="text-sm font-medium">Mise à jour en temps réel</p>
-                  <p className="text-xs text-muted-foreground">Notifications envoyées</p>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <DialogFooter className="gap-2">
-            <Button variant="outline" onClick={() => setShowPaymentDialog(false)} disabled={paymentLoading}>
-              Annuler
-            </Button>
-            <Button
-              onClick={handleInitiatePayment}
-              disabled={paymentLoading}
-              className="bg-gradient-to-r from-emerald-600 to-emerald-500"
-            >
-              {paymentLoading ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Redirection...
-                </>
-              ) : (
-                <>
-                  <CreditCard className="h-4 w-4 mr-2" />
-                  Payer 10 000 CDF avec GeniusPay
-                </>
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       {/* Dialog d'édition/création */}
       <Dialog open={!!editingStudent || isCreating} onOpenChange={(o) => { if (!o) { setEditingStudent(null); setIsCreating(false); } }}>

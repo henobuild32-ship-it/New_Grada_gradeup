@@ -6,10 +6,12 @@ import { auditFromRequest } from '@/lib/api/audit';
 import { parseOrThrow, paymentSchema } from '@/lib/validation/entities';
 import { assignReceiptNumber } from '@/lib/business/rules';
 
+const STUDENT_CARD_PAYMENT_LABEL = 'Carte scolaire';
+
 export async function GET(request: NextRequest) {
   try {
     const auth = await authenticateRequestActive(request);
-    if (!['ADMIN', 'CAISSIER', 'STUDENT', 'PARENT'].includes(auth.role)) {
+    if (!['CAISSIER', 'LECTEUR'].includes(auth.role)) {
       return NextResponse.json({ error: 'Accès non autorisé' }, { status: 403 });
     }
     const { searchParams } = new URL(request.url);
@@ -21,7 +23,7 @@ export async function GET(request: NextRequest) {
     const classId = searchParams.get('classId');
 
     const querySchoolId = searchParams.get('schoolId');
-    if (querySchoolId && querySchoolId !== auth.schoolId && auth.role !== 'ADMIN') {
+    if (querySchoolId && querySchoolId !== auth.schoolId) {
       return NextResponse.json({ error: 'schoolId invalide' }, { status: 400 });
     }
 
@@ -33,22 +35,7 @@ export async function GET(request: NextRequest) {
     }
 
     if (studentId) {
-      if (auth.role === 'PARENT') {
-        const student = await db.user.findUnique({
-          where: { id: studentId },
-          select: { parentId: true, schoolId: true, role: true, deletedAt: true },
-        });
-        if (!student || student.deletedAt || student.role !== 'STUDENT' || student.parentId !== auth.userId || student.schoolId !== schoolId) {
-          return NextResponse.json({ error: 'Vous ne pouvez consulter que les paiements de vos enfants' }, { status: 403 });
-        }
-      } else if (auth.role === 'STUDENT' && studentId !== auth.userId) {
-        return NextResponse.json({ error: 'Accès non autorisé' }, { status: 403 });
-      }
       where.studentId = studentId;
-    } else if (auth.role === 'STUDENT') {
-      where.studentId = auth.userId;
-    } else if (auth.role === 'PARENT') {
-      where.student = { is: { parentId: auth.userId, schoolId, role: 'STUDENT', deletedAt: null } };
     }
     if (status === 'late' || status === 'overdue') {
       where.OR = [
@@ -62,7 +49,7 @@ export async function GET(request: NextRequest) {
       where.status = status;
     }
     if (month) where.month = month;
-    if (classId && auth.role === 'ADMIN') {
+    if (classId) {
       // Filtrer aux paiements des élèves inscrits dans cette classe
       where.student = { classEnrollments: { some: { classId } } };
     }
@@ -103,9 +90,8 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const auth = await authenticateRequestActive(request);
-    // Caisse : enregistrement réservé à l'administration de l'établissement.
-    if (auth.role !== 'ADMIN' && auth.role !== 'CAISSIER') {
-      return NextResponse.json({ error: 'Réservé à l’administration.', code: 'ROLE_FORBIDDEN' }, { status: 403 });
+    if (auth.role !== 'CAISSIER') {
+      return NextResponse.json({ error: 'Action réservée au caissier ou à la caissière.', code: 'ROLE_FORBIDDEN' }, { status: 403 });
     }
 
     const body = await request.json();
@@ -115,13 +101,13 @@ export async function POST(request: NextRequest) {
     // Vérifier que l'élève appartient à l'école.
     const student = await db.user.findUnique({
       where: { id: parsed.studentId },
-      select: { id: true, schoolId: true, parentId: true, fullName: true, deletedAt: true },
+      select: { id: true, schoolId: true, parentId: true, fullName: true, role: true, active: true, deletedAt: true },
     });
-    if (!student || student.deletedAt || student.schoolId !== schoolId) {
+    if (!student || student.role !== 'STUDENT' || !student.active || student.deletedAt || student.schoolId !== schoolId) {
       throw new ApiError('Élève introuvable dans votre établissement.', 404, 'STUDENT_NOT_FOUND');
     }
 
-    const school = await db.school.findUnique({ where: { id: schoolId }, select: { currency: true } });
+    const school = await db.school.findUnique({ where: { id: schoolId }, select: { currency: true, studentCardPriceCdf: true } });
     const installment = parsed.installmentId
       ? await db.installment.findFirst({
           where: { id: parsed.installmentId, schoolId, studentId: parsed.studentId, deletedAt: null },
@@ -141,6 +127,17 @@ export async function POST(request: NextRequest) {
     }
 
     const currency = parsed.currency || installment?.currency || school?.currency || 'USD';
+    if (parsed.month === STUDENT_CARD_PAYMENT_LABEL) {
+      if (student.role !== 'STUDENT') throw new ApiError('Le paiement de carte concerne uniquement un élève.', 400, 'CARD_PAYMENT_STUDENT_REQUIRED');
+      if (!school || school.studentCardPriceCdf <= 0 || parsed.status !== 'paid' || currency !== 'CDF' || parsed.amount !== school.studentCardPriceCdf) {
+        throw new ApiError('Le paiement de la carte doit correspondre exactement au prix configuré en CDF et être confirmé.', 400, 'CARD_PAYMENT_AMOUNT_MISMATCH');
+      }
+      const existingCardPayment = await db.payment.findFirst({
+        where: { schoolId, studentId: parsed.studentId, month: STUDENT_CARD_PAYMENT_LABEL, status: 'paid', amount: school.studentCardPriceCdf, currency: 'CDF', deletedAt: null },
+        select: { id: true },
+      });
+      if (existingCardPayment) throw new ApiError('Le paiement de la carte est déjà enregistré pour cet élève.', 409, 'CARD_PAYMENT_ALREADY_RECORDED');
+    }
     // Le contrôle de tranche et l'attribution du reçu sont protégés contre les
     // doubles clics/requêtes concurrentes; l'unicité du reçu est également
     // garantie par l'index unique en base.

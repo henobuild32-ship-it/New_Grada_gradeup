@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { authenticateRequest, authenticateRequestActive, AuthError } from '@/lib/auth/authenticate';
+import { notifyUser } from '@/services/notifications/notificationEngine';
+import { auditFromRequest } from '@/lib/api/audit';
 
 export async function GET(request: NextRequest) {
   try {
@@ -16,7 +18,7 @@ export async function GET(request: NextRequest) {
 
     const where: Record<string, unknown> = { schoolId, deletedAt: null };
 
-    if (auth.role === 'ADMIN') {
+    if (auth.role === 'ADMIN' || auth.role === 'LECTEUR') {
       if (teacherId) where.teacherId = teacherId;
       if (classId) where.classId = classId;
     } else if (auth.role === 'TEACHER') {
@@ -104,6 +106,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Accès non autorisé. Action réservée aux administrateurs.' }, { status: 403 });
     }
 
+    const [schoolClass, teacher] = await Promise.all([
+      db.schoolClass.findFirst({ where: { id: classId, schoolId, deletedAt: null }, select: { id: true, name: true } }),
+      db.user.findFirst({ where: { id: teacherId, schoolId, role: 'TEACHER', active: true, deletedAt: null }, select: { id: true } }),
+    ]);
+    if (!schoolClass) return NextResponse.json({ error: 'Classe introuvable dans votre école.' }, { status: 404 });
+    if (!teacher) return NextResponse.json({ error: 'Le professeur doit être actif dans votre école.' }, { status: 400 });
+
     const course = await db.course.create({
       data: {
         schoolId,
@@ -129,6 +138,23 @@ export async function POST(request: NextRequest) {
         },
       },
     });
+    await auditFromRequest(request, {
+      schoolId: auth.schoolId, userId: auth.userId, action: 'COURSE_ASSIGNED', entity: 'Course', entityId: course.id,
+      after: { id: course.id, name: course.name, classId: course.classId, teacherId: course.teacherId },
+    }).catch((error) => console.error('[Courses] Audit write failed:', error));
+
+    const assignedAt = new Date().toLocaleString('fr-FR');
+    await notifyUser({
+      schoolId: auth.schoolId,
+      senderId: auth.userId,
+      userId: teacher.id,
+      targetRole: 'TEACHER',
+      title: 'Nouveau cours attribué',
+      message: `${auth.name} vous a attribué le cours « ${course.name} » en classe de ${schoolClass.name}, le ${assignedAt}.`,
+      type: 'LESSON',
+      priority: 'NORMAL',
+      metadata: { courseId: course.id, classId: schoolClass.id, teacherId: teacher.id, changedAt: new Date().toISOString() },
+    }).catch((error) => console.error('[Courses] Assignment notification failed:', error));
 
     return NextResponse.json({ course }, { status: 201 });
   } catch (error: unknown) {
@@ -154,9 +180,20 @@ export async function PUT(request: NextRequest) {
     if (auth.role !== 'ADMIN') {
       return NextResponse.json({ error: 'Accès non autorisé. Action réservée aux administrateurs.' }, { status: 403 });
     }
-    const existing = await db.course.findUnique({ where: { id }, select: { schoolId: true } });
+    const existing = await db.course.findUnique({
+      where: { id },
+      include: { teacher: { select: { id: true, fullName: true } }, class: { select: { id: true, name: true } } },
+    });
     if (!existing || existing.schoolId !== auth.schoolId) {
       return NextResponse.json({ error: 'Cours introuvable dans votre établissement.' }, { status: 403 });
+    }
+    if (classId !== undefined) {
+      const schoolClass = await db.schoolClass.findFirst({ where: { id: classId, schoolId: auth.schoolId, deletedAt: null }, select: { id: true } });
+      if (!schoolClass) return NextResponse.json({ error: 'Classe introuvable dans votre école.' }, { status: 404 });
+    }
+    if (teacherId !== undefined) {
+      const teacher = await db.user.findFirst({ where: { id: teacherId, schoolId: auth.schoolId, role: 'TEACHER', active: true, deletedAt: null }, select: { id: true } });
+      if (!teacher) return NextResponse.json({ error: 'Le professeur doit être actif dans votre école.' }, { status: 400 });
     }
 
     const course = await db.course.update({
@@ -185,6 +222,44 @@ export async function PUT(request: NextRequest) {
         },
       },
     });
+    await auditFromRequest(request, {
+      schoolId: auth.schoolId, userId: auth.userId, action: 'COURSE_UPDATED', entity: 'Course', entityId: course.id,
+      before: { name: existing.name, classId: existing.classId, teacherId: existing.teacherId },
+      after: { name: course.name, classId: course.classId, teacherId: course.teacherId },
+    }).catch((error) => console.error('[Courses] Audit write failed:', error));
+
+    if (existing.teacherId !== course.teacherId || existing.classId !== course.classId) {
+      const changedAt = new Date();
+      const when = changedAt.toLocaleString('fr-FR');
+      const previousAssignment = `« ${existing.name} » en classe de ${existing.class.name}`;
+      const nextAssignment = `« ${course.name} » en classe de ${course.class.name}`;
+      if (existing.teacherId === course.teacherId) {
+        await notifyUser({
+          schoolId: auth.schoolId, senderId: auth.userId, userId: course.teacherId, targetRole: 'TEACHER',
+          title: 'Attribution de cours modifiée',
+          message: `${auth.name} a déplacé ${nextAssignment} depuis ${previousAssignment}, le ${when}.`,
+          type: 'LESSON', priority: 'NORMAL',
+          metadata: { courseId: course.id, oldClassId: existing.classId, classId: course.classId, changedAt: changedAt.toISOString() },
+        }).catch((error) => console.error('[Courses] Assignment notification failed:', error));
+      } else {
+        await Promise.allSettled([
+          notifyUser({
+            schoolId: auth.schoolId, senderId: auth.userId, userId: existing.teacherId, targetRole: 'TEACHER',
+            title: 'Cours retiré de votre attribution',
+            message: `${auth.name} vous a retiré ${previousAssignment}, le ${when}.`,
+            type: 'LESSON', priority: 'NORMAL',
+            metadata: { courseId: course.id, classId: existing.classId, changedAt: changedAt.toISOString() },
+          }),
+          notifyUser({
+            schoolId: auth.schoolId, senderId: auth.userId, userId: course.teacherId, targetRole: 'TEACHER',
+            title: 'Nouveau cours attribué',
+            message: `${auth.name} vous a attribué ${nextAssignment}, le ${when}.`,
+            type: 'LESSON', priority: 'NORMAL',
+            metadata: { courseId: course.id, classId: course.classId, teacherId: course.teacherId, changedAt: changedAt.toISOString() },
+          }),
+        ]).then((results) => results.filter((result) => result.status === 'rejected').forEach((result) => console.error('[Courses] Assignment notification failed:', result.reason)));
+      }
+    }
 
     return NextResponse.json({ course });
   } catch (error: unknown) {

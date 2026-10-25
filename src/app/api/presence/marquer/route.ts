@@ -25,7 +25,7 @@ function isLate(now: Date, cutoff: string): boolean {
 
 export async function POST(request: NextRequest) {
   try {
-    const auth = authenticateRequest(request);
+    const auth = await authenticateRequest(request);
 
     const body = await request.json();
     const { userId, schoolId, latitude, longitude, justification } = body;

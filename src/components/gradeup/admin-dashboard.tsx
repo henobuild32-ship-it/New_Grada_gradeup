@@ -36,10 +36,11 @@ import {
 import WelcomeBanner from './welcome-banner';
 import ActivityFeed from './activity-feed';
 import { ErrorBanner } from './ui-states';
-import { MonthlyRevenueChart, GradeDistributionChart } from './charts-widget';
+import { GradeDistributionChart } from './charts-widget';
 import { toast } from 'sonner';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import ConfidentialCodesCard from './confidential-codes-card';
 
 interface Stats {
   totalStudents: number;
@@ -272,20 +273,8 @@ export default function AdminDashboard() {
   };
 
   const fetchAlerts = async () => {
-    try {
-      const [pendingRes, overdueRes] = await Promise.all([
-        fetch(`/api/payments?schoolId=${user?.schoolId}&status=pending`),
-        fetch(`/api/payments?schoolId=${user?.schoolId}&status=overdue`),
-      ]);
-      const pendingData = await pendingRes.json();
-      const overdueData = await overdueRes.json();
-      const p = pendingData.payments?.slice(0, 5) || [];
-      const o = overdueData.payments?.slice(0, 5) || [];
-      setPendingPayments(p);
-      setOverduePayments(o);
-    } catch {
-      // alertes non bloquantes hors ligne
-    }
+    setPendingPayments([]);
+    setOverduePayments([]);
   };
 
   // Launch annual transition (N+1)
@@ -399,14 +388,6 @@ export default function AdminDashboard() {
       border: 'border-green-200',
     },
     {
-      title: 'Revenus',
-      value: `${(stats?.totalRevenue ?? 0).toLocaleString()} ${stats?.currency || user?.school?.currency || 'USD'}`,
-      icon: DollarSign,
-      color: 'text-emerald-600',
-      bg: 'bg-emerald-50',
-      border: 'border-emerald-200',
-    },
-    {
       title: 'Total Parents',
       value: stats?.totalParents ?? 0,
       icon: UsersRound,
@@ -436,6 +417,8 @@ export default function AdminDashboard() {
           <GraduationCap className="h-24 w-24 text-white/10" />
         </div>
       </div>
+
+      <ConfidentialCodesCard />
 
       {/* Snapshot / Offline Indicator */}
       {lastSnapshotTime && (
@@ -543,16 +526,6 @@ export default function AdminDashboard() {
         </CardContent>
       </Card>
 
-      {/* Recettes par devise — montants réels, sans additionner des devises différentes. */}
-      {!loading && stats && <Card className="rounded-2xl">
-        <CardHeader className="pb-3"><CardTitle className="text-base">Paiements enregistrés par devise</CardTitle><CardDescription>Les montants restent séparés selon la devise du reçu.</CardDescription></CardHeader>
-        <CardContent className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          {Object.entries(stats.revenueByCurrency ?? { [stats.currency || user?.school?.currency || 'USD']: stats.totalRevenue }).length === 0
-            ? <p className="text-sm text-muted-foreground">Aucun paiement confirmé.</p>
-            : Object.entries(stats.revenueByCurrency ?? { [stats.currency || user?.school?.currency || 'USD']: stats.totalRevenue }).map(([currency, amount]) => <div key={currency} className="rounded-lg border p-3"><p className="text-xs text-muted-foreground">Encaissé · {currency}</p><p className="text-xl font-bold">{Number(amount).toLocaleString('fr-FR')} {currency}</p></div>)}
-        </CardContent>
-      </Card>}
-
       {/* Priority actions & transition button */}
       <Card className="overflow-hidden shadow-md border rounded-2xl relative">
         <div className="absolute top-0 right-0 w-32 h-32 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGNpcmNsZSBjeD0iMiIgY3k9IjIiIHI9IjEiIGZpbGw9InJnYmEoNTksMTMwLDI0NiwwLjA4KSIvPjwvc3ZnPg==')] opacity-40 pointer-events-none" />
@@ -570,20 +543,6 @@ export default function AdminDashboard() {
             Lancer la transition d'année (N+1)
           </Button>
 
-          {/* Export Financial reports */}
-          <Button
-            variant="outline"
-            onClick={handleExportFinances}
-            disabled={exportingReport}
-            className="border-emerald-300 text-emerald-700 hover:bg-emerald-50 hover:border-emerald-400 font-bold rounded-xl hover:scale-[1.02] active:scale-[0.97] transition-all duration-200"
-          >
-            {exportingReport ? (
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-            ) : (
-              <Download className="h-4 w-4 mr-2" />
-            )}
-            Exporter rapports financiers
-          </Button>
         </CardContent>
       </Card>
 
@@ -665,7 +624,7 @@ export default function AdminDashboard() {
       </div>
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         {loading
           ? Array.from({ length: 4 }).map((_, i) => (
               <Skeleton key={i} className="h-36 rounded-xl" />
@@ -693,7 +652,7 @@ export default function AdminDashboard() {
 
       {/* Secondary Stats */}
       {!loading && stats && (
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <Card className="transition-all duration-300 hover:shadow-lg rounded-2xl">
             <CardContent className="p-5 flex items-center gap-4">
               <div className="p-3 rounded-xl bg-orange-50">
@@ -702,17 +661,6 @@ export default function AdminDashboard() {
               <div className="flex-1">
                 <p className="text-sm text-muted-foreground">Total Classes</p>
                 <p className="text-xl font-bold">{stats.totalClasses}</p>
-              </div>
-            </CardContent>
-          </Card>
-          <Card className="transition-all duration-300 hover:shadow-lg rounded-2xl">
-            <CardContent className="p-5 flex items-center gap-4">
-              <div className="p-3 rounded-xl bg-cyan-50">
-                <TrendingUp className="h-5 w-5 text-cyan-600" />
-              </div>
-              <div className="flex-1">
-                <p className="text-sm text-muted-foreground">Revenus en attente</p>
-                <p className="text-xl font-bold">{stats.pendingRevenue.toLocaleString()} {stats.currency || user?.school?.currency || 'USD'}</p>
               </div>
             </CardContent>
           </Card>
@@ -755,75 +703,15 @@ export default function AdminDashboard() {
         </CardContent>
       </Card>
 
-      {/* Charts Section */}
+      {/* Analyse pédagogique */}
       {user?.schoolId && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <MonthlyRevenueChart schoolId={user.schoolId} currency={stats?.currency || user?.school?.currency || 'USD'} />
+        <div className="grid grid-cols-1 gap-4">
           <GradeDistributionChart schoolId={user.schoolId} />
         </div>
       )}
 
       {/* Activity Feed */}
       {user?.schoolId && <ActivityFeed schoolId={user.schoolId} />}
-
-      {/* Alerts Section */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {/* Pending Payments */}
-        <Card className="rounded-2xl">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base font-bold flex items-center gap-2">
-              <Clock className="h-4 w-4 text-yellow-500" />
-              Paiements en attente
-              {pendingPayments.length > 0 && <Badge className="bg-yellow-100 text-yellow-700 font-semibold ml-2">{pendingPayments.length}</Badge>}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {pendingPayments.length === 0 ? (
-              <p className="text-xs text-muted-foreground text-center py-6">Aucun paiement en attente</p>
-            ) : (
-              <div className="space-y-2">
-                {pendingPayments.map((p: any) => (
-                  <div key={p.id} className="flex justify-between items-center p-3 bg-yellow-50/50 border border-yellow-100 rounded-xl text-xs">
-                    <div>
-                      <p className="font-semibold">{p.student?.fullName}</p>
-                      <p className="text-muted-foreground mt-0.5">{p.month} · {parseFloat(p.amount).toLocaleString()} {p.currency || stats?.currency || 'USD'}</p>
-                    </div>
-                    <Badge variant="outline" className="bg-yellow-100 text-yellow-700 border-yellow-200">En attente</Badge>
-                  </div>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Overdue Payments */}
-        <Card className="rounded-2xl">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base font-bold flex items-center gap-2">
-              <AlertTriangle className="h-4 w-4 text-red-500" />
-              Paiements en retard
-              {overduePayments.length > 0 && <Badge className="bg-red-100 text-red-700 font-semibold ml-2">{overduePayments.length}</Badge>}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {overduePayments.length === 0 ? (
-              <p className="text-xs text-muted-foreground text-center py-6">Aucun paiement en retard</p>
-            ) : (
-              <div className="space-y-2">
-                {overduePayments.map((p: any) => (
-                  <div key={p.id} className="flex justify-between items-center p-3 bg-red-50/50 border border-red-100 rounded-xl text-xs">
-                    <div>
-                      <p className="font-semibold">{p.student?.fullName}</p>
-                      <p className="text-muted-foreground mt-0.5">{p.month} · {parseFloat(p.amount).toLocaleString()} {p.currency || stats?.currency || 'USD'}</p>
-                    </div>
-                    <Badge variant="outline" className="bg-red-100 text-red-700 border-red-200">En retard</Badge>
-                  </div>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
 
       {/* N+1 Transition Wizard Dialog */}
       <Dialog open={transitionOpen} onOpenChange={setTransitionOpen}>

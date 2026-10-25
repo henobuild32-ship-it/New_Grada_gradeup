@@ -9,6 +9,7 @@ import Image from 'next/image';
 import AuthPage from '@/components/gradeup/auth-page';
 import AppLayout from '@/components/gradeup/app-layout';
 import { installAuthenticatedFetchRecovery } from '@/lib/auth/authenticated-fetch';
+import { NAV_ITEMS_BY_ROLE } from '@/lib/navigation.config';
 
 // Squelette affiché pendant le chargement différé (code-splitting) d'une page.
 function PageSkeleton() {
@@ -44,6 +45,8 @@ const AdminAi = dynamic(() => import('@/components/gradeup/admin-ai'), { ssr: fa
 const TuitionTracking = dynamic(() => import('@/components/gradeup/tuition-tracking'), { ssr: false, loading: () => <PageSkeleton /> });
 const CashierCaisse = dynamic(() => import('@/components/gradeup/cashier-caisse'), { ssr: false, loading: () => <PageSkeleton /> });
 const CashierNotifications = dynamic(() => import('@/components/gradeup/cashier-notifications'), { ssr: false, loading: () => <PageSkeleton /> });
+const ReaderDashboard = dynamic(() => import('@/components/gradeup/reader-dashboard'), { ssr: false, loading: () => <PageSkeleton /> });
+const ReaderAudit = dynamic(() => import('@/components/gradeup/reader-audit'), { ssr: false, loading: () => <PageSkeleton /> });
 const EndOfYear = dynamic(() => import('@/components/gradeup/end-of-year'), { ssr: false, loading: () => <PageSkeleton /> });
 const TeacherCanonicalBulletins = dynamic(() => import('@/components/gradeup/teacher-canonical-bulletins'), { ssr: false, loading: () => <PageSkeleton /> });
 const AdminCourses = dynamic(() => import('@/components/gradeup/admin-courses'), { ssr: false, loading: () => <PageSkeleton /> });
@@ -91,6 +94,8 @@ const ChatPage = dynamic(() => import('@/components/gradeup/chat-page'), { ssr: 
 const SchoolCalendar = dynamic(() => import('@/components/gradeup/school-calendar'), { ssr: false, loading: () => <PageSkeleton /> });
 const HelpPage = dynamic(() => import('@/components/gradeup/help-page'), { ssr: false, loading: () => <PageSkeleton /> });
 const SyncCenter = dynamic(() => import('@/components/gradeup/sync-center'), { ssr: false, loading: () => <PageSkeleton /> });
+const ReaderMessages = dynamic(() => import('@/components/gradeup/reader-messages'), { ssr: false, loading: () => <PageSkeleton /> });
+const ReaderModuleView = dynamic(() => import('@/components/gradeup/reader-module-view'), { ssr: false, loading: () => <PageSkeleton /> });
 
 function PageRouter({ page }: { page: PageView }) {
   const { user } = useAppStore();
@@ -98,48 +103,60 @@ function PageRouter({ page }: { page: PageView }) {
   // Navigation is not an authorization boundary, but never render a role-specific
   // screen when a stale client state points at another user's module.
   if (user) {
-    const prefix = user.role === 'ADMIN' ? 'admin-' : user.role === 'TEACHER' ? 'teacher-' : user.role === 'STUDENT' ? 'student-' : user.role === 'CAISSIER' ? 'caisse' : 'parent-';
-    const shared = new Set<PageView>(['meetings', 'meeting-room', 'library', 'messages', 'calendar', 'profile', 'help', 'sync-center']);
+    const shared = new Set<PageView>(['meetings', 'meeting-room', 'library', 'calendar', 'profile', 'help', 'sync-center']);
+    if (user.role === 'ADMIN') shared.add('messages');
     if (user.role === 'STUDENT') {
       shared.delete('meetings');
       shared.delete('meeting-room');
       shared.delete('messages');
     }
+    if (user.role === 'LECTEUR') shared.clear();
     const roleShared = (user.role === 'ADMIN' || user.role === 'TEACHER') && new Set<PageView>(['cahier-cotation', 'auto-report-sync', 'admin-note-modifications']).has(page);
     if (user.role === 'ADMIN' && page === 'admin-grade-validation') return <AdminGradeValidation />;
-    const allowed = page === 'auth' || page === 'register' || shared.has(page) || roleShared || (user.role === 'ADMIN' && page === 'admin-grade-validation') || page === `${prefix}dashboard` || page.startsWith(prefix);
-    if (!allowed) return <AuthPage />;
+    const rolePages = new Set(NAV_ITEMS_BY_ROLE[user.role].map((item) => item.page));
+    const allowed = page === 'auth' || page === 'register' || shared.has(page) || roleShared || (user.role === 'ADMIN' && page === 'admin-grade-validation') || rolePages.has(page);
+    if (!allowed) {
+      if (user.role === 'ADMIN') return <AdminDashboard />;
+      if (user.role === 'TEACHER') return <TeacherDashboard />;
+      if (user.role === 'STUDENT') return <StudentDashboard />;
+      if (user.role === 'PARENT') return <ParentDashboard />;
+      if (user.role === 'CAISSIER') return <CashierCaisse />;
+      return <ReaderDashboard />;
+    }
   }
 
   if (page === 'auth' || page === 'register') return <AuthPage />;
-  if (page === 'admin-dashboard') return <AdminDashboard />;
-  if (page === 'admin-users') return <AdminUsers />;
-  if (page === 'admin-classes') return <AdminClasses />;
-  if (page === 'admin-payments') return <AdminPayments />;
-  if (page === 'admin-bulletins') return <AdminBulletins />;
+  if (page === 'admin-dashboard') return user?.role === 'LECTEUR' ? <ReaderDashboard /> : <AdminDashboard />;
+  if (page === 'admin-users') return user?.role === 'LECTEUR' ? <ReaderModuleView mode="users" /> : <AdminUsers />;
+  if (page === 'admin-classes') return user?.role === 'LECTEUR' ? <ReaderModuleView mode="classes" /> : <AdminClasses />;
+  if (page === 'admin-payments') return user?.role === 'LECTEUR' ? <ReaderModuleView mode="payments" /> : <AdminPayments />;
+  if (page === 'admin-bulletins') return user?.role === 'LECTEUR' ? <ReaderModuleView mode="bulletins" /> : <AdminBulletins />;
   if (page === 'admin-config') return <AdminConfig />;
-  if (page === 'admin-reports') return <AdminReports />;
-  if (page === 'admin-notifications') return <AdminNotifications />;
-  if (page === 'admin-conferences') return <AdminConferences />;
+  if (page === 'admin-reports') return user?.role === 'LECTEUR' ? <ReaderModuleView mode="overview" /> : <AdminReports />;
+  if (page === 'admin-notifications') return user?.role === 'LECTEUR' ? <ReaderModuleView mode="announcements" /> : <AdminNotifications />;
+  if (page === 'admin-conferences') return user?.role === 'LECTEUR' ? <ReaderModuleView mode="conferences" /> : <AdminConferences />;
   if (page === 'meetings') return <MeetingsHub />;
   if (page === 'meeting-room') return <MeetingRoom />;
   if (page === 'library') return <LibraryHub />;
-  if (page === 'admin-cards') return <AdminCards />;
-  if (page === 'admin-courses') return <AdminCourses />;
-  if (page === 'admin-presence') return <AdminPresence />;
-  if (page === 'admin-schedules') return <AdminSchedules />;
-  if (page === 'admin-school-calendar') return <AdminSchoolCalendar />;
-  if (page === 'admin-coefficients') return <AdminCoefficients />;
-  if (page === 'admin-passages') return <AdminPassages />;
-  if (page === 'admin-note-modifications') return <AdminNoteModifications />;
-  if (page === 'admin-grade-validation') return <AdminGradeValidation />;
+  if (page === 'admin-cards') return user?.role === 'LECTEUR' ? <ReaderModuleView mode="cards" /> : <AdminCards />;
+  if (page === 'admin-courses') return user?.role === 'LECTEUR' ? <ReaderModuleView mode="courses" /> : <AdminCourses />;
+  if (page === 'admin-presence') return user?.role === 'LECTEUR' ? <ReaderModuleView mode="attendance" /> : <AdminPresence />;
+  if (page === 'admin-schedules') return user?.role === 'LECTEUR' ? <ReaderModuleView mode="schedules" /> : <AdminSchedules />;
+  if (page === 'admin-school-calendar') return user?.role === 'LECTEUR' ? <ReaderModuleView mode="calendar" /> : <AdminSchoolCalendar />;
+  if (page === 'admin-coefficients') return user?.role === 'LECTEUR' ? <ReaderModuleView mode="coefficients" /> : <AdminCoefficients />;
+  if (page === 'admin-passages') return user?.role === 'LECTEUR' ? <ReaderModuleView mode="passages" /> : <AdminPassages />;
+  if (page === 'admin-note-modifications') return user?.role === 'LECTEUR' ? <ReaderModuleView mode="note-modifications" /> : <AdminNoteModifications />;
+  if (page === 'admin-grade-validation') return user?.role === 'LECTEUR' ? <ReaderModuleView mode="bulletins" /> : <AdminGradeValidation />;
   if (page === 'auto-report-sync') return <AutoReportSyncPanel />;
   if (page === 'cahier-cotation') return <CahierCotation />;
-  if (page === 'admin-cotation-rules') return <AdminCotationRules />;
-  if (page === 'admin-tuition') return <TuitionTracking />;
+  if (page === 'admin-cotation-rules') return user?.role === 'LECTEUR' ? <ReaderModuleView mode="cotation" /> : <AdminCotationRules />;
+  if (page === 'admin-tuition') return user?.role === 'LECTEUR' ? <ReaderModuleView mode="tuition" /> : <TuitionTracking />;
   if (page === 'caisse') return <CashierCaisse />;
   if (page === 'caisse-notifications') return <CashierNotifications />;
-  if (page === 'admin-end-of-year') return <EndOfYear />;
+  if (page === 'reader-dashboard') return <ReaderDashboard />;
+  if (page === 'reader-audit') return <ReaderAudit />;
+  if (page === 'reader-messages') return <ReaderMessages />;
+  if (page === 'admin-end-of-year') return user?.role === 'LECTEUR' ? <ReaderModuleView mode="end-of-year" /> : <EndOfYear />;
   if (page === 'admin-ai') return <AdminAi />;
   if (page === 'teacher-dashboard') return <TeacherDashboard />;
   if (page === 'teacher-reports') return <TeacherCanonicalBulletins />;
@@ -168,12 +185,12 @@ function PageRouter({ page }: { page: PageView }) {
   if (page === 'parent-dashboard') return <ParentDashboard />;
   if (page === 'parent-grades') return <ParentGrades />;
   if (page === 'parent-bulletins') return <ParentBulletins />;
-  if (page === 'parent-payments') return <ParentPayments />;
+  if (page === 'parent-payments' || page === 'parent-balance') return <ParentPayments />;
   if (page === 'parent-notifications') return <ParentNotifications />;
   if (page === 'parent-ai') return <ParentAI />;
   if (page === 'profile') return <ProfilePage />;
   if (page === 'messages') return <ChatPage />;
-  if (page === 'calendar') return <SchoolCalendar />;
+  if (page === 'calendar') return user?.role === 'LECTEUR' ? <ReaderModuleView mode="calendar" /> : <SchoolCalendar />;
   if (page === 'help') return <HelpPage />;
   if (page === 'sync-center') return <SyncCenter />;
   return <AuthPage />;
@@ -215,10 +232,13 @@ export default function HomePage() {
       setUser(null);
       setCurrentPage('auth');
     };
+    const handleBackOnline = () => { void hydrateSession(); };
     window.addEventListener('gradeup-session-expired', handleExpiredSession);
+    window.addEventListener('online', handleBackOnline);
     hydrateSession().finally(() => setHydrating(false));
     return () => {
       window.removeEventListener('gradeup-session-expired', handleExpiredSession);
+      window.removeEventListener('online', handleBackOnline);
       uninstallFetchRecovery();
     };
   }, [hydrateSession, setCurrentPage, setUser]);

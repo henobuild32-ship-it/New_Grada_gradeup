@@ -34,6 +34,7 @@ const roleLabels: Record<UserRole, string> = {
   STUDENT: 'Élève',
   PARENT: 'Parent',
   CAISSIER: 'Caissier',
+  LECTEUR: 'Lecteur',
 };
 
 const roleColors: Record<UserRole, string> = {
@@ -42,6 +43,7 @@ const roleColors: Record<UserRole, string> = {
   STUDENT: 'from-violet-600 to-violet-500',
   PARENT: 'from-amber-600 to-amber-500',
   CAISSIER: 'from-emerald-600 to-emerald-500',
+  LECTEUR: 'from-sky-600 to-cyan-500',
 };
 
 const shortcuts = [

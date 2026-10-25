@@ -39,6 +39,7 @@ interface StudentTuition {
   classId: string | null;
   className: string;
   paymentStatus: 'paid' | 'partial' | 'unpaid' | 'overdue' | 'no-fee';
+  cardPaid: boolean;
   balances: Balance[];
   fees: Array<{ feeId: string | null; name: string; amount: number; currency: string; dueDate: string }>;
   installments: InstallmentItem[];
@@ -100,6 +101,42 @@ export default function TuitionTracking() {
   const [planLabel, setPlanLabel] = useState('');
   const [planAmount, setPlanAmount] = useState('');
   const [planDueDate, setPlanDueDate] = useState('');
+  const [cardPriceCdf, setCardPriceCdf] = useState('');
+  const [cardPriceSaving, setCardPriceSaving] = useState(false);
+
+  useEffect(() => {
+    if (!schoolId) return;
+    void fetch('/api/card-pricing', { cache: 'no-store' })
+      .then(async (response) => {
+        const data = await response.json();
+        if (response.ok && Number.isFinite(data.priceCdf)) setCardPriceCdf(String(data.priceCdf));
+      })
+      .catch(() => undefined);
+  }, [schoolId]);
+
+  const saveCardPrice = async () => {
+    const amount = Number(cardPriceCdf);
+    if (!Number.isInteger(amount) || amount < 0 || amount > 10_000_000) {
+      toast({ title: 'Prix invalide', description: 'Entrez un montant entier en CDF, de 0 à 10 000 000.', variant: 'destructive' });
+      return;
+    }
+    setCardPriceSaving(true);
+    try {
+      const response = await fetch('/api/card-pricing', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ priceCdf: amount }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Impossible d’enregistrer le prix.');
+      setCardPriceCdf(String(data.priceCdf));
+      toast({ title: 'Prix enregistré', description: `${Number(data.priceCdf).toLocaleString('fr-FR')} CDF par carte.` });
+    } catch (error) {
+      toast({ title: 'Erreur', description: error instanceof Error ? error.message : 'Impossible d’enregistrer le prix.', variant: 'destructive' });
+    } finally {
+      setCardPriceSaving(false);
+    }
+  };
 
   const fetchData = useCallback(async () => {
     if (!schoolId) return;
@@ -116,6 +153,7 @@ export default function TuitionTracking() {
       setStudents(Array.isArray(data.students) ? data.students : []);
       setFees(Array.isArray(data.fees) ? data.fees : []);
       setClasses(Array.isArray(data.classes) ? data.classes : []);
+      setCardPriceCdf(String(data.cardPriceCdf ?? 0));
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Impossible de charger le suivi des frais.';
       setLoadError(message);
@@ -190,6 +228,30 @@ export default function TuitionTracking() {
       toast({ title: 'Rappel envoyé', description: `Le parent de ${student.fullName} a été notifié.` });
     } catch (error) {
       toast({ title: 'Erreur', description: error instanceof Error ? error.message : 'Rappel non envoyé.', variant: 'destructive' });
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const recordCardPayment = async (student: StudentTuition) => {
+    const amount = Number(cardPriceCdf);
+    if (!Number.isInteger(amount) || amount <= 0) {
+      toast({ title: 'Prix non configuré', description: 'Définissez d’abord un prix de carte supérieur à zéro en CDF.', variant: 'destructive' });
+      return;
+    }
+    setActionLoading(student.id);
+    try {
+      const response = await fetch('/api/payments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ studentId: student.id, amount, currency: 'CDF', status: 'paid', method: 'cash', month: 'Carte scolaire', academicYear: user?.school?.academicYear || '' }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Paiement de carte non enregistré.');
+      toast({ title: 'Paiement de carte enregistré', description: `Reçu ${data.payment?.receiptNumber || 'créé'}. L’administration peut maintenant émettre la carte.` });
+      await fetchData();
+    } catch (error) {
+      toast({ title: 'Erreur', description: error instanceof Error ? error.message : 'Paiement de carte non enregistré.', variant: 'destructive' });
     } finally {
       setActionLoading(null);
     }
@@ -289,6 +351,22 @@ export default function TuitionTracking() {
 
       <Card>
         <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-base"><Wallet className="h-4 w-4" /> Prix des cartes scolaires</CardTitle>
+          <CardDescription>Le prix est fixé en francs congolais et affiché dans le module Cartes. Seul le caissier peut le modifier.</CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-3 sm:flex-row sm:items-end">
+          <div className="grid w-full gap-2 sm:max-w-xs">
+            <Label htmlFor="student-card-price">Prix par carte (CDF)</Label>
+            <Input id="student-card-price" type="number" min="0" max="10000000" step="1" inputMode="numeric" value={cardPriceCdf} onChange={(event) => setCardPriceCdf(event.target.value)} />
+          </div>
+          <Button className="min-h-11" onClick={() => void saveCardPrice()} disabled={cardPriceSaving || cardPriceCdf === ''}>
+            {cardPriceSaving ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Enregistrement…</> : 'Enregistrer le prix'}
+          </Button>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-3">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"><div><CardTitle className="flex items-center gap-2 text-base"><FileText className="h-4 w-4" /> Barème des frais</CardTitle><CardDescription className="mt-1">Montants officiels définis par classe et échéance, sans conversion entre devises.</CardDescription></div><Button className="min-h-11" onClick={() => { setFeeCurrency(defaultCurrency); setFeeDialogOpen(true); }}><DollarSign className="mr-2 h-4 w-4" /> Nouveau barème</Button></div>
         </CardHeader>
         <CardContent>
@@ -337,6 +415,7 @@ export default function TuitionTracking() {
                         <FileText className="mr-2 h-4 w-4" /> {expandedStudentId === student.id ? 'Masquer les échéances' : `Échéances (${student.installments.length || student.fees.length})`}
                       </Button>
                       <Button className="min-h-11" onClick={() => openPayment(student)} disabled={student.paymentStatus === 'no-fee'}><DollarSign className="mr-2 h-4 w-4" /> Enregistrer un paiement</Button>
+                      {student.cardPaid ? <Badge className="min-h-11 px-3">Carte réglée</Badge> : <Button variant="outline" className="min-h-11" onClick={() => void recordCardPayment(student)} disabled={isBusy || !Number(cardPriceCdf)}><Wallet className="mr-2 h-4 w-4" />Carte · {formatAmount(Number(cardPriceCdf), 'CDF')}</Button>}
                       <Button variant="outline" className="min-h-11" onClick={() => void remindParent(student)} disabled={!student.parentId || isBusy} title={!student.parentId ? 'Aucun parent lié' : undefined}><BellRing className="mr-2 h-4 w-4" /> Rappeler le parent</Button>
                       {fees.some((fee) => fee.classId === student.classId || fee.classId === null) && <Button variant="outline" className="min-h-11" onClick={() => openPlanInstallment(student)} disabled={isBusy}><Clock3 className="mr-2 h-4 w-4" /> Planifier une tranche</Button>}
                     </div>

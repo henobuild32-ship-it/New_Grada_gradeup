@@ -2,22 +2,45 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { notifyUser } from '@/services/notifications/notificationEngine';
 import { authenticateRequestActive, AuthError } from '@/lib/auth/authenticate';
+import { auditFromRequest } from '@/lib/api/audit';
+
+async function validateHumanitiesPlacement(schoolId: string, level: string, cycle: string, sectionName: string, optionName: string) {
+  if (level !== 'Secondaire' || cycle !== 'Humanites') return null;
+  if (!sectionName || !optionName) return 'Une section et une option sont obligatoires pour une classe d’Humanités.';
+  const configured = await db.humanitiesOption.findFirst({
+    where: { name: optionName, section: { schoolId, name: sectionName } },
+    select: { id: true },
+  });
+  return configured ? null : 'Cette option ne fait pas partie de la section configurée pour votre école.';
+}
 
 export async function GET(request: NextRequest) {
   try {
     const auth = await authenticateRequestActive(request);
     // Tenant forcé à la session : le paramètre schoolId du client est ignoré
     const schoolId = auth.schoolId;
+    const where: Record<string, unknown> = { schoolId, deletedAt: null };
+    if (auth.role === 'TEACHER') {
+      where.OR = [
+        { titulaireId: auth.userId },
+        { courses: { some: { teacherId: auth.userId, schoolId, deletedAt: null } } },
+      ];
+    } else if (auth.role === 'STUDENT') {
+      where.enrollments = { some: { userId: auth.userId } };
+    } else if (auth.role === 'PARENT') {
+      where.enrollments = { some: { user: { schoolId, parentId: auth.userId, role: 'STUDENT', active: true, deletedAt: null } } };
+    } else if (!['ADMIN', 'LECTEUR'].includes(auth.role)) {
+      return NextResponse.json({ error: 'Accès non autorisé.' }, { status: 403 });
+    }
 
     const classes = await db.schoolClass.findMany({
-      where: { schoolId, deletedAt: null },
+      where,
       include: {
         titulaire: {
           select: {
             id: true,
             fullName: true,
-            email: true,
-            phone: true,
+            ...(auth.role === 'ADMIN' ? { email: true, phone: true } : {}),
           },
         },
         _count: {
@@ -61,6 +84,18 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const classLevel = String(level || 'Primaire');
+    const classCycle = classLevel === 'Secondaire' && cycle === 'Humanites' ? 'Humanites' : classLevel === 'Secondaire' ? 'EB' : classLevel;
+    const sectionName = classLevel === 'Secondaire' && classCycle === 'Humanites' ? String(section || '').trim() : '';
+    const optionName = classLevel === 'Secondaire' && classCycle === 'Humanites' ? String(option || '').trim() : '';
+    const placementError = await validateHumanitiesPlacement(schoolId, classLevel, classCycle, sectionName, optionName);
+    if (placementError) return NextResponse.json({ error: placementError }, { status: 400 });
+
+    if (titulaireId) {
+      const teacher = await db.user.findFirst({ where: { id: titulaireId, schoolId, role: 'TEACHER', active: true, deletedAt: null }, select: { id: true } });
+      if (!teacher) return NextResponse.json({ error: 'Le professeur titulaire doit être actif dans cette école.' }, { status: 400 });
+    }
+
     const existing = await db.schoolClass.findFirst({
       where: { schoolId, name, deletedAt: null },
     });
@@ -76,10 +111,10 @@ export async function POST(request: NextRequest) {
       data: {
         schoolId,
         name,
-        level: level || 'Primaire',
-        cycle: level === 'Secondaire' ? (cycle === 'Humanites' ? 'Humanites' : 'EB') : (level || 'Primaire'),
-        section: level === 'Secondaire' && cycle === 'Humanites' ? String(section || '').trim() : '',
-        option: level === 'Secondaire' && cycle === 'Humanites' ? String(option || '').trim() : '',
+        level: classLevel,
+        cycle: classCycle,
+        section: sectionName,
+        option: optionName,
         fees: typeof fees === 'number' ? fees : parseFloat(fees) || 0,
         titulaireId: titulaireId || null,
       },
@@ -100,6 +135,14 @@ export async function POST(request: NextRequest) {
         },
       },
     });
+    await auditFromRequest(request, {
+      schoolId,
+      userId: auth.userId,
+      action: 'CLASS_CREATED',
+      entity: 'SchoolClass',
+      entityId: schoolClass.id,
+      after: { id: schoolClass.id, name: schoolClass.name, level: schoolClass.level, cycle: schoolClass.cycle, section: schoolClass.section, option: schoolClass.option },
+    }).catch((error) => console.error('[Classes] Audit write failed:', error));
 
     // Marquer l'enseignant comme titulaire si renseigné
     if (titulaireId) {
@@ -107,6 +150,17 @@ export async function POST(request: NextRequest) {
         where: { id: titulaireId, schoolId },
         data: { isTitulaire: true },
       });
+      await notifyUser({
+        schoolId,
+        senderId: auth.userId,
+        userId: titulaireId,
+        targetRole: 'TEACHER',
+        title: 'Classe attribuée',
+        message: `${auth.name} vous a confié la classe « ${name} »${classCycle === 'Humanites' ? ` (${sectionName} · ${optionName})` : ''}, le ${new Date().toLocaleString('fr-FR')}.`,
+        type: 'CLASS',
+        priority: 'NORMAL',
+        metadata: { classId: schoolClass.id, className: name, changedAt: new Date().toISOString() },
+      }).catch((error) => console.error('[Classes] Titular assignment notification failed:', error));
     }
 
     // Broad broadcast to everyone in the school when a new class is added

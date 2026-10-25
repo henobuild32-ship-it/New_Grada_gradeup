@@ -74,11 +74,14 @@ export async function createAndSendOtp(
   const safeSchoolName = schoolName.replace(/[&<>"']/g, (char) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
   })[char] ?? char);
+  const appUrl = (process.env.NEXT_PUBLIC_APP_URL || 'https://gradeupcom.vercel.app').replace(/\/+$/, '');
+  const logoUrl = `${appUrl}/logo-gradeup.png`;
 
   const html = `
     <div style="font-family:Arial,Helvetica,sans-serif;max-width:480px;margin:auto;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden">
-      <div style="background:linear-gradient(90deg,#2563eb,#6d28d9);padding:16px 24px;color:#fff">
-        <h2 style="margin:0;font-size:18px">🔐 ${safeSchoolName} — Réinitialisation du mot de passe</h2>
+      <div style="background:linear-gradient(90deg,#2563eb,#6d28d9);padding:16px 24px;color:#fff;display:flex;align-items:center;gap:14px">
+        <img src="${logoUrl}" alt="GradeUp" width="54" height="54" style="display:block;width:54px;height:54px;object-fit:contain;background:#fff;border-radius:12px;padding:5px" />
+        <div><p style="margin:0 0 5px;font-size:13px;font-weight:700;letter-spacing:.04em">GRADEUP</p><h2 style="margin:0;font-size:18px">${safeSchoolName} — Réinitialisation du mot de passe</h2></div>
       </div>
       <div style="padding:24px">
         <p style="color:#334155;font-size:14px;line-height:1.6">Bonjour,</p>

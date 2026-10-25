@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { notifyUser } from '@/services/notifications/notificationEngine';
-import { authenticateRequest, AuthError } from '@/lib/auth/authenticate';
+import { authenticateRequest, authenticateRequestActive, AuthError } from '@/lib/auth/authenticate';
 
 export async function GET(request: NextRequest) {
   try {
-    const auth = await authenticateRequest(request);
-    if (auth.role !== 'ADMIN' && auth.role !== 'TEACHER') return NextResponse.json({ error: 'Accès refusé.' }, { status: 403 });
+    const auth = await authenticateRequestActive(request);
+    if (auth.role !== 'ADMIN' && auth.role !== 'LECTEUR' && auth.role !== 'TEACHER') return NextResponse.json({ error: 'Accès refusé.' }, { status: 403 });
     const { searchParams } = new URL(request.url);
     const schoolId = auth.schoolId;
     const classId = searchParams.get('classId');
@@ -15,13 +15,21 @@ export async function GET(request: NextRequest) {
 
     if (!schoolId) return NextResponse.json({ error: 'École introuvable' }, { status: 400 });
 
+    if (scope === 'global' && auth.role === 'TEACHER') return NextResponse.json({ error: 'Le récapitulatif consolidé est réservé à l’administration et au Lecteur.' }, { status: 403 });
+    const teacherCourses = auth.role === 'TEACHER'
+      ? await db.course.findMany({ where: { schoolId, teacherId: auth.userId, deletedAt: null }, select: { classId: true }, distinct: ['classId'] })
+      : [];
     const classes = await db.schoolClass.findMany({
-      where: { schoolId },
+      where: { schoolId, ...(auth.role === 'TEACHER' ? { id: { in: teacherCourses.map((course) => course.classId) } } : {}) },
       include: {
         _count: { select: { enrollments: true } },
       },
       orderBy: { name: 'asc' },
     });
+
+    if (classId && !classes.some((schoolClass) => schoolClass.id === classId)) {
+      return NextResponse.json({ error: 'Classe introuvable dans votre établissement.' }, { status: 404 });
+    }
 
     // Analyse détaillée d'une classe précise
     if (classId) {

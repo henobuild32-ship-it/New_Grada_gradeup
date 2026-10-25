@@ -1,15 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { authenticateRequest, AuthError } from '@/lib/auth/authenticate';
+import { authenticateRequest, authenticateRequestActive, AuthError } from '@/lib/auth/authenticate';
 
 export const runtime = 'nodejs';
 
 // GET /api/note-modifications?studentId=&status=&courseId=
 export async function GET(req: NextRequest) {
   try {
-    const auth = authenticateRequest(req);
+    const auth = await authenticateRequestActive(req);
     const { searchParams } = new URL(req.url);
-    const schoolId = searchParams.get('schoolId') || auth.schoolId;
+    const requestedSchoolId = searchParams.get('schoolId');
+    const schoolId = auth.schoolId;
+    if (requestedSchoolId && requestedSchoolId !== auth.schoolId) {
+      return NextResponse.json({ error: 'Accès non autorisé à cet établissement.' }, { status: 403 });
+    }
     const studentId = searchParams.get('studentId') || '';
     const status = searchParams.get('status') || '';
     const courseId = searchParams.get('courseId') || '';
@@ -19,8 +23,19 @@ export async function GET(req: NextRequest) {
     if (status) where.requestStatus = status;
     if (courseId) where.courseId = courseId;
 
-    // Étudiant ne voit que ses propres demandes ; admin voit tout ; enseignant voit les demandes de ses cours
-    if (auth.role === 'STUDENT') where.studentId = auth.userId;
+    // Le périmètre est dérivé de la session, jamais du filtre fourni par le client.
+    if (auth.role === 'LECTEUR' || auth.role === 'ADMIN') {
+      // Lecture de toutes les demandes de l’établissement.
+    } else if (auth.role === 'PARENT') {
+      const children = await db.user.findMany({ where: { schoolId, parentId: auth.userId, role: 'STUDENT', active: true, deletedAt: null }, select: { id: true } });
+      const childIds = children.map((child) => child.id);
+      if (studentId && !childIds.includes(studentId)) return NextResponse.json({ error: 'Demande hors du périmètre de vos enfants.' }, { status: 403 });
+      where.studentId = studentId || { in: childIds };
+    } else if (auth.role === 'STUDENT') {
+      where.studentId = auth.userId;
+    } else if (auth.role !== 'TEACHER') {
+      return NextResponse.json({ error: 'Accès non autorisé.' }, { status: 403 });
+    }
     if (auth.role === 'TEACHER') {
       const teacherCourses = await db.course.findMany({
         where: { schoolId, teacherId: auth.userId, deletedAt: null },
@@ -54,6 +69,9 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const auth = await authenticateRequest(req);
+    if (!['STUDENT', 'PARENT', 'TEACHER'].includes(auth.role)) {
+      return NextResponse.json({ error: 'Cette action est réservée aux élèves, parents et professeurs.' }, { status: 403 });
+    }
     const body = await req.json();
     const { noteId, oldValue, newValue, oldMax, newMax, reason } = body;
 
@@ -69,6 +87,10 @@ export async function POST(req: NextRequest) {
     // Permission : étudiant ne modifie que ses propres notes
     if (auth.role === 'STUDENT' && grade.studentId !== auth.userId) {
       return NextResponse.json({ error: 'Vous ne pouvez pas demander de modification pour cette note.' }, { status: 403 });
+    }
+    if (auth.role === 'PARENT') {
+      const child = await db.user.findFirst({ where: { id: grade.studentId, schoolId: auth.schoolId, parentId: auth.userId, role: 'STUDENT', active: true, deletedAt: null }, select: { id: true } });
+      if (!child) return NextResponse.json({ error: 'Vous ne pouvez demander une modification que pour la note de votre enfant.' }, { status: 403 });
     }
     if (auth.role === 'TEACHER') {
       const course = await db.course.findUnique({

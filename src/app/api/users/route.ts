@@ -117,6 +117,11 @@ export async function GET(request: NextRequest) {
       if (role) where.role = role;
       if (classId) where.classEnrollments = { some: { classId } };
       if (parentId) where.parentId = parentId;
+    } else if (auth.role === 'LECTEUR') {
+      if (parentId || teacherId || includeDeleted) return NextResponse.json({ error: 'Accès limité aux comptes actifs de l’école.' }, { status: 403 });
+      if (role) where.role = role;
+      if (classId) where.classEnrollments = { some: { classId } };
+      where.active = true;
     } else {
       return NextResponse.json({ error: 'Accès non autorisé' }, { status: 403 });
     }
@@ -131,6 +136,19 @@ export async function GET(request: NextRequest) {
         { matricule: { contains: search, mode: 'insensitive' } },
         ...(auth.role === 'ADMIN' ? [{ parentCode: { contains: search, mode: 'insensitive' } }] : []),
       ];
+    }
+
+    if (auth.role === 'LECTEUR') {
+      const users = await db.user.findMany({
+        where,
+        select: {
+          id: true, schoolId: true, fullName: true, role: true, active: true, createdAt: true, lastActivityAt: true,
+          matricule: true, cardId: true, cardIssuedDate: true, cardExpiryDate: true, photoUrl: true, gender: true,
+          classEnrollments: { select: { classId: true, class: { select: { id: true, name: true, level: true } } } },
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+      return NextResponse.json({ users });
     }
 
     if (auth.role === 'ADMIN') {
@@ -151,9 +169,23 @@ export async function GET(request: NextRequest) {
               active: true,
             },
           },
+          ...(role === 'STUDENT' ? {
+            payments: {
+              where: { schoolId, month: 'Carte scolaire', status: 'paid', currency: 'CDF', deletedAt: null },
+              select: { amount: true },
+            },
+          } : {}),
         },
         orderBy: { createdAt: 'desc' },
       });
+      if (role === 'STUDENT') {
+        const school = await db.school.findFirst({ where: { id: auth.schoolId, deletedAt: null }, select: { studentCardPriceCdf: true } });
+        return NextResponse.json({ users: users.map((candidate) => ({
+          ...candidate,
+          cardPaymentConfirmed: !school?.studentCardPriceCdf || candidate.payments.some((payment) => payment.amount === school.studentCardPriceCdf),
+          payments: undefined,
+        })) });
+      }
       return NextResponse.json({ users });
     }
 
@@ -200,6 +232,9 @@ export async function POST(request: NextRequest) {
     });
     if (!userValidation.success) {
       return NextResponse.json({ error: 'Informations utilisateur invalides.', details: userValidation.error.flatten().fieldErrors }, { status: 400 });
+    }
+    if (userValidation.data.role === 'CAISSIER') {
+      return NextResponse.json({ error: 'Ce rôle doit être créé par l’inscription avec son code de confidentialité.' }, { status: 409 });
     }
     const {
       schoolId,
@@ -377,9 +412,11 @@ export async function POST(request: NextRequest) {
         contactTuteur: contactTuteur || '',
         allergies: allergies || '',
         assurance: assurance || '',
-        cardId: `${(fullName.trim().charAt(0) || 'X').toUpperCase()}${Date.now().toString().slice(-8)}`,
-        cardIssuedDate: issued,
-        cardExpiryDate: expiry,
+        ...(role === 'TEACHER' ? {
+          cardId: `${(fullName.trim().charAt(0) || 'X').toUpperCase()}${Date.now().toString().slice(-8)}`,
+          cardIssuedDate: issued,
+          cardExpiryDate: expiry,
+        } : {}),
         parentId: parentId || null,
         parentCode: parentCodeVal,
         isTitulaire: !!isTitulaire,
@@ -488,7 +525,7 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ error: 'Accès non autorisé. Action réservée aux administrateurs.' }, { status: 403 });
     }
 
-    const targetUser = await db.user.findUnique({ where: { id: userId }, select: { id: true, schoolId: true, active: true } });
+    const targetUser = await db.user.findUnique({ where: { id: userId }, select: { id: true, schoolId: true, active: true, role: true } });
     if (!targetUser || targetUser.schoolId !== auth.schoolId) {
       return NextResponse.json({ error: 'Utilisateur introuvable dans votre établissement.' }, { status: 403 });
     }
@@ -496,6 +533,9 @@ export async function PATCH(request: NextRequest) {
     const updateData: Record<string, unknown> = {};
     if (active !== undefined) {
       if (typeof active !== 'boolean') return NextResponse.json({ error: 'Le statut du compte doit être un booléen.' }, { status: 400 });
+      if (active && !targetUser.active && (targetUser.role === 'LECTEUR' || targetUser.role === 'CAISSIER')) {
+        return NextResponse.json({ error: 'Ce compte a été révoqué. La personne doit se réinscrire avec le nouveau code de confidentialité.' }, { status: 409 });
+      }
       updateData.active = active;
       if (active !== targetUser.active) updateData.authVersion = { increment: 1 };
     }

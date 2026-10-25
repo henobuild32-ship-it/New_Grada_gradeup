@@ -63,6 +63,7 @@ const roleDashboardMap: Record<UserRole, PageView> = {
   STUDENT: 'student-dashboard',
   PARENT: 'parent-dashboard',
   CAISSIER: 'caisse',
+  LECTEUR: 'reader-dashboard',
 };
 
 const roleLabels: Record<string, string> = {
@@ -71,6 +72,7 @@ const roleLabels: Record<string, string> = {
   PARENT: 'Parent',
   ADMIN: 'Direction / Admin',
   CAISSIER: 'Caissier',
+  LECTEUR: 'Lecteur',
 };
 
 const roleIcons: Record<string, React.ElementType> = {
@@ -79,6 +81,7 @@ const roleIcons: Record<string, React.ElementType> = {
   PARENT: Users,
   ADMIN: Shield,
   CAISSIER: DollarSign,
+  LECTEUR: BookOpen,
 };
 
 const roleColors: Record<string, { bg: string; border: string; badge: string; gradient: string }> = {
@@ -112,7 +115,28 @@ const roleColors: Record<string, { bg: string; border: string; badge: string; gr
     badge: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/60 dark:text-emerald-300',
     gradient: 'from-emerald-600 to-teal-700',
   },
+  LECTEUR: {
+    bg: 'bg-sky-50 dark:bg-sky-950/20',
+    border: 'border-sky-200 dark:border-sky-800/40',
+    badge: 'bg-sky-100 text-sky-800 dark:bg-sky-900/60 dark:text-sky-300',
+    gradient: 'from-sky-500 to-cyan-600',
+  },
 };
+
+function getConfidentialDeviceId(): string {
+  const key = 'gradeup-confidential-device';
+  try {
+    const existing = localStorage.getItem(key);
+    if (existing) return existing;
+    const id = typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? crypto.randomUUID()
+      : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+    localStorage.setItem(key, id);
+    return id;
+  } catch {
+    return typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : 'device-unavailable';
+  }
+}
 
 function PasswordStrengthIndicator({ password }: { password: string }) {
   if (!password) return null;
@@ -257,6 +281,7 @@ export default function AuthPage({ initialView }: { initialView?: LandingAction 
   const [joinClassIds, setJoinClassIds] = useState<string[]>([]);
   const [joinParentCode, setJoinParentCode] = useState('');
   const [joinEmail, setJoinEmail] = useState('');
+  const [joinConfidentialCode, setJoinConfidentialCode] = useState('');
   const [joinGender, setJoinGender] = useState<'M' | 'F' | ''>('');
   const [joinBirthDate, setJoinBirthDate] = useState('');
   const [joinSpecialty, setJoinSpecialty] = useState('');
@@ -298,6 +323,7 @@ export default function AuthPage({ initialView }: { initialView?: LandingAction 
     setJoinPhone('');
     setJoinFullName('');
     setJoinEmail('');
+    setJoinConfidentialCode('');
     setJoinPassword('');
     setJoinConfirmPassword('');
   };
@@ -478,13 +504,9 @@ export default function AuthPage({ initialView }: { initialView?: LandingAction 
 
   // ── Mot de passe oublié (OTP via SMTP) ────────────────────────────────────
   const forgotApiPayload = () => {
-    const identity = forgotIdentity.trim();
-    const isEmail = identity.includes('@');
     return {
       isAdminLogin: forgotIsAdmin,
-      inviteCode: loginInviteCode.toUpperCase().trim(),
-      email: forgotIsAdmin ? forgotEmail.trim() : isEmail ? identity : '',
-      fullName: (!forgotIsAdmin && !isEmail) ? identity : '',
+      email: (forgotIsAdmin ? forgotEmail : forgotIdentity).trim(),
     };
   };
 
@@ -493,8 +515,9 @@ export default function AuthPage({ initialView }: { initialView?: LandingAction 
     if (forgotLoading) return;
     setForgotError('');
     setForgotMessage('');
-    if (forgotIsAdmin ? !forgotEmail.trim() : !forgotIdentity.trim()) {
-      setForgotError('Veuillez saisir votre identifiant.');
+    const recoveryEmail = (forgotIsAdmin ? forgotEmail : forgotIdentity).trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recoveryEmail)) {
+      setForgotError('Saisissez l’adresse e-mail enregistrée sur votre compte. Sans e-mail, ajoutez-en un dans votre profil ou contactez l’administration.');
       return;
     }
     setForgotLoading(true);
@@ -695,10 +718,6 @@ export default function AuthPage({ initialView }: { initialView?: LandingAction 
       toast({ title: 'Code élève à vérifier', description: 'Vérifiez le code de votre enfant et confirmez son nom et sa classe.', variant: 'destructive' });
       return;
     }
-    if (joinRole === 'CAISSIER' && !joinEmail.trim()) {
-      toast({ title: 'Adresse e-mail obligatoire', description: 'Le compte caisse doit disposer d’une adresse e-mail pour la récupération du mot de passe.', variant: 'destructive' });
-      return;
-    }
     setJoinLoading(true);
     try {
       const res = await fetch('/api/auth/register', {
@@ -711,6 +730,8 @@ export default function AuthPage({ initialView }: { initialView?: LandingAction 
           password: joinPassword,
           inviteCode: normalizeInviteCode(joinInviteCode),
           role: joinRole,
+          confidentialCode: joinConfidentialCode.trim(),
+          deviceId: getConfidentialDeviceId(),
           gender: joinGender,
           dateOfBirth: joinBirthDate || undefined,
           specialty: joinRole === 'TEACHER' ? joinSpecialty.trim() : undefined,
@@ -846,7 +867,7 @@ export default function AuthPage({ initialView }: { initialView?: LandingAction 
                 }`}
               >
                 <User className="mr-1 inline size-3 sm:mr-1.5 sm:size-3.5" />
-                Élève · Prof · Parent
+                Élève · Prof · Parent · Lecteur
               </button>
               <button
                 type="button"
@@ -1121,28 +1142,19 @@ export default function AuthPage({ initialView }: { initialView?: LandingAction 
                   <>
                     <div className="space-y-1.5">
                       <Label className="text-xs font-bold flex items-center gap-1.5">
-                        <Key className="w-3.5 h-3.5 text-blue-500" />
-                        Code École
+                        <Mail className="w-3.5 h-3.5 text-brand" />
+                        Adresse e-mail enregistrée
                       </Label>
                       <Input
-                        placeholder="Ex: ECOLE-XXXXXX"
-                        value={loginInviteCode}
-                        onChange={(e) => setLoginInviteCode(e.target.value.toUpperCase())}
-                        className="h-11 font-mono uppercase tracking-wider rounded-xl"
-                      />
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label className="text-xs font-bold flex items-center gap-1.5">
-                        <User className="w-3.5 h-3.5 text-brand" />
-                        Email ou Nom Complet
-                      </Label>
-                      <Input
-                        placeholder="Jean Dupont  ou  jean@exemple.com"
+                        type="email"
+                        autoComplete="email"
+                        placeholder="nom@exemple.com"
                         value={forgotIdentity}
                         onChange={(e) => setForgotIdentity(e.target.value)}
                         className="h-11 rounded-xl"
                         required
                       />
+                      <p className="text-xs leading-relaxed text-muted-foreground">La récupération utilise uniquement l’adresse enregistrée. Si votre compte n’en a pas, ajoutez-en une dans votre profil ou contactez l’administration.</p>
                     </div>
                   </>
                 )}
@@ -1529,7 +1541,7 @@ export default function AuthPage({ initialView }: { initialView?: LandingAction 
               <div className="space-y-1.5">
                 <Label className="text-xs font-bold">Votre Rôle dans l'École</Label>
                 <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                  {(['STUDENT', 'TEACHER', 'PARENT', 'CAISSIER'] as UserRole[]).map((r) => {
+                  {(['STUDENT', 'TEACHER', 'PARENT', 'LECTEUR', 'CAISSIER'] as UserRole[]).map((r) => {
                     const RIcon = roleIcons[r];
                     const isSel = joinRole === r;
                     return (
@@ -1539,6 +1551,7 @@ export default function AuthPage({ initialView }: { initialView?: LandingAction 
                         disabled={!codeVerified}
                         onClick={() => {
                           setJoinRole(r);
+                          setJoinConfidentialCode('');
                           setJoinClassIds([]);
                           setJoinParentCode('');
                           setStudentVerification('idle');
@@ -1555,19 +1568,35 @@ export default function AuthPage({ initialView }: { initialView?: LandingAction 
                 </div>
               </div>
 
+              {(joinRole === 'LECTEUR' || joinRole === 'CAISSIER') && codeVerified && (
+                <div className="space-y-1.5 rounded-2xl border border-sky-200 bg-sky-50/70 p-4 dark:border-sky-900 dark:bg-sky-950/30">
+                  <Label htmlFor="join-confidential-code" className="text-xs font-bold">Code de confidentialité</Label>
+                  <Input
+                    id="join-confidential-code"
+                    value={joinConfidentialCode}
+                    onChange={(event) => setJoinConfidentialCode(event.target.value.toUpperCase())}
+                    placeholder="XXXX-XXXX-XXXX"
+                    className="h-11 rounded-xl bg-background font-mono uppercase tracking-widest"
+                    autoComplete="off"
+                    required
+                  />
+                  <p className="text-xs leading-relaxed text-muted-foreground">Code communiqué en personne par l’administrateur. Il est lié à cette école et à ce rôle.</p>
+                </div>
+              )}
+
               {/* Class selection for Student/Teacher */}
               {(joinRole === 'STUDENT' || joinRole === 'TEACHER') && (
                 <div className="space-y-1.5">
                   <Label htmlFor="join-class" className="text-xs font-bold">
                     {joinRole === 'STUDENT' ? 'Votre Classe' : 'Classe(s) Enseignée(s)'}
                   </Label>
-                  {availableClasses.length > 0 ? (
+                  {availableClasses.length > 0 && joinRole === 'STUDENT' ? (
                     <select
                       id="join-class"
                       value={joinClassIds[0] || ''}
                       onChange={(e) => setJoinClassIds([e.target.value])}
                       className="w-full h-11 px-3 rounded-xl border border-input bg-background text-sm font-medium"
-                      required={joinRole === 'STUDENT' || joinRole === 'TEACHER'}
+                      required
                     >
                       <option value="">-- Sélectionner une classe --</option>
                       {availableClasses.map((c) => (
@@ -1576,9 +1605,29 @@ export default function AuthPage({ initialView }: { initialView?: LandingAction 
                         </option>
                       ))}
                     </select>
+                  ) : availableClasses.length > 0 ? (
+                    <div className="max-h-56 space-y-1 overflow-y-auto rounded-xl border border-input bg-background p-2">
+                      {availableClasses.map((schoolClass) => {
+                        const selected = joinClassIds.includes(schoolClass.id);
+                        return (
+                          <label key={schoolClass.id} className={`flex min-h-11 cursor-pointer items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors ${selected ? 'bg-primary/10 text-primary' : 'hover:bg-muted'}`}>
+                            <input
+                              type="checkbox"
+                              checked={selected}
+                              onChange={(event) => setJoinClassIds((current) => event.target.checked
+                                ? [...new Set([...current, schoolClass.id])]
+                                : current.filter((id) => id !== schoolClass.id))}
+                              className="size-4 accent-primary"
+                            />
+                            <span>{[schoolClass.name, schoolClass.level, schoolClass.section, schoolClass.option].filter(Boolean).join(' · ')}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
                   ) : (
                     <p className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">Cette école n’a pas encore configuré ses classes.</p>
                   )}
+                  {joinRole === 'TEACHER' && <p className="text-xs text-muted-foreground">Choisissez toutes les classes où vous enseignez. L’administrateur pourra ensuite attribuer vos cours.</p>}
                 </div>
               )}
 
@@ -1719,7 +1768,7 @@ export default function AuthPage({ initialView }: { initialView?: LandingAction 
               </div>
 
               <div className="space-y-1.5">
-                <Label htmlFor="join-email" className="text-xs font-bold">Adresse Email {joinRole === 'CAISSIER' ? <span className="text-destructive">*</span> : '(Optionnel)'}</Label>
+                <Label htmlFor="join-email" className="text-xs font-bold">Adresse e-mail (facultative)</Label>
                 <Input
                   id="join-email"
                   type="email"
@@ -1727,9 +1776,9 @@ export default function AuthPage({ initialView }: { initialView?: LandingAction 
                   value={joinEmail}
                   onChange={(e) => setJoinEmail(e.target.value)}
                   className="h-11 rounded-xl"
-                  required={joinRole === 'CAISSIER'}
+                  autoComplete="email"
                 />
-                {joinRole === 'CAISSIER' && <p className="text-xs text-muted-foreground">La direction validera votre demande avant l’activation de l’accès aux paiements.</p>}
+                <p className="text-xs leading-relaxed text-muted-foreground">Facultatif, mais utile pour récupérer votre mot de passe en cas d’oubli.</p>
               </div>
 
               {/* Passwords */}

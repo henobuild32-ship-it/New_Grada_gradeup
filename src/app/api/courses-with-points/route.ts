@@ -15,7 +15,7 @@ function pickCourseData(body: Record<string, unknown>) {
 export async function GET(request: NextRequest) {
   try {
     // Lecture : utilisateur authentifié, scope école
-    const auth = authenticateRequest(request);
+    const auth = await authenticateRequest(request);
     const { searchParams } = new URL(request.url);
     const classId = searchParams.get('classId');
     const schoolId = searchParams.get('schoolId') || auth.schoolId;

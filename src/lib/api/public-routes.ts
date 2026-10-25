@@ -14,6 +14,8 @@ const PUBLIC_API_EXACT = new Set([
   '/api/auth/me',
   '/api/join/verify-school-code',
   '/api/parent-link/validate',
+  // The route verifies the Vercel CRON_SECRET bearer token itself.
+  '/api/cron/confidential-code-rotation',
 ]);
 
 const PUBLIC_API_PREFIXES = [

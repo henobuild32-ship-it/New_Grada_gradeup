@@ -77,7 +77,7 @@ export default function SchoolCalendar() {
         const params = new URLSearchParams({ schoolId: user.schoolId });
         const [hwRes, payRes] = await Promise.all([
           fetchJsonWithCache(`/api/homework?${params}`, { homework: [] }),
-          fetchJsonWithCache(`/api/payments?${params}`, { payments: [] }),
+          fetchJsonWithCache(`/api/receipts?${params}`, { payments: [] }),
         ]);
 
         const homeworks: HomeworkInfo[] = Array.isArray(hwRes) ? hwRes : Array.isArray((hwRes as any)?.homework) ? (hwRes as any).homework : [];

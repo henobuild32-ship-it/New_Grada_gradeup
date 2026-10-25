@@ -530,7 +530,7 @@ async function main() {
         secondCookie,
       ], 200);
       expectData('D5 aucun audit de la démo', d5, (j) =>
-        Array.isArray(j?.auditLogs) && j.auditLogs.every((l) => l.schoolId !== 'sch_demo_gradeup')
+        Array.isArray(j?.logs) && j.logs.length === 0
           ? true
           : 'audit d’une autre école présent'
       );

@@ -7,7 +7,7 @@ export const runtime = 'nodejs';
 // GET /api/schedules/timeslots?schoolId= – plages horaires de l'école
 export async function GET(request: NextRequest) {
   try {
-    const auth = authenticateRequest(request);
+    const auth = await authenticateRequest(request);
     const { searchParams } = new URL(request.url);
     const schoolId = searchParams.get('schoolId');
 

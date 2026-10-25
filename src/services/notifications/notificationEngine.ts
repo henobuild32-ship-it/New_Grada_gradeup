@@ -39,6 +39,7 @@ export async function notifyUser(input: CreateNotificationInput) {
     const pushPayload = {
       title: notification.title,
       body: notification.message,
+      icon: '/logo-gradeup.png',
       url: getRouteForNotificationType(notification.type),
     };
 

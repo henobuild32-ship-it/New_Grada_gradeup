@@ -1,19 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { authenticateRequest, AuthError } from '@/lib/auth/authenticate';
+import { authenticateRequestActive, AuthError } from '@/lib/auth/authenticate';
 import { assertYearOpen } from '@/lib/year-status';
 
 export async function GET(request: NextRequest) {
   try {
-    const auth = authenticateRequest(request);
+    const auth = await authenticateRequestActive(request);
     const { searchParams } = new URL(request.url);
-    const schoolId = searchParams.get('schoolId');
+    const requestedSchoolId = searchParams.get('schoolId');
+    const schoolId = auth.schoolId;
     const studentId = searchParams.get('studentId');
     const date = searchParams.get('date');
     const courseId = searchParams.get('courseId');
 
-    if (!schoolId || (schoolId !== auth.schoolId && auth.role !== 'PARENT')) {
-      return NextResponse.json({ error: 'schoolId invalide' }, { status: 400 });
+    if (!schoolId || (requestedSchoolId && requestedSchoolId !== schoolId)) {
+      return NextResponse.json({ error: 'Accès non autorisé à cet établissement.' }, { status: 403 });
     }
 
     const where: Record<string, unknown> = { schoolId };
@@ -33,6 +34,20 @@ export async function GET(request: NextRequest) {
       where.studentId = studentId;
     } else if (auth.role === 'STUDENT') {
       where.studentId = auth.userId;
+    } else if (auth.role === 'LECTEUR' || auth.role === 'ADMIN') {
+      // Lecteur : toutes les présences de son école, en lecture seule.
+    } else if (auth.role === 'TEACHER') {
+      const courses = await db.course.findMany({ where: { schoolId, teacherId: auth.userId, deletedAt: null }, select: { id: true } });
+      const courseIds = courses.map((course) => course.id);
+      if (courseId && !courseIds.includes(courseId)) return NextResponse.json({ error: 'Cette matière ne vous est pas attribuée.' }, { status: 403 });
+      where.courseId = courseId ? courseId : { in: courseIds };
+    } else if (auth.role === 'PARENT') {
+      const children = await db.user.findMany({ where: { schoolId, parentId: auth.userId, role: 'STUDENT', active: true, deletedAt: null }, select: { id: true } });
+      const childIds = children.map((child) => child.id);
+      if (studentId && !childIds.includes(studentId)) return NextResponse.json({ error: 'Vous ne pouvez consulter que les absences de vos enfants.' }, { status: 403 });
+      where.studentId = studentId || { in: childIds };
+    } else if (auth.role !== 'STUDENT') {
+      return NextResponse.json({ error: 'Accès non autorisé.' }, { status: 403 });
     }
     if (date) where.date = date;
     if (courseId) where.courseId = courseId;
@@ -57,7 +72,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const auth = authenticateRequest(request);
+    const auth = await authenticateRequestActive(request);
     if (auth.role === 'PARENT') {
       return NextResponse.json({ error: 'Accès non autorisé' }, { status: 403 });
     }

@@ -10,8 +10,11 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Send, Search, MessageCircle, ArrowLeft, Users, Smile, MoreHorizontal, Reply, Pencil, Trash2, FileText, Image as ImageIcon } from 'lucide-react';
+import { Send, Search, MessageCircle, ArrowLeft, Users, Smile, MoreHorizontal, Reply, Pencil, Trash2, FileText, Image as ImageIcon, X } from 'lucide-react';
 import { subscribeToTable, isRealtimeEnabled } from '@/lib/realtime';
+import { MessageAttachmentPicker } from '@/components/gradeup/message-attachment-picker';
+import { flushPendingMessageDrafts, listPendingMessageDrafts, savePendingMessageDrafts } from '@/lib/offline/message-drafts';
+import { uploadMessageAttachment } from '@/lib/message-upload';
 
 const roleLabels: Record<string, string> = {
   ADMIN: 'Admin',
@@ -55,10 +58,14 @@ export default function ChatPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedContact, setSelectedContact] = useState<ContactInfo | null>(null);
   const [newMessage, setNewMessage] = useState('');
+  const [attachmentFiles, setAttachmentFiles] = useState<File[]>([]);
   const [sending, setSending] = useState(false);
+  const [queuedDraftCount, setQueuedDraftCount] = useState(0);
+  const [uploadProgress, setUploadProgress] = useState<{ fileName: string; percent: number } | null>(null);
   const [loading, setLoading] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const uploadAbortRef = useRef<AbortController | null>(null);
   const [mobileShowChat, setMobileShowChat] = useState(false);
   const [replyTo, setReplyTo] = useState<MessageInfo | null>(null);
   const [editingMsg, setEditingMsg] = useState<MessageInfo | null>(null);
@@ -73,6 +80,38 @@ export default function ChatPage() {
   const schoolId = user?.schoolId || '';
   const userId = user?.id || '';
   const userRole = user?.role || 'STUDENT';
+
+  useEffect(() => {
+    if (!schoolId || !userId || userRole !== 'ADMIN') return;
+    let active = true;
+    const refreshCount = () => {
+      void listPendingMessageDrafts(schoolId, userId).then((drafts) => { if (active) setQueuedDraftCount(drafts.length); }).catch(() => undefined);
+    };
+    const sync = async () => {
+      if (!navigator.onLine) return;
+      try {
+        const result = await flushPendingMessageDrafts(schoolId, userId);
+        if (!active) return;
+        setQueuedDraftCount(result.pending);
+        if (result.sent > 0) toast.success(`${result.sent} brouillon(s) de message envoyé(s).`);
+        if (result.failed > 0) toast.error(`${result.failed} brouillon(s) n’ont pas pu être envoyé(s). Vérifiez les destinataires ou les fichiers.`);
+      } catch { refreshCount(); }
+    };
+    const onOnline = () => { void sync(); };
+    const onFocus = () => { void sync(); };
+    const onDraftChange = () => refreshCount();
+    refreshCount();
+    void sync();
+    window.addEventListener('online', onOnline);
+    window.addEventListener('focus', onFocus);
+    window.addEventListener('gradeup-message-drafts-updated', onDraftChange);
+    return () => {
+      active = false;
+      window.removeEventListener('online', onOnline);
+      window.removeEventListener('focus', onFocus);
+      window.removeEventListener('gradeup-message-drafts-updated', onDraftChange);
+    };
+  }, [schoolId, userId, userRole]);
 
   const QUICK_EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '🙏', '👏', '🔥'];
 
@@ -404,6 +443,7 @@ export default function ChatPage() {
 
   const handleSelectContact = (contact: ContactInfo) => {
     setSelectedContact(contact);
+    setAttachmentFiles([]);
     setMobileShowChat(true);
     fetchMessages(contact.id);
     setTimeout(() => inputRef.current?.focus(), 100);
@@ -416,20 +456,61 @@ export default function ChatPage() {
   };
 
   const handleSendMessage = async () => {
-    if (!newMessage.trim() || !selectedContact || sending) return;
+    if ((!newMessage.trim() && attachmentFiles.length === 0) || !selectedContact || sending) return;
 
     // Handle reply
     if (replyTo) {
+      if (attachmentFiles.length) { toast.error('Retirez les pièces jointes pour envoyer cette réponse.'); return; }
       return handleReplySend();
     }
 
     // Handle edit
     if (editingMsg) {
+      if (attachmentFiles.length) { toast.error('Retirez les pièces jointes avant de modifier ce message.'); return; }
       return handleEditMessage();
     }
 
+    if (!navigator.onLine) {
+      try {
+        await savePendingMessageDrafts({ schoolId, senderId: userId, recipientId: selectedContact.id, channel: 'admin-chat', content: newMessage.trim(), files: attachmentFiles });
+        setAttachmentFiles([]);
+        setNewMessage('');
+        void listPendingMessageDrafts(schoolId, userId).then((drafts) => setQueuedDraftCount(drafts.length));
+        toast.info('Enregistré sur cet appareil. Le message sera envoyé au retour de la connexion.');
+      } catch {
+        toast.error('Impossible d’enregistrer ce brouillon sur cet appareil. Gardez cette page ouverte et réessayez.');
+      }
+      return;
+    }
+
+    let unsentFiles = [...attachmentFiles];
+    let unsentContent = newMessage.trim();
     setSending(true);
     try {
+      if (attachmentFiles.length > 0) {
+        const filesToSend = [...attachmentFiles];
+        for (const [index, file] of filesToSend.entries()) {
+          const formData = new FormData();
+          formData.append('file', file);
+          formData.append('recipientId', selectedContact.id);
+          formData.append('content', index === 0 ? newMessage.trim() : '');
+          const controller = new AbortController();
+          uploadAbortRef.current = controller;
+          setUploadProgress({ fileName: file.name, percent: 0 });
+          const uploadResponse = await uploadMessageAttachment(formData, (percent) => setUploadProgress({ fileName: file.name, percent }), controller.signal);
+          uploadAbortRef.current = null;
+          setUploadProgress(null);
+          if (!uploadResponse.ok) throw new Error(`${file.name} : ${typeof uploadResponse.data.error === 'string' ? uploadResponse.data.error : 'envoi impossible.'}`);
+          unsentFiles = unsentFiles.filter((item) => item !== file);
+          if (index === 0 && unsentContent) { unsentContent = ''; setNewMessage(''); }
+          setAttachmentFiles((current) => current.filter((item) => item !== file));
+        }
+        setNewMessage('');
+        fetchMessages(selectedContact.id);
+        fetchConversations();
+        toast.success(filesToSend.length === 1 ? 'Pièce jointe envoyée.' : `${filesToSend.length} pièces jointes envoyées.`);
+        return;
+      }
       const res = await fetch('/api/messages', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -449,10 +530,30 @@ export default function ChatPage() {
         const data = await res.json();
         toast.error(data.error || 'Erreur lors de l\'envoi');
       }
-    } catch {
-      toast.error('Erreur réseau');
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        toast.info('Envoi annulé. Les fichiers non envoyés restent prêts à être renvoyés.');
+        return;
+      }
+      const networkFailure = !navigator.onLine || error instanceof TypeError;
+      if (networkFailure && selectedContact && (unsentFiles.length > 0 || unsentContent)) {
+        try {
+          await savePendingMessageDrafts({ schoolId, senderId: userId, recipientId: selectedContact.id, channel: 'admin-chat', content: unsentContent, files: unsentFiles });
+          setAttachmentFiles((current) => current.filter((file) => !unsentFiles.includes(file)));
+          setNewMessage('');
+          void listPendingMessageDrafts(schoolId, userId).then((drafts) => setQueuedDraftCount(drafts.length));
+          toast.info('Connexion perdue. Le message restant est enregistré comme brouillon et sera envoyé au retour du réseau.');
+          return;
+        } catch {
+          toast.error('Connexion perdue et brouillon non enregistré. Gardez cette page ouverte et réessayez.');
+          return;
+        }
+      }
+      toast.error(error instanceof Error ? error.message : 'Erreur réseau. Réessayez.');
     } finally {
       setSending(false);
+      uploadAbortRef.current = null;
+      setUploadProgress(null);
       setTimeout(() => inputRef.current?.focus(), 100);
     }
   };
@@ -712,6 +813,10 @@ export default function ChatPage() {
                                     <FileText className="w-4 h-4" /> {msg.attachmentName || 'Fichier'}
                                   </div>
                                 )}
+                                {msg.attachmentUrl && msg.messageType === 'image' && <a href={msg.attachmentUrl} target="_blank" rel="noreferrer"><img src={msg.attachmentUrl} alt={msg.attachmentName || 'Pièce jointe'} className="mb-2 max-h-64 max-w-full rounded-lg object-contain" loading="lazy" /></a>}
+                                {msg.attachmentUrl && msg.messageType === 'video' && <video src={msg.attachmentUrl} controls preload="metadata" className="mb-2 max-h-64 max-w-full rounded-lg" />}
+                                {msg.attachmentUrl && msg.messageType === 'audio' && <audio src={msg.attachmentUrl} controls preload="metadata" className="mb-2 w-full max-w-full" />}
+                                {msg.attachmentUrl && msg.messageType === 'file' && <a href={msg.attachmentUrl} target="_blank" rel="noreferrer" className="mb-2 flex items-center gap-2 rounded-lg border border-current/20 bg-black/5 p-2 text-xs underline"><FileText className="size-4 shrink-0" />{msg.attachmentName || 'Ouvrir la pièce jointe'}</a>}
 
                                 <p className="text-sm leading-relaxed break-words whitespace-pre-wrap">
                                   {isDeleted ? '🗑️ Message supprimé' : (editingMsg?.id === msg.id ? editContent : msg.content)}
@@ -822,7 +927,10 @@ export default function ChatPage() {
                       </button>
                     </div>
                   )}
+                  {queuedDraftCount > 0 && <p className="mb-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900" role="status">{queuedDraftCount} brouillon(s) en attente. Ils partiront automatiquement au retour de la connexion.</p>}
+                  {uploadProgress && <div className="mb-2 rounded-xl border bg-muted/30 p-3" role="status" aria-live="polite"><div className="flex items-center justify-between gap-3 text-xs"><span className="min-w-0 flex-1 truncate">Envoi de {uploadProgress.fileName}</span><span>{uploadProgress.percent}%</span><Button type="button" variant="ghost" size="icon" aria-label="Annuler l’envoi" title="Annuler l’envoi" onClick={() => uploadAbortRef.current?.abort()} className="size-8 shrink-0"><X className="size-4" /></Button></div><progress className="mt-2 h-2 w-full accent-primary" max={100} value={uploadProgress.percent} /></div>}
                   <div className="flex items-center gap-2">
+                    <MessageAttachmentPicker files={attachmentFiles} onFilesChange={setAttachmentFiles} disabled={sending || Boolean(replyTo || editingMsg)} />
                     <Input
                       ref={inputRef}
                       placeholder={replyTo ? 'Écrire une réponse...' : editingMsg ? 'Modifier le message...' : 'Écrire un message...'}
@@ -836,7 +944,7 @@ export default function ChatPage() {
                       size="icon"
                       className="h-10 w-10 shrink-0 bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-700 hover:to-blue-600 text-white shadow-md shadow-blue-500/20 transition-all duration-200 hover:brightness-110 active:scale-[0.95]"
                       onClick={handleSendMessage}
-                      disabled={!newMessage.trim() || sending}
+                      disabled={(!newMessage.trim() && attachmentFiles.length === 0) || sending}
                     >
                       {sending ? (
                         <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />

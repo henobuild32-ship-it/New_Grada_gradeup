@@ -16,7 +16,7 @@ function extractCardCode(value: string) {
 /** POST /api/presence/scan — pointage par QR depuis le panneau admin. */
 export async function POST(request: NextRequest) {
   try {
-    const auth = authenticateRequest(request);
+    const auth = await authenticateRequest(request);
     if (auth.role !== 'ADMIN') return NextResponse.json({ error: 'Pointage QR réservé à l’administration.' }, { status: 403 });
     const body = await request.json();
     const rawCode = typeof body?.code === 'string' ? body.code : '';

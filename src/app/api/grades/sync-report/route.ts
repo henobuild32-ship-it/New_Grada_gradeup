@@ -15,7 +15,7 @@ import { syncStudentReport, type SyncResult } from '@/lib/grade-sync';
 
 export async function POST(request: NextRequest) {
   try {
-    const auth = authenticateRequest(request);
+    const auth = await authenticateRequest(request);
     const body = await request.json();
     const { schoolId, classId, trimester, studentId } = body;
 
@@ -110,7 +110,7 @@ export async function POST(request: NextRequest) {
  */
 export async function GET(request: NextRequest) {
   try {
-    const auth = authenticateRequest(request);
+    const auth = await authenticateRequest(request);
     const { searchParams } = new URL(request.url);
     const schoolId = searchParams.get('schoolId');
     const studentId = searchParams.get('studentId');

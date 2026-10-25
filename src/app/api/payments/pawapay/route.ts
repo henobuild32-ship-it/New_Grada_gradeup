@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
+import { db } from '@/lib/db';
+import { authenticateRequestActive, AuthError } from '@/lib/auth/authenticate';
 
-const STUDENT_CARD_PRICE_CDF = Number(process.env.STUDENT_CARD_PRICE_CDF || 10000);
 
 /**
  * GeniusPay payment initiation endpoint.
@@ -9,13 +10,20 @@ const STUDENT_CARD_PRICE_CDF = Number(process.env.STUDENT_CARD_PRICE_CDF || 1000
  */
 export async function POST(request: NextRequest) {
   try {
+    const auth = await authenticateRequestActive(request);
+    if (auth.role !== 'CAISSIER') return NextResponse.json({ error: 'La caisse est réservée au caissier ou à la caissière.' }, { status: 403 });
     const body = await request.json();
     const { amount, currency, paymentMethod, mobileMoneyOperator, customer, description, successUrl, cancelUrl } = body;
 
     const parsedAmount = Number(amount);
-    if (!Number.isFinite(parsedAmount) || parsedAmount !== STUDENT_CARD_PRICE_CDF || currency !== 'CDF' || !successUrl || !cancelUrl) {
+    const school = await db.school.findFirst({ where: { id: auth.schoolId, deletedAt: null }, select: { studentCardPriceCdf: true } });
+    const allowedOrigin = new URL(request.url).origin;
+    const validReturnUrls = [successUrl, cancelUrl].every((value) => {
+      try { return new URL(value).origin === allowedOrigin; } catch { return false; }
+    });
+    if (!school || !Number.isFinite(parsedAmount) || parsedAmount !== school.studentCardPriceCdf || currency !== 'CDF' || !validReturnUrls) {
       return NextResponse.json(
-        { error: 'Le prix de la carte scolaire est fixé à 10 000 CDF.' },
+        { error: 'Le montant doit correspondre au prix des cartes configuré par la caisse et les URL de retour doivent appartenir à GradeUp.' },
         { status: 400 }
       );
     }
@@ -65,7 +73,7 @@ export async function POST(request: NextRequest) {
         metadata: {
           source: 'gradeup',
           module: 'student-card',
-          price_cdf: String(STUDENT_CARD_PRICE_CDF),
+          price_cdf: String(school.studentCardPriceCdf),
         },
       }),
     });
@@ -95,6 +103,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ redirectUrl }, { status: 200 });
   } catch (err) {
+    if (err instanceof AuthError) return NextResponse.json({ error: err.message }, { status: err.status });
     console.error('GeniusPay endpoint error:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }

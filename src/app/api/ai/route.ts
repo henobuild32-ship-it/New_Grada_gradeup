@@ -1,4 +1,4 @@
-import { NextRequest } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { generateGLMResponse } from '@/lib/ai/glm-provider';
 import { authenticateRequest, AuthError } from '@/lib/auth/authenticate';
@@ -497,9 +497,12 @@ ${schedules.map(s => `  - ${DAYS[s.dayOfWeek] || '?'} ${s.startTime}-${s.endTime
 
 export async function POST(request: NextRequest) {
   let auth;
-  try { auth = authenticateRequest(request); } catch (error) {
+  try { auth = await authenticateRequest(request); } catch (error) {
     if (error instanceof AuthError) return new Response(JSON.stringify({ error: error.message }), { status: error.status, headers: { 'Content-Type': 'application/json' } });
     return new Response(JSON.stringify({ error: 'Non authentifié.' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
+  }
+  if (auth.role === 'LECTEUR') {
+    return NextResponse.json({ error: 'L’accès à Gradie IA n’est pas disponible pour le rôle Lecteur.' }, { status: 403 });
   }
   const rl = rateLimit(`ai:${auth.userId || clientIp(request)}`, 20, 60 * 1000);
   if (!rl.ok) {

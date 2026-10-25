@@ -39,7 +39,7 @@ export async function sendPushNotification(
     const pushPayload = JSON.stringify({
       title: payload.title,
       body: payload.body,
-      icon: payload.icon || '/icons/icon-192x192.png',
+      icon: payload.icon || '/logo-gradeup.png',
       data: {
         url: payload.url || '/',
       },

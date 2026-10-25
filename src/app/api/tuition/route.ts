@@ -16,7 +16,7 @@ function isOverdue(dueDate: string, status: string, today: string) {
 export async function GET(request: NextRequest) {
   try {
     const auth = await authenticateRequestActive(request);
-    if (auth.role !== 'ADMIN' && auth.role !== 'PARENT') return NextResponse.json({ error: 'Accès non autorisé.' }, { status: 403 });
+    if (!['CAISSIER', 'LECTEUR', 'PARENT'].includes(auth.role)) return NextResponse.json({ error: 'Accès non autorisé.' }, { status: 403 });
 
     const { searchParams } = new URL(request.url);
     const isParent = auth.role === 'PARENT';
@@ -90,7 +90,7 @@ export async function GET(request: NextRequest) {
       isParent
         ? Promise.resolve([])
         : db.schoolClass.findMany({ where: { schoolId: auth.schoolId, deletedAt: null }, select: { id: true, name: true }, orderBy: { name: 'asc' } }),
-      db.school.findUnique({ where: { id: auth.schoolId }, select: { currency: true } }),
+      db.school.findUnique({ where: { id: auth.schoolId }, select: { currency: true, studentCardPriceCdf: true } }),
     ]);
 
     const today = new Date().toISOString().slice(0, 10);
@@ -141,11 +141,12 @@ export async function GET(request: NextRequest) {
         fees: expectedFees,
         installments: studentInstallments.map((item) => ({ ...item, isOverdue: isOverdue(item.dueDate, item.status, today) })),
         lastPayment: student.payments[0] ?? null,
+        cardPaid: !school?.studentCardPriceCdf || student.payments.some((payment) => payment.month === 'Carte scolaire' && payment.currency === 'CDF' && payment.amount === school.studentCardPriceCdf),
       };
     });
 
     const result = status ? mapped.filter((student) => student.paymentStatus === status) : mapped;
-    return NextResponse.json({ students: result, fees, classes, updatedAt: new Date().toISOString() });
+    return NextResponse.json({ students: result, fees, classes, cardPriceCdf: school?.studentCardPriceCdf ?? 0, updatedAt: new Date().toISOString() });
   } catch (error: unknown) {
     if (error instanceof AuthError) return NextResponse.json({ error: error.message }, { status: error.status });
     return NextResponse.json({ error: 'Impossible de charger le suivi des frais.' }, { status: 500 });
@@ -155,7 +156,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const auth = await authenticateRequestActive(request);
-    if (auth.role !== 'ADMIN') return NextResponse.json({ error: 'Accès réservé à l’administration.' }, { status: 403 });
+    if (auth.role !== 'CAISSIER') return NextResponse.json({ error: 'Accès réservé au caissier ou à la caissière.' }, { status: 403 });
 
     const parsed = reminderSchema.safeParse(await request.json());
     if (!parsed.success) return NextResponse.json({ error: 'Demande de rappel invalide.' }, { status: 400 });

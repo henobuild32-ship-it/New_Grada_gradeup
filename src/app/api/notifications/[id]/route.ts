@@ -84,7 +84,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const auth = authenticateRequest(request);
+    const auth = await authenticateRequest(request);
     const { id } = await params;
 
     const notification = await db.notification.findUnique({
@@ -130,7 +130,10 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const auth = authenticateRequest(request);
+    const auth = await authenticateRequest(request);
+    if (auth.role === 'LECTEUR') {
+      return NextResponse.json({ error: 'Le Lecteur peut uniquement envoyer des messages à l’administrateur.' }, { status: 403 });
+    }
     const { id } = await params;
     const body = await request.json();
     const { read, message, targetRole } = body;
@@ -185,7 +188,7 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const auth = authenticateRequest(request);
+    const auth = await authenticateRequest(request);
     if (auth.role !== 'ADMIN') {
       return NextResponse.json({ error: 'Accès non autorisé' }, { status: 403 });
     }

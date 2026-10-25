@@ -38,6 +38,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Aucun utilisateur modifiable sélectionné.' }, { status: 400 });
     }
 
+    if (action === 'activate' && validUsers.some((user) => (user.role === 'LECTEUR' || user.role === 'CAISSIER') && !user.active)) {
+      return NextResponse.json({ error: 'Un compte Lecteur ou Caissier révoqué doit se réinscrire avec le nouveau code.' }, { status: 409 });
+    }
+
     if (action === 'activate') {
       const changedUsers = validUsers.filter((user) => user.active === false);
       await db.user.updateMany({

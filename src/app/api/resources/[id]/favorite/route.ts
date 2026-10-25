@@ -14,6 +14,7 @@ export async function POST(
 ) {
   try {
     const auth = await requireAuth(req);
+    if (auth.role === 'LECTEUR') return NextResponse.json({ error: 'Le Lecteur dispose d’un accès en lecture seule.' }, { status: 403 });
     const { id } = await params;
     const { userId } = await req.json();
     if (!userId) return NextResponse.json({ error: 'userId requis.' }, { status: 400 });
@@ -40,6 +41,7 @@ export async function DELETE(
 ) {
   try {
     const auth = await requireAuth(req);
+    if (auth.role === 'LECTEUR') return NextResponse.json({ error: 'Le Lecteur dispose d’un accès en lecture seule.' }, { status: 403 });
     const { id } = await params;
     const { searchParams } = new URL(req.url);
     const userId = searchParams.get('userId');

@@ -1,4 +1,4 @@
-export type UserRole = 'ADMIN' | 'TEACHER' | 'STUDENT' | 'PARENT' | 'CAISSIER';
+export type UserRole = 'ADMIN' | 'TEACHER' | 'STUDENT' | 'PARENT' | 'CAISSIER' | 'LECTEUR';
 export type PaymentStatus = 'paid' | 'pending' | 'overdue' | 'late' | 'cancelled';
 export type AttendanceStatus = 'present' | 'absent' | 'late' | 'justified';
 export type ClassLevel = 'Maternelle' | 'Primaire' | 'Secondaire';
@@ -316,6 +316,9 @@ export type PageView =
   | 'admin-end-of-year'
   | 'caisse'
   | 'caisse-notifications'
+  | 'reader-dashboard'
+  | 'reader-audit'
+  | 'reader-messages'
   | 'teacher-reports'
   | 'teacher-end-of-year'
   | 'teacher-dashboard'
@@ -344,6 +347,7 @@ export type PageView =
   | 'parent-grades'
   | 'parent-bulletins'
   | 'parent-payments'
+  | 'parent-balance'
   | 'parent-notifications'
   | 'parent-ai'
   | 'admin-presence'

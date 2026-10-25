@@ -5,8 +5,7 @@ import { authenticateRequestActive, AuthError } from '@/lib/auth/authenticate';
 export async function GET(request: NextRequest) {
   try {
     const auth = await authenticateRequestActive(request);
-    if (auth.role !== 'ADMIN') return NextResponse.json({ error: 'Accès réservé à l’administration.' }, { status: 403 });
-    const { searchParams } = new URL(request.url);
+    if (auth.role !== 'ADMIN' && auth.role !== 'LECTEUR') return NextResponse.json({ error: 'Accès réservé à l’administration et au Lecteur.' }, { status: 403 });
     const schoolId = auth.schoolId;
 
     if (!schoolId) {
@@ -19,9 +18,6 @@ export async function GET(request: NextRequest) {
       totalParents,
       totalClasses,
       totalCourses,
-      totalPayments,
-      paidPayments,
-      pendingPayments,
       school,
     ] = await Promise.all([
       db.user.count({ where: { schoolId, role: 'STUDENT', active: true, deletedAt: null } }),
@@ -29,25 +25,9 @@ export async function GET(request: NextRequest) {
       db.user.count({ where: { schoolId, role: 'PARENT', active: true, deletedAt: null } }),
       db.schoolClass.count({ where: { schoolId, deletedAt: null } }),
       db.course.count({ where: { schoolId, deletedAt: null } }),
-      db.payment.findMany({ where: { schoolId, deletedAt: null }, select: { id: true } }),
-      db.payment.groupBy({
-        by: ['currency'],
-        where: { schoolId, deletedAt: null, status: 'paid' },
-        _sum: { amount: true },
-      }),
-      db.payment.groupBy({
-        by: ['currency'],
-        where: { schoolId, deletedAt: null, status: 'pending' },
-        _sum: { amount: true },
-      }),
       db.school.findUnique({ where: { id: schoolId }, select: { currency: true } }),
     ]);
-
-    const revenueByCurrency = Object.fromEntries(paidPayments.map((row) => [row.currency, row._sum.amount || 0]));
-    const pendingRevenueByCurrency = Object.fromEntries(pendingPayments.map((row) => [row.currency, row._sum.amount || 0]));
     const configuredCurrency = school?.currency || 'USD';
-    const totalRevenue = revenueByCurrency[configuredCurrency] || 0;
-    const pendingRevenue = pendingRevenueByCurrency[configuredCurrency] || 0;
 
     const attendanceToday = new Date().toISOString().split('T')[0];
     const [
@@ -73,11 +53,6 @@ export async function GET(request: NextRequest) {
         totalParents,
         totalClasses,
         totalCourses,
-        totalPayments: totalPayments.length,
-        totalRevenue,
-        pendingRevenue,
-        revenueByCurrency,
-        pendingRevenueByCurrency,
         currency: configuredCurrency,
         attendanceToday: {
           present: presentToday,

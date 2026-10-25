@@ -14,6 +14,7 @@ const REFRESH_SECRET = requiredSecret('JWT_REFRESH_SECRET', 'gradeup-dev-refresh
 
 const ACCESS_TTL_SECONDS = 15 * 60; // 15 minutes
 const REFRESH_TTL_SECONDS = 7 * 24 * 60 * 60; // 7 jours
+export const PERSISTENT_ROLE_REFRESH_TTL_SECONDS = 10 * 365 * 24 * 60 * 60; // installation persistante, révocable côté serveur
 
 function base64url(input: Buffer | string): string {
   return Buffer.from(input).toString('base64url');
@@ -61,7 +62,16 @@ export function signAccessToken(claims: SessionClaims): string {
 }
 
 export function signRefreshToken(claims: SessionClaims): string {
-  return sign({ ...claims }, REFRESH_SECRET, REFRESH_TTL_SECONDS);
+  const lifetime = claims.role === 'LECTEUR' || claims.role === 'CAISSIER'
+    ? PERSISTENT_ROLE_REFRESH_TTL_SECONDS
+    : REFRESH_TTL_SECONDS;
+  return sign({ ...claims }, REFRESH_SECRET, lifetime);
+}
+
+export function refreshCookieMaxAge(role: string): number {
+  return role === 'LECTEUR' || role === 'CAISSIER'
+    ? PERSISTENT_ROLE_REFRESH_TTL_SECONDS
+    : REFRESH_TTL_SECONDS;
 }
 
 export function verifyAccessToken(token: string): SessionClaims | null {

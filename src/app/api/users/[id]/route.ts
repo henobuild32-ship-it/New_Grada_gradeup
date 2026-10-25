@@ -12,7 +12,10 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const auth = authenticateRequest(request);
+    const auth = await authenticateRequest(request);
+    if (auth.role === 'LECTEUR') {
+      return NextResponse.json({ error: 'Le compte Lecteur est en consultation seule.' }, { status: 403 });
+    }
     const { id } = await params;
 
     // Un élève ne voit que son propre profil
@@ -62,7 +65,10 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const auth = authenticateRequest(request);
+    const auth = await authenticateRequest(request);
+    if (auth.role === 'LECTEUR') {
+      return NextResponse.json({ error: 'Le compte Lecteur est en consultation seule.' }, { status: 403 });
+    }
     const { id } = await params;
 
     const isSelf = id === auth.userId;
@@ -116,6 +122,9 @@ export async function PUT(
     // réservés à l'ADMIN — silencieusement ignorés côté self pour ne pas casser le front
     // (profile-page envoie notamment `email`).
     const roleChanged = isAdmin && role !== undefined && role !== existing.role;
+    if (roleChanged && (existing.role === 'LECTEUR' || existing.role === 'CAISSIER' || role === 'LECTEUR' || role === 'CAISSIER')) {
+      return NextResponse.json({ error: 'Le rôle Lecteur ou Caissier est géré par son code de confidentialité et ne peut pas être modifié ici.' }, { status: 409 });
+    }
 
     const user = await db.user.update({
       where: { id },
@@ -209,7 +218,7 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const auth = authenticateRequest(request);
+    const auth = await authenticateRequest(request);
     if (auth.role !== 'ADMIN') {
       return NextResponse.json({ error: 'Seul un administrateur peut supprimer des utilisateurs' }, { status: 403 });
     }

@@ -6,7 +6,7 @@ import { generateReadableCode, isUniqueConstraintError } from '@/lib/code-genera
 // POST: Generate or regenerate parent code for a student
 export async function POST(request: NextRequest) {
   try {
-    const auth = authenticateRequest(request);
+    const auth = await authenticateRequest(request);
     if (auth.role !== 'ADMIN') {
       return NextResponse.json({ error: 'Seul un administrateur peut générer le code de l’élève.' }, { status: 403 });
     }

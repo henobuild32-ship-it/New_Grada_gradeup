@@ -7,7 +7,7 @@ import { resolveClassCoefficients } from '@/lib/coefficient-resolver';
 /** Signaux de décision calculés à partir des données de l'établissement. */
 export async function GET(request: NextRequest) {
   try {
-    const auth = authenticateRequest(request);
+    const auth = await authenticateRequest(request);
     if (auth.role !== 'ADMIN') return NextResponse.json({ error: 'Réservé à l’administration.' }, { status: 403 });
 
     const students = await db.user.findMany({

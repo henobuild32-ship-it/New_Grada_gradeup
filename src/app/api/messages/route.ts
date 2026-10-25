@@ -8,6 +8,9 @@ import { handleApiError, assertFound } from '@/lib/api/errors';
 export async function GET(request: NextRequest) {
   try {
     const auth = await requireAuth(request);
+    if (auth.role !== 'ADMIN') {
+      return NextResponse.json({ error: 'Seuls le Lecteur et l’administration peuvent consulter la messagerie.' }, { status: 403 });
+    }
     const { searchParams } = new URL(request.url);
     const userId = searchParams.get('userId');
     const schoolId = searchParams.get('schoolId');
@@ -104,6 +107,9 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const auth = await requireAuth(request);
+    if (auth.role !== 'ADMIN' && auth.role !== 'LECTEUR') {
+      return NextResponse.json({ error: 'Seuls le Lecteur et l’administration peuvent utiliser cette messagerie.' }, { status: 403 });
+    }
     const body = await request.json();
     const { senderId, recipientId, content, schoolId } = body;
 
@@ -124,11 +130,17 @@ export async function POST(request: NextRequest) {
     const recipient = assertFound(
       await db.user.findUnique({
         where: { id: recipientId },
-        select: { schoolId: true },
+        select: { schoolId: true, role: true, active: true, deletedAt: true },
       }),
       'Destinataire introuvable.'
     );
     assertSchool(auth, recipient.schoolId);
+    if (recipient.deletedAt || !recipient.active) {
+      return NextResponse.json({ error: 'Ce destinataire n’est plus actif.' }, { status: 404 });
+    }
+    if (auth.role === 'LECTEUR' && recipient.role !== 'ADMIN') {
+      return NextResponse.json({ error: 'Le Lecteur peut uniquement écrire à l’administrateur de son école.' }, { status: 403 });
+    }
 
     const message = await db.message.create({
       data: {

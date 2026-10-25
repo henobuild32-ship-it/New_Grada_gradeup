@@ -25,6 +25,7 @@ async function assertMessageAccess(auth: AuthUser, messageId: string) {
 export async function POST(request: NextRequest) {
   try {
     const auth = await requireAuth(request);
+    if (auth.role === 'LECTEUR') return NextResponse.json({ error: 'Accès non autorisé.' }, { status: 403 });
     const { messageId, userId, emoji } = await request.json();
     if (!messageId || !userId || !emoji) {
       return NextResponse.json({ error: 'messageId, userId, emoji requis' }, { status: 400 });
@@ -58,6 +59,7 @@ export async function POST(request: NextRequest) {
 export async function GET(request: NextRequest) {
   try {
     const auth = await requireAuth(request);
+    if (auth.role === 'LECTEUR') return NextResponse.json({ error: 'Accès non autorisé.' }, { status: 403 });
     const { searchParams } = new URL(request.url);
     const messageId = searchParams.get('messageId');
     if (!messageId) {
@@ -93,6 +95,7 @@ export async function GET(request: NextRequest) {
 export async function DELETE(request: NextRequest) {
   try {
     const auth = await requireAuth(request);
+    if (auth.role === 'LECTEUR') return NextResponse.json({ error: 'Accès non autorisé.' }, { status: 403 });
     const { searchParams } = new URL(request.url);
     const id = searchParams.get('id');
     const userId = searchParams.get('userId');

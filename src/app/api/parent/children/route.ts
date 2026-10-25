@@ -8,7 +8,7 @@ export async function GET(request: NextRequest) {
     if (auth.role !== 'PARENT') return NextResponse.json({ error: 'Accès réservé aux parents.' }, { status: 403 });
     const children = await db.user.findMany({
       where: { parentId: auth.userId, role: 'STUDENT', active: true, deletedAt: null },
-      include: { school: { select: { id: true, name: true, logoUrl: true, academicYear: true } }, classEnrollments: { include: { class: { select: { id: true, name: true, level: true } } } } },
+      include: { school: { select: { id: true, name: true, logoUrl: true, academicYear: true } }, classEnrollments: { include: { class: { select: { id: true, name: true, level: true, cycle: true, section: true, option: true } } } } },
       orderBy: [{ school: { name: 'asc' } }, { fullName: 'asc' }],
     });
     return NextResponse.json({ children: children.map(child => ({ id: child.id, fullName: child.fullName, matricule: child.matricule, photoUrl: child.photoUrl, school: child.school, classEnrollments: child.classEnrollments })) });

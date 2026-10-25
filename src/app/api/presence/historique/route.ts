@@ -5,7 +5,7 @@ import { auditFromRequest } from '@/lib/api/audit';
 
 export async function GET(request: NextRequest) {
   try {
-    const auth = authenticateRequest(request);
+    const auth = await authenticateRequest(request);
     const { searchParams } = new URL(request.url);
     const schoolId = searchParams.get('schoolId');
     const userId = searchParams.get('userId');
@@ -18,7 +18,7 @@ export async function GET(request: NextRequest) {
     }
 
     const where: Record<string, unknown> = { schoolId, deletedAt: null };
-    if (auth.role === 'ADMIN') {
+    if (auth.role === 'ADMIN' || auth.role === 'LECTEUR') {
       if (userId) where.userId = userId;
     } else if (auth.role === 'PARENT') {
       const children = await db.user.findMany({
@@ -86,7 +86,7 @@ export async function GET(request: NextRequest) {
 
 export async function PUT(request: NextRequest) {
   try {
-    const auth = authenticateRequest(request);
+    const auth = await authenticateRequest(request);
     if (auth.role !== 'ADMIN') {
       return NextResponse.json({ error: 'Seul un administrateur peut valider des justifications' }, { status: 403 });
     }

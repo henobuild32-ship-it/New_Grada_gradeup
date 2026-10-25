@@ -56,7 +56,8 @@ function isAllowed(pathname: string, method: string): boolean {
 
 export async function POST(request: NextRequest) {
   try {
-    const auth = authenticateRequest(request);
+    const auth = await authenticateRequest(request);
+    if (auth.role === 'LECTEUR') return NextResponse.json({ error: 'La synchronisation d’écritures est désactivée pour le Lecteur.' }, { status: 403 });
     const rl = rateLimit(`sync-push:${auth.userId}`, WRITE_RATE_LIMIT.limit, WRITE_RATE_LIMIT.windowMs);
     if (!rl.ok) {
       return NextResponse.json(rateLimitResponse(rl.retryAfterSeconds), {

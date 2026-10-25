@@ -46,7 +46,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const auth = authenticateRequest(request);
+    const auth = await authenticateRequest(request);
     const { id } = await params;
 
     const lesson = await db.lesson.findUnique({
@@ -102,7 +102,7 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const auth = authenticateRequest(request);
+    const auth = await authenticateRequest(request);
     const { id } = await params;
     const body = await request.json();
     const { title, content, fileUrl, fileName } = body;
@@ -183,7 +183,7 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const auth = authenticateRequest(request);
+    const auth = await authenticateRequest(request);
     const { id } = await params;
 
     const existing = await db.lesson.findUnique({ where: { id } });

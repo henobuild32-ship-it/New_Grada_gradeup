@@ -5,7 +5,7 @@ import { assertYearOpen } from '@/lib/year-status';
 
 export async function POST(request: NextRequest) {
   try {
-    const auth = authenticateRequest(request);
+    const auth = await authenticateRequest(request);
     if (auth.role === 'PARENT') {
       return NextResponse.json({ error: 'Accès non autorisé' }, { status: 403 });
     }

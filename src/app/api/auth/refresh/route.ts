@@ -6,6 +6,8 @@ import {
   ACCESS_COOKIE,
   REFRESH_COOKIE,
   SessionClaims,
+  signRefreshToken,
+  refreshCookieMaxAge,
 } from '@/lib/auth/jwt';
 import { serializeUser } from '@/lib/auth/session';
 
@@ -54,6 +56,17 @@ export async function POST(req: NextRequest) {
 
     const response = NextResponse.json({ user: serializeUser(user, user.school), ok: true });
     response.cookies.set(ACCESS_COOKIE, newAccessToken, cookieOptions(15 * 60));
+    response.cookies.set(REFRESH_COOKIE, signRefreshToken({
+      sub: user.id,
+      schoolId: user.schoolId,
+      role: user.role,
+      name: user.fullName,
+      authVersion: user.authVersion ?? 0,
+    }), cookieOptions(refreshCookieMaxAge(user.role)));
+    await db.user.updateMany({
+      where: { id: user.id, active: true, authVersion: user.authVersion, OR: [{ lastActivityAt: null }, { lastActivityAt: { lt: new Date(Date.now() - 2 * 60 * 1000) } }] },
+      data: { lastActivityAt: new Date() },
+    });
     return response;
   } catch (error) {
     console.error('Error in /api/auth/refresh:', error);

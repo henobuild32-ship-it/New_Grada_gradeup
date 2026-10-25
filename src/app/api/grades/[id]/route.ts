@@ -20,7 +20,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const auth = authenticateRequest(request);
+    const auth = await authenticateRequest(request);
     const { id } = await params;
 
     const grade = await db.grade.findUnique({
@@ -64,7 +64,7 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const auth = authenticateRequest(request);
+    const auth = await authenticateRequest(request);
     if (auth.role === 'PARENT' || auth.role === 'STUDENT') {
       return NextResponse.json({ error: 'Accès non autorisé' }, { status: 403 });
     }
@@ -270,7 +270,7 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const auth = authenticateRequest(request);
+    const auth = await authenticateRequest(request);
     if (!['TEACHER', 'ADMIN'].includes(auth.role)) {
       return NextResponse.json({ error: 'Accès non autorisé' }, { status: 403 });
     }
@@ -308,7 +308,7 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const auth = authenticateRequest(request);
+    const auth = await authenticateRequest(request);
     if (auth.role === 'PARENT' || auth.role === 'STUDENT') {
       return NextResponse.json({ error: 'Accès non autorisé' }, { status: 403 });
     }

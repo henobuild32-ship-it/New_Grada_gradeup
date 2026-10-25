@@ -26,6 +26,7 @@ const TYPE_META: Record<ResType, { label: string; icon: any; color: string }> = 
 export default function LibraryHub() {
   const { user } = useAppStore();
   const isManager = user?.role === 'ADMIN' || user?.role === 'TEACHER';
+  const isReader = user?.role === 'LECTEUR';
 
   const [resources, setResources] = useState<RessourceInfo[]>([]);
   const [facets, setFacets] = useState<{ matiere: string[]; niveau: string[]; category: string[]; type: string[] }>({ matiere: [], niveau: [], category: [], type: [] });
@@ -351,9 +352,9 @@ export default function LibraryHub() {
                 {downloadedResources.includes(r.id) ? <CheckCircle2 className="w-4 h-4" /> : <Download className="w-4 h-4" />}
               </Button>
             )}
-            <Button size="icon" variant={r.isFavorite ? 'default' : 'outline'} className={r.isFavorite ? 'text-yellow-500' : ''} onClick={() => toggleFavorite(r)}>
+            {!isReader && <Button size="icon" variant={r.isFavorite ? 'default' : 'outline'} className={r.isFavorite ? 'text-yellow-500' : ''} onClick={() => toggleFavorite(r)}>
               <Star className="w-4 h-4" fill={r.isFavorite ? 'currentColor' : 'none'} />
-            </Button>
+            </Button>}
           </div>
         </CardContent>
       </Card>
@@ -439,7 +440,7 @@ export default function LibraryHub() {
       <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)}>
         <TabsList>
           <TabsTrigger value="catalogue">Catalogue</TabsTrigger>
-          <TabsTrigger value="favoris">Favoris</TabsTrigger>
+          {!isReader && <TabsTrigger value="favoris">Favoris</TabsTrigger>}
           <TabsTrigger value="recents"><Clock className="w-3.5 h-3.5 mr-1" />Récents</TabsTrigger>
         </TabsList>
 

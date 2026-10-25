@@ -75,8 +75,8 @@ export async function POST(request: NextRequest) {
       const pushPayload = JSON.stringify({
         title,
         body: message,
-        icon: '/icon-192x192.png',
-        badge: '/icon-192x192.png',
+        icon: '/logo-gradeup.png',
+        badge: '/logo-gradeup.png',
         tag: 'gradeup-update',
         requireInteraction: true,
         data: { url: '/', type: 'APP_UPDATE', version: APP_VERSION },

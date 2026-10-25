@@ -60,6 +60,7 @@ export async function GET(req: NextRequest) {
 export async function PUT(req: NextRequest) {
   try {
     const auth = await requireAuth(req);
+    if (auth.role === 'LECTEUR') return new Response(JSON.stringify({ error: 'Le Lecteur dispose d’un accès en lecture seule.' }), { status: 403, headers: { 'Content-Type': 'application/json' } });
     const body = await req.json();
     const data = parseOrThrow(notificationPreferenceSchema, body);
 

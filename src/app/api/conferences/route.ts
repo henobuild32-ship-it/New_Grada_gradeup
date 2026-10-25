@@ -9,16 +9,17 @@ const prisma = db;
 
 export async function GET(req: NextRequest) {
   try {
-    const auth = authenticateRequest(req);
+    const auth = await authenticateRequestActive(req);
     const { searchParams } = new URL(req.url);
-    const schoolId = searchParams.get('schoolId');
+    const requestedSchoolId = searchParams.get('schoolId');
+    const schoolId = auth.schoolId;
 
     if (!schoolId) {
       return NextResponse.json({ error: 'schoolId is required' }, { status: 400 });
     }
 
     // Seul un utilisateur de la même école peut lister les visioconférences
-    if (auth.schoolId !== schoolId && auth.role !== 'ADMIN') {
+    if (!schoolId || (requestedSchoolId && requestedSchoolId !== schoolId)) {
       return NextResponse.json({ error: 'Accès non autorisé' }, { status: 403 });
     }
 

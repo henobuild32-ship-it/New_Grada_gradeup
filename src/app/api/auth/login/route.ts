@@ -125,7 +125,7 @@ export async function POST(request: NextRequest) {
       if (email && email.trim()) {
         const normalizedEmail = email.trim().toLowerCase();
         const candidate = await db.user.findFirst({
-          where: { schoolId: school.id, email: { equals: normalizedEmail, mode: 'insensitive' } },
+          where: { schoolId: school.id, active: true, deletedAt: null, email: { equals: normalizedEmail, mode: 'insensitive' } },
           include: {
             school: true,
             classEnrollments: { include: { class: true } },
@@ -149,6 +149,7 @@ export async function POST(request: NextRequest) {
           where: {
             schoolId: school.id,
             active: true,
+            deletedAt: null,
           },
           include: {
             school: true,

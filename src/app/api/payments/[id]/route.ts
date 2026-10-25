@@ -35,9 +35,7 @@ export async function GET(
     }
 
     if (payment.schoolId !== auth.schoolId) return NextResponse.json({ error: 'Accès non autorisé' }, { status: 403 });
-    if (auth.role === 'STUDENT' && payment.studentId !== auth.userId) return NextResponse.json({ error: 'Accès non autorisé' }, { status: 403 });
-    if (auth.role === 'PARENT' && payment.student?.parentId !== auth.userId) return NextResponse.json({ error: 'Accès non autorisé' }, { status: 403 });
-    if (!['ADMIN', 'CAISSIER', 'STUDENT', 'PARENT'].includes(auth.role)) return NextResponse.json({ error: 'Accès non autorisé' }, { status: 403 });
+    if (!['CAISSIER', 'LECTEUR'].includes(auth.role)) return NextResponse.json({ error: 'Accès non autorisé' }, { status: 403 });
 
     return NextResponse.json({ payment });
   } catch (error: unknown) {
@@ -68,9 +66,9 @@ export async function PUT(
       return NextResponse.json({ error: 'Payment not found' }, { status: 404 });
     }
 
-    // Admin uniquement, et admin de la même école
-    if (auth.role !== 'ADMIN' || existing.schoolId !== auth.schoolId) {
-      return NextResponse.json({ error: 'Accès non autorisé. Action réservée aux administrateurs.' }, { status: 403 });
+    // Seul le caissier de la même école peut modifier les paiements.
+    if (auth.role !== 'CAISSIER' || existing.schoolId !== auth.schoolId) {
+      return NextResponse.json({ error: 'Accès non autorisé. Action réservée au caissier.' }, { status: 403 });
     }
 
     const payment = await db.payment.update({
@@ -121,9 +119,9 @@ export async function DELETE(
       return NextResponse.json({ error: 'Payment not found' }, { status: 404 });
     }
 
-    // Admin uniquement, et admin de la même école
-    if (auth.role !== 'ADMIN' || existing.schoolId !== auth.schoolId) {
-      return NextResponse.json({ error: 'Accès non autorisé. Action réservée aux administrateurs.' }, { status: 403 });
+    // Seul le caissier de la même école peut modifier les paiements.
+    if (auth.role !== 'CAISSIER' || existing.schoolId !== auth.schoolId) {
+      return NextResponse.json({ error: 'Accès non autorisé. Action réservée au caissier.' }, { status: 403 });
     }
 
     await db.payment.update({ where: { id }, data: { deletedAt: new Date() } });

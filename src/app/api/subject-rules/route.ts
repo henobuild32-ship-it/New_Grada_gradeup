@@ -20,7 +20,16 @@ export async function GET(req: NextRequest) {
       schoolId,
       academicYear,
     };
-    if (classId) whereClause.classId = classId;
+    if (auth.role === 'TEACHER') {
+      const assigned = await db.course.findMany({ where: { schoolId, teacherId: auth.userId, deletedAt: null }, select: { classId: true }, distinct: ['classId'] });
+      const allowedClassIds = assigned.map((item) => item.classId);
+      if (classId && !allowedClassIds.includes(classId)) return NextResponse.json({ error: 'Cette classe ne vous est pas attribuée.' }, { status: 403 });
+      whereClause.classId = classId || { in: allowedClassIds };
+    } else if (auth.role === 'ADMIN' || auth.role === 'LECTEUR') {
+      if (classId) whereClause.classId = classId;
+    } else {
+      return NextResponse.json({ error: 'Accès réservé à l’administration, au Lecteur et aux professeurs.' }, { status: 403 });
+    }
 
     const rules = await db.subjectRule.findMany({
       where: whereClause,

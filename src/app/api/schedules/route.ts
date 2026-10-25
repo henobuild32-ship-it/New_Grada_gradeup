@@ -44,7 +44,7 @@ export async function GET(request: NextRequest) {
         },
       });
       allowedClassIds = [...new Set(children.flatMap((child) => child.classEnrollments.map((enrollment) => enrollment.classId)))];
-    } else if (auth.role !== 'ADMIN') {
+    } else if (auth.role !== 'ADMIN' && auth.role !== 'LECTEUR') {
       return NextResponse.json({ error: 'Accès non autorisé' }, { status: 403 });
     }
 

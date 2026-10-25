@@ -1,6 +1,7 @@
 import type { LucideIcon } from 'lucide-react';
 import {
   LayoutDashboard,
+  Eye,
   Users,
   CreditCard,
   Settings,
@@ -49,6 +50,7 @@ export const ROLE_LABELS: Record<UserRole, string> = {
   TEACHER: 'Professeur',
   STUDENT: 'Élève',
   PARENT: 'Parent',
+  LECTEUR: 'Lecteur',
 };
 
 export const ROLE_BADGE_COLORS: Record<UserRole, string> = {
@@ -57,6 +59,7 @@ export const ROLE_BADGE_COLORS: Record<UserRole, string> = {
   TEACHER: 'bg-emerald-100 text-emerald-700',
   STUDENT: 'bg-violet-100 text-violet-700',
   PARENT: 'bg-amber-100 text-amber-700',
+  LECTEUR: 'bg-sky-100 text-sky-700',
 };
 
 /** Menu complet par rôle (sidebar desktop/tablette + tiroir « Plus » mobile). */
@@ -65,8 +68,6 @@ export const NAV_ITEMS_BY_ROLE: Record<UserRole, NavItem[]> = {
     { label: 'Tableau de bord', page: 'admin-dashboard', icon: LayoutDashboard, emoji: '📊' },
     { label: 'Utilisateurs', page: 'admin-users', icon: Users, emoji: '👥' },
     { label: 'Classes', page: 'admin-classes', icon: School, emoji: '🏫' },
-    { label: 'Paiements', page: 'admin-payments', icon: CreditCard, emoji: '💳' },
-    { label: 'Frais scolaires', page: 'admin-tuition', icon: DollarSign, emoji: '💰' },
     { label: 'Cartes Élèves', page: 'admin-cards', icon: IdCard, emoji: '🆔' },
     { label: 'Configuration', page: 'admin-config', icon: Settings, emoji: '⚙️' },
     { label: 'Présence', page: 'admin-presence', icon: ClipboardCheck, emoji: '✅' },
@@ -95,6 +96,8 @@ export const NAV_ITEMS_BY_ROLE: Record<UserRole, NavItem[]> = {
   ],
   CAISSIER: [
     { label: 'Caisse', page: 'caisse', icon: DollarSign, emoji: '💵' },
+    { label: 'Frais scolaires', page: 'admin-tuition', icon: CreditCard, emoji: '💳' },
+    { label: 'Paiements', page: 'admin-payments', icon: ScrollText, emoji: '🧾' },
     { label: 'Notifications', page: 'caisse-notifications', icon: Bell, emoji: '🔔' },
     { label: 'Profil', page: 'profile', icon: User, emoji: '👤' },
     { label: 'Aide', page: 'help', icon: Lightbulb, emoji: '💡' },
@@ -118,7 +121,6 @@ export const NAV_ITEMS_BY_ROLE: Record<UserRole, NavItem[]> = {
     { label: 'Cahier de Cotation', page: 'cahier-cotation', icon: ClipboardList, emoji: '📖' },
     { label: 'Demandes de notes', page: 'admin-note-modifications', icon: PenLine, emoji: '✍️' },
     { label: 'Fin du cursus', page: 'teacher-end-of-year', icon: GraduationCap, emoji: '🎓' },
-    { label: 'Messagerie', page: 'messages', icon: MessageSquare, emoji: '💬' },
     { label: 'Calendrier', page: 'calendar', icon: CalendarDays, emoji: '📆' },
     { label: 'Profil', page: 'profile', icon: User, emoji: '👤' },
     { label: 'Hors ligne & Sync', page: 'sync-center', icon: Zap, emoji: '🔄' },
@@ -130,7 +132,6 @@ export const NAV_ITEMS_BY_ROLE: Record<UserRole, NavItem[]> = {
     { label: 'Emploi du temps', page: 'student-schedules', icon: CalendarDays, emoji: '🗓️' },
     { label: 'Leçons', page: 'student-lessons', icon: FileText, emoji: '📖' },
     { label: 'Notes', page: 'student-grades', icon: ClipboardList, emoji: '📝' },
-    { label: 'Paiements', page: 'student-payments', icon: CreditCard, emoji: '💳' },
     { label: 'Bulletins', page: 'student-bulletins', icon: Award, emoji: '🏆' },
     { label: 'Devoirs', page: 'student-homework', icon: ClipboardCheck, emoji: '📋' },
     { label: 'Absences', page: 'student-attendance', icon: Calendar, emoji: '📅' },
@@ -146,15 +147,40 @@ export const NAV_ITEMS_BY_ROLE: Record<UserRole, NavItem[]> = {
     { label: 'Tableau de bord', page: 'parent-dashboard', icon: LayoutDashboard, emoji: '📊' },
     { label: 'Suivi scolaire', page: 'parent-grades', icon: BarChart3, emoji: '📊' },
     { label: 'Bulletins', page: 'parent-bulletins', icon: Award, emoji: '🏆' },
-    { label: 'Paiements', page: 'parent-payments', icon: CreditCard, emoji: '💳' },
+    { label: 'Solde & reçus', page: 'parent-balance', icon: CreditCard, emoji: '🧾' },
     { label: 'IA Gradie', page: 'parent-ai', icon: Bot, emoji: '🤖' },
     { label: 'Visioconférences', page: 'meetings', icon: Video, emoji: '🎥' },
     { label: 'Bibliothèque', page: 'library', icon: Library, emoji: '📚' },
     { label: 'Notifications', page: 'parent-notifications', icon: Bell, emoji: '🔔' },
-    { label: 'Messagerie', page: 'messages', icon: MessageSquare, emoji: '💬' },
     { label: 'Profil', page: 'profile', icon: User, emoji: '👤' },
     { label: 'Hors ligne & Sync', page: 'sync-center', icon: Zap, emoji: '🔄' },
     { label: 'Aide', page: 'help', icon: Lightbulb, emoji: '💡' },
+  ],
+  LECTEUR: [
+    { label: 'Vue en lecture seule', page: 'reader-dashboard', icon: Eye, emoji: '👁️' },
+    { label: 'Utilisateurs actifs', page: 'admin-users', icon: Users, emoji: '👥' },
+    { label: 'Classes', page: 'admin-classes', icon: School, emoji: '🏫' },
+    { label: 'Cours', page: 'admin-courses', icon: BookOpen, emoji: '📚' },
+    { label: 'Présences', page: 'admin-presence', icon: ClipboardCheck, emoji: '✅' },
+    { label: 'Paiements en lecture seule', page: 'admin-payments', icon: CreditCard, emoji: '💳' },
+    { label: 'Frais et soldes', page: 'admin-tuition', icon: DollarSign, emoji: '💰' },
+    { label: 'Cartes élèves', page: 'admin-cards', icon: IdCard, emoji: '🆔' },
+    { label: 'Rapports', page: 'admin-reports', icon: BarChart3, emoji: '📈' },
+    { label: 'Bulletins', page: 'admin-bulletins', icon: Award, emoji: '🏆' },
+    { label: 'Emplois du temps', page: 'admin-schedules', icon: CalendarDays, emoji: '🗓️' },
+    { label: 'Calendrier des périodes', page: 'admin-school-calendar', icon: CalendarDays, emoji: '📆' },
+    { label: 'Coefficients', page: 'admin-coefficients', icon: SlidersHorizontal, emoji: '⚖️' },
+    { label: 'Cotation', page: 'admin-cotation-rules', icon: ClipboardList, emoji: '📝' },
+    { label: 'Validation des notes', page: 'admin-grade-validation', icon: ClipboardCheck, emoji: '✅' },
+    { label: 'Demandes de notes', page: 'admin-note-modifications', icon: PenLine, emoji: '✍️' },
+    { label: 'Passages', page: 'admin-passages', icon: GraduationCap, emoji: '🎓' },
+    { label: 'Fin du cursus', page: 'admin-end-of-year', icon: GraduationCap, emoji: '🎓' },
+    { label: 'Communiqués', page: 'admin-notifications', icon: Bell, emoji: '🔔' },
+    { label: 'Réunions', page: 'admin-conferences', icon: Video, emoji: '🎥' },
+    { label: 'Bibliothèque', page: 'library', icon: Library, emoji: '📚' },
+    { label: 'Calendrier', page: 'calendar', icon: CalendarDays, emoji: '📆' },
+    { label: 'Journal d’audit', page: 'reader-audit', icon: ScrollText, emoji: '🧾' },
+    { label: 'Écrire à l’administrateur', page: 'reader-messages', icon: MessageSquare, emoji: '💬' },
   ],
 };
 
@@ -166,11 +192,13 @@ export const PRIMARY_TABS_BY_ROLE: Record<UserRole, NavItem[]> = {
   ADMIN: [
     { label: 'Accueil', page: 'admin-dashboard', icon: LayoutDashboard, emoji: '📊' },
     { label: 'Classes', page: 'admin-classes', icon: School, emoji: '🏫' },
-    { label: 'Paiements', page: 'admin-payments', icon: CreditCard, emoji: '💳' },
+    { label: 'Utilisateurs', page: 'admin-users', icon: Users, emoji: '👥' },
     { label: 'Profil', page: 'profile', icon: User, emoji: '👤' },
   ],
   CAISSIER: [
     { label: 'Caisse', page: 'caisse', icon: DollarSign, emoji: '💵' },
+    { label: 'Frais', page: 'admin-tuition', icon: CreditCard, emoji: '💳' },
+    { label: 'Notifications', page: 'caisse-notifications', icon: Bell, emoji: '🔔' },
     { label: 'Profil', page: 'profile', icon: User, emoji: '👤' },
   ],
   TEACHER: [
@@ -188,8 +216,15 @@ export const PRIMARY_TABS_BY_ROLE: Record<UserRole, NavItem[]> = {
   PARENT: [
     { label: 'Accueil', page: 'parent-dashboard', icon: LayoutDashboard, emoji: '📊' },
     { label: 'Suivi', page: 'parent-grades', icon: BarChart3, emoji: '📊' },
-    { label: 'Paiements', page: 'parent-payments', icon: CreditCard, emoji: '💳' },
+    { label: 'Solde & reçus', page: 'parent-balance', icon: CreditCard, emoji: '🧾' },
     { label: 'Profil', page: 'profile', icon: User, emoji: '👤' },
+  ],
+  LECTEUR: [
+    { label: 'Vue', page: 'reader-dashboard', icon: Eye, emoji: '👁️' },
+    { label: 'Classes', page: 'admin-classes', icon: School, emoji: '🏫' },
+    { label: 'Présences', page: 'admin-presence', icon: ClipboardCheck, emoji: '✅' },
+    { label: 'Paiements', page: 'admin-payments', icon: CreditCard, emoji: '💳' },
+    { label: 'Journal', page: 'reader-audit', icon: ScrollText, emoji: '🧾' },
   ],
 };
 
@@ -225,6 +260,9 @@ export const PAGE_TITLES: Record<PageView, string> = {
   'admin-end-of-year': 'Fin du cursus',
   caisse: 'Caisse',
   'caisse-notifications': 'Notifications',
+  'reader-dashboard': 'Espace Lecteur',
+  'reader-audit': 'Journal d’audit',
+  'reader-messages': 'Écrire à l’administrateur',
   'teacher-dashboard': 'Tableau de bord',
   'teacher-courses': 'Cours',
   'teacher-classes': 'Mes Classes',
@@ -253,6 +291,7 @@ export const PAGE_TITLES: Record<PageView, string> = {
   'parent-grades': 'Suivi scolaire',
   'parent-bulletins': 'Bulletins',
   'parent-payments': 'Paiements',
+  'parent-balance': 'Solde et reçus',
   'parent-notifications': 'Notifications',
   'parent-ai': 'IA Gradie',
   profile: 'Profil',
@@ -284,6 +323,7 @@ export const NOTIFICATION_PAGE_BY_ROLE: Record<UserRole, PageView> = {
   TEACHER: 'teacher-notifications',
   STUDENT: 'student-notifications',
   PARENT: 'parent-notifications',
+  LECTEUR: 'reader-audit',
 };
 
 export function getNotificationPage(role: UserRole): PageView {
