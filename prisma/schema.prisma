@@ -59,7 +59,6 @@ model School {
   calendrier              CalendrierScolaire[]
   coefficients            Coefficient[]
   passages                PassageHistorique[]
-  noteModifications       NoteModification[]
   subjectRules            SubjectRule[]
   gradingDecisionRules    GradingDecisionRule[]
   academicClosures        AcademicClosure[]
@@ -74,6 +73,7 @@ model School {
   notificationPreferences NotificationPreference[]
   confidentialAccessCodes ConfidentialAccessCode[]
   humanitiesSections      HumanitiesSection[]
+  announcements           Announcement[]
 
   @@index([subscriptionStatus])
   @@index([inviteCode])
@@ -201,8 +201,6 @@ model User {
   validatedBulletinsAsTitulaire  Bulletin[]                @relation("BulletinTitulaireValidator")
   validatedBulletinsAsAdmin      Bulletin[]                @relation("BulletinAdminValidator")
   passageHistoriques             PassageHistorique[]       @relation("PassageStudent")
-  noteModifications              NoteModification[]        @relation("NoteModificationStudent")
-  noteModificationsFaites        NoteModification[]        @relation("NoteModificationModifier")
   auditLogs                      AuditLog[]
   absenceJustificationsExplained AbsenceJustification[]    @relation("JustificationExplainer")
   absenceJustificationsReviewed  AbsenceJustification[]    @relation("JustificationReviewer")
@@ -210,6 +208,8 @@ model User {
   eventsCreated                  Event[]
   notificationPreference         NotificationPreference?
   conversationParticipants       ConversationParticipant[]
+  announcementsAuthored          Announcement[]            @relation("AnnouncementAuthor")
+  announcementReads              AnnouncementRead[]        @relation("AnnouncementReads")
   version                        Int                       @default(1)
 
   @@index([schoolId, fullName, role])
@@ -324,7 +324,6 @@ model Course {
   transmissions     CotationTransmission[]
   attendanceCourse  Attendance[]
   coefficients      Coefficient[]
-  noteModifications NoteModification[]
   subjectRules      SubjectRule[]
 
   @@unique([schoolId, classId, name])
@@ -387,7 +386,6 @@ model Grade {
   student       User               @relation("GradeStudent", fields: [studentId], references: [id], onDelete: Cascade)
   teacher       User               @relation("GradeTeacher", fields: [teacherId], references: [id], onDelete: Restrict)
   history       GradeHistory[]
-  modifications NoteModification[]
   validatedBy   User?              @relation("GradeValidator", fields: [validatedById], references: [id], onDelete: SetNull)
 
   @@index([schoolId, courseId, studentId, trimester])
@@ -615,6 +613,55 @@ model Notification {
 
   @@index([schoolId, userId, read])
   @@index([schoolId, targetRole, targetClassId])
+}
+
+/// Communiqué officiel rédigé par l'administration. Contrairement à une simple
+/// notification, il possède une audience structurée (tout le monde, rôles,
+/// classes, élèves précis ou personnes précises) et un suivi de lecture.
+model Announcement {
+  id             String    @id @default(cuid())
+  schoolId       String
+  authorId       String
+  title          String
+  content        String
+  category       String    @default("GENERAL")
+  priority       String    @default("NORMAL")
+  audienceType   String    @default("ALL")
+  targetRoles    String[]  @default([])
+  targetClassIds String[]  @default([])
+  targetUserIds  String[]  @default([])
+  contextClassId String    @default("")
+  recipientCount Int       @default(0)
+  published      Boolean   @default(true)
+  publishedAt    DateTime  @default(now())
+  expiresAt      DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  deletedAt      DateTime?
+
+  school School             @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  author User               @relation("AnnouncementAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+  reads  AnnouncementRead[]
+
+  @@index([schoolId, publishedAt])
+  @@index([schoolId, audienceType])
+  @@index([schoolId, deletedAt])
+}
+
+/// Une seule trace de lecture par utilisateur et par communiqué.
+model AnnouncementRead {
+  id             String   @id @default(cuid())
+  announcementId String
+  userId         String
+  schoolId       String
+  readAt         DateTime @default(now())
+
+  announcement Announcement @relation(fields: [announcementId], references: [id], onDelete: Cascade)
+  user         User         @relation("AnnouncementReads", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([announcementId, userId])
+  @@index([userId, schoolId])
+  @@index([announcementId])
 }
 
 model VideoConference {
@@ -1022,33 +1069,6 @@ model PassageHistorique {
   @@index([schoolId, result])
 }
 
-model NoteModification {
-  id            String   @id @default(cuid())
-  noteId        String
-  schoolId      String
-  studentId     String
-  courseId      String
-  modifierId    String
-  oldValue      Float
-  newValue      Float
-  oldMax        Float
-  newMax        Float
-  reason        String
-  requestStatus String   @default("PENDING")
-  ipAddress     String   @default("")
-  createdAt     DateTime @default(now())
-
-  note     Grade  @relation(fields: [noteId], references: [id], onDelete: Cascade)
-  school   School @relation(fields: [schoolId], references: [id], onDelete: Cascade)
-  student  User   @relation("NoteModificationStudent", fields: [studentId], references: [id], onDelete: Cascade)
-  course   Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
-  modifier User   @relation("NoteModificationModifier", fields: [modifierId], references: [id], onDelete: Cascade)
-
-  @@index([schoolId, requestStatus])
-  @@index([studentId, courseId])
-  @@index([modifierId, createdAt])
-  @@index([schoolId, createdAt])
-}
 
 model EPSTCurriculum {
   id         String    @id @default(cuid())

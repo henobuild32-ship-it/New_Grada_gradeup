@@ -40,6 +40,19 @@ export function periodToTrimester(period: string): string {
 }
 
 /**
+ * Année scolaire active (OPEN) de l'école : les lectures du cahier sont
+ * filtrées sur cette année, toute colonne créée sans elle est invisible.
+ */
+async function activeSchoolYearId(schoolId: string): Promise<string | null> {
+  const year = await db.schoolYear.findFirst({
+    where: { schoolId, status: 'OPEN', deletedAt: null },
+    orderBy: { createdAt: 'desc' },
+    select: { id: true },
+  });
+  return year?.id ?? null;
+}
+
+/**
  * Trouve (ou crée) la colonne d'évaluation du cahier correspondant à une
  * saisie depuis le module Notes. Sans métadonnée, la colonne "Saisie rapide"
  * historique est conservée pour la grille rapide.
@@ -53,10 +66,36 @@ export async function ensureQuickEvaluation(params: {
   title?: string;
   maxScore?: number;
   date?: Date;
+  schoolYearId?: string | null;
+  /** Lors d'une modification, on réutilise la colonne qui porte déjà la note de cet élève. */
+  studentId?: string;
 }) {
   const { schoolId, classId, courseId, teacherId, period } = params;
   const title = params.title?.trim() || QUICK_EVALUATION_TITLE;
   const maxScore = params.maxScore && params.maxScore > 0 ? params.maxScore : 20;
+  const schoolYearId = params.schoolYearId !== undefined ? params.schoolYearId : await activeSchoolYearId(schoolId);
+
+  // Modification d'une note : on ne connaît plus le libellé de l'évaluation,
+  // on retrouve donc la colonne qui contient déjà la note de cet élève.
+  if (params.studentId) {
+    const mark = await db.cahierMark.findFirst({
+      where: {
+        studentId: params.studentId,
+        evaluation: { schoolId, classId, courseId, trimester: period, deletedAt: null },
+      },
+      orderBy: { evaluation: { date: 'desc' } },
+      select: { evaluationId: true },
+    });
+    if (mark) {
+      const linked = await db.cahierEvaluation.findUnique({ where: { id: mark.evaluationId } });
+      if (linked) {
+        if (!linked.schoolYearId && schoolYearId) {
+          return db.cahierEvaluation.update({ where: { id: linked.id }, data: { schoolYearId } });
+        }
+        return linked;
+      }
+    }
+  }
 
   const existing = await db.cahierEvaluation.findFirst({
     where: {
@@ -71,11 +110,19 @@ export async function ensureQuickEvaluation(params: {
     orderBy: { createdAt: 'desc' },
   });
 
-  if (existing) return existing;
+  if (existing) {
+    // Colonne héritée sans année scolaire : on la rattache à l'année active
+    // pour qu'elle réapparaisse dans le cahier.
+    if (!existing.schoolYearId && schoolYearId) {
+      return db.cahierEvaluation.update({ where: { id: existing.id }, data: { schoolYearId } });
+    }
+    return existing;
+  }
 
   return db.cahierEvaluation.create({
     data: {
       schoolId,
+      schoolYearId,
       classId,
       courseId,
       teacherId,

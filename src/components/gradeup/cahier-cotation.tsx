@@ -112,6 +112,16 @@ interface OcrImportResult {
   studentRoster: Student[];
 }
 
+/** Libellés des périodes RDC du secondaire. */
+const PERIOD_LABELS: Record<string, string> = {
+  P1: '1ère Période (P1)',
+  P2: '2ème Période (P2)',
+  EX1: 'Examen 1er Semestre (EX1)',
+  P3: '3ème Période (P3)',
+  P4: '4ème Période (P4)',
+  EX2: 'Examen 2ème Semestre (EX2)',
+};
+
 function normalizeOcrName(value: string) {
   return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 }
@@ -724,6 +734,45 @@ export default function CahierCotation() {
     return count > 0 ? Math.round((sum / count) * 10) / 10 : 0;
   };
 
+  // ── Contexte affiché au-dessus de la grille (cours, classe, période, année) ──
+  const selectedCourseInfo = courses.find((c) => c.id === selectedCourseId) || null;
+  const selectedClassInfo = classes.find((c) => c.id === selectedClassId) || null;
+  const selectedYearLabel =
+    schoolYears.find((y) => y.id === selectedSchoolYearId)?.year ||
+    (() => {
+      const now = new Date();
+      const year = now.getFullYear();
+      const start = now.getMonth() >= 8 ? year : year - 1;
+      return `${start}-${start + 1}`;
+    })();
+
+  /** Total obtenu / total possible / nombre de notes d'une colonne. */
+  const getColumnTotals = (evaluation: Evaluation) => {
+    let obtained = 0;
+    let maxTotal = 0;
+    let count = 0;
+    for (const student of students) {
+      const mark = evaluation.marks.find((m) => m.studentId === student.id);
+      if (!mark) continue;
+      const max = evaluation.maxScore > 0 ? evaluation.maxScore : 20;
+      obtained += mark.score;
+      maxTotal += max;
+      count += 1;
+    }
+    return {
+      obtained: Math.round(obtained * 100) / 100,
+      maxTotal: Math.round(maxTotal * 100) / 100,
+      count,
+    };
+  };
+
+  /** Moyenne de la classe sur la période (moyenne des moyennes /20). */
+  const getClassPeriodAverage = () => {
+    if (students.length === 0) return 0;
+    const total = students.reduce((sum, student) => sum + getStudentPeriodAverage(student.id), 0);
+    return Math.round((total / students.length) * 10) / 10;
+  };
+
   // Print function
   const handlePrint = () => {
     window.print();
@@ -956,14 +1005,28 @@ export default function CahierCotation() {
               </div>
               <div>
                 <strong>Année Scolaire:</strong>{' '}
-                {(() => {
-                  const now = new Date();
-                  const y = now.getFullYear();
-                  const start = now.getMonth() >= 8 ? y : y - 1;
-                  return `${start}-${start + 1}`;
-                })()}
+                {selectedYearLabel}
               </div>
             </div>
+          </div>
+
+          {/* Résumé à l'écran : cours, classe, période, année et effectifs */}
+          <div className="flex flex-wrap items-center gap-2 px-4 pt-4 sm:px-6 print:hidden">
+            <Badge className="bg-emerald-600 text-white gap-1.5">
+              <BookOpen className="w-3.5 h-3.5" />
+              {selectedCourseInfo?.name || 'Cours non sélectionné'}
+            </Badge>
+            <Badge variant="outline" className="gap-1.5">
+              <Users className="w-3.5 h-3.5" />
+              {selectedClassInfo?.name || 'Classe non sélectionnée'}
+            </Badge>
+            <Badge variant="outline">{PERIOD_LABELS[selectedPeriod] || selectedPeriod}</Badge>
+            <Badge variant="outline">Année {selectedYearLabel}</Badge>
+            <Badge variant="outline">{students.length} élève(s)</Badge>
+            <Badge variant="outline">{evaluations.length} évaluation(s)</Badge>
+            {selectedCourseInfo?.teacher?.fullName && (
+              <Badge variant="outline">Prof. {selectedCourseInfo.teacher.fullName}</Badge>
+            )}
           </div>
 
           {loading ? (
@@ -1116,6 +1179,37 @@ export default function CahierCotation() {
                       </TableRow>
                     );
                   })}
+
+                  {/* Ligne de synthèse : total obtenu / total maximal par colonne */}
+                  <TableRow className="border-t-2 border-foreground bg-muted/40 font-bold print:bg-transparent">
+                    <TableCell colSpan={3} className="text-center border-r border-foreground text-xs uppercase tracking-wide">
+                      Total de la classe · {students.length} élève(s)
+                    </TableCell>
+                    {evaluations.map((e) => {
+                      const totals = getColumnTotals(e);
+                      return (
+                        <TableCell key={e.id} className="text-center p-1 border-r border-foreground">
+                          {totals.count > 0 ? (
+                            <span className="flex flex-col leading-tight">
+                              <span className="font-mono font-extrabold text-sm">
+                                {totals.obtained}/{totals.maxTotal}
+                              </span>
+                              <span className="text-[9px] font-medium text-muted-foreground">
+                                {totals.count} note(s) · max {e.maxScore}
+                              </span>
+                            </span>
+                          ) : (
+                            <span className="text-[10px] font-medium text-muted-foreground">—</span>
+                          )}
+                        </TableCell>
+                      );
+                    })}
+                    <TableCell className="text-center">
+                      <span className="inline-flex items-center justify-center rounded-lg px-2 py-0.5 border border-emerald-300 bg-emerald-50 text-emerald-700 font-extrabold text-sm print:border-none print:bg-transparent">
+                        {getClassPeriodAverage().toFixed(1)}
+                      </span>
+                    </TableCell>
+                  </TableRow>
                 </TableBody>
               </Table>
             </div>

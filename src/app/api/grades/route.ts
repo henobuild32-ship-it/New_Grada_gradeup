@@ -268,6 +268,7 @@ export async function POST(request: NextRequest) {
         title: typeof evaluationTitle === 'string' ? evaluationTitle : undefined,
         maxScore: parsedMax,
         date: evaluationDate ? new Date(evaluationDate) : undefined,
+        schoolYearId: activeYear?.id,
       });
       await upsertCahierMark({ evaluationId: evaluation.id, studentId, score: parsedScore });
       await recomputeStudentPeriodGrade({

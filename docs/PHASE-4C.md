@@ -7,7 +7,7 @@
 | Module | Résultat actuel | Reste à fermer |
 | --- | --- | --- |
 | `admin-coefficients`, `admin-cotation-rules` | Coefficients actifs raccordés au calcul; décision applique seuils de classe et règle éliminatoire. Maxima 10/20/50/100 respectés via `maxScore`. | Cas de tests RDC, maxima et règles dédiées; unifier avec l'ancien moteur du cahier. |
-| `admin-grade-validation`, `admin-note-modifications`, `cahier-cotation` | Routes de validation/correction et contrôles de période présents. | Tester motif rejet, notification prof et toutes écritures verrouillées. |
+| `admin-grade-validation`, `cahier-cotation` | Routes de validation et contrôles de période présents (les « Demandes de notes » ont été supprimées). | Tester notification prof et toutes écritures verrouillées. |
 | `admin-bulletins` | Écran menu + génération sur notes réelles, filtres, validation titulaire/admin, publication et PDF. | Tester titulaire/établissement, notes manquantes et transitions concurrentes. |
 | Élève/parent | Lecture du modèle canonique, uniquement publié; PDF officiel téléchargeable et caché hors ligne après téléchargement. | Test d'ownership et d'ouverture PDF offline authentifiés. |
 | `admin-passages`, `admin-end-of-year` | Écrans/API de passage et clôture annuels existants. | Vérifier décisions, double confirmation, sauvegarde, annulation et idempotence. |

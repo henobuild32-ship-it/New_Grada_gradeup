@@ -4,10 +4,20 @@ import { useEffect, useState, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { RefreshCw, CheckCircle2 } from 'lucide-react';
+import { toast } from 'sonner';
 import { APP_VERSION, APP_VERSION_LABEL } from '@/lib/app-version';
 
 const VERSION_KEY = 'gradeup-app-version';
 
+/**
+ * Complément de `ServiceWorkerRegistration` :
+ *  - signale à l'utilisateur qu'une nouvelle version a été installée ;
+ *  - propose une mise à jour manuelle si un worker reste en attente
+ *    (cas limite : le rechargement automatique a été différé).
+ *
+ * En fonctionnement normal, la mise à jour est appliquée automatiquement par
+ * `controllerchange` (skipWaiting + rechargement guardé).
+ */
 export default function PWAUpdateManager() {
   const [registration, setRegistration] = useState<ServiceWorkerRegistration | null>(null);
   const [available, setAvailable] = useState(false);
@@ -26,44 +36,54 @@ export default function PWAUpdateManager() {
           data: { url: '/' },
         }))
         .catch(() => {
-          // The in-app update dialog remains available when the OS rejects a notification.
+          // Le dialog in-app reste disponible si l'OS refuse la notification.
         });
     }
   }, []);
 
-  // Check if a new version is available by comparing SW version
+  // Confirme (discrètement) que la PWA tourne sur la dernière version buildée.
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(VERSION_KEY);
+      if (stored === APP_VERSION) return;
+      localStorage.setItem(VERSION_KEY, APP_VERSION);
+      if (stored) {
+        toast.success(`GradeUp ${APP_VERSION_LABEL} est à jour`, {
+          description: 'La dernière version vient d’être installée.',
+          duration: 4000,
+        });
+      }
+    } catch {
+      // Stockage indisponible (mode privé) : la mise à jour reste automatique.
+    }
+  }, []);
+
   const checkForUpdate = useCallback(async () => {
     if (!('serviceWorker' in navigator)) return;
     try {
       const reg = await navigator.serviceWorker.ready;
       setRegistration(reg);
 
-      // Check if there's a waiting worker (new version)
-      if (reg.waiting) {
-        const storedVersion = localStorage.getItem(VERSION_KEY);
-        if (storedVersion !== APP_VERSION) {
+      // Un worker en attente = mise à jour téléchargée mais pas encore active.
+      const offerWaiting = () => {
+        if (reg.waiting) {
           setAvailable(true);
-          // Show native notification if permission granted
           showUpdateNotification();
         }
-      }
+      };
+
+      offerWaiting();
 
       reg.addEventListener('updatefound', () => {
         const worker = reg.installing;
         worker?.addEventListener('statechange', () => {
-          if (worker.state === 'installed' && navigator.serviceWorker.controller) {
-            const storedVersion = localStorage.getItem(VERSION_KEY);
-            if (storedVersion !== APP_VERSION) {
-              setAvailable(true);
-              showUpdateNotification();
-            }
-          }
+          if (worker.state === 'installed') offerWaiting();
         });
       });
 
       void reg.update();
     } catch {
-      // SW not supported
+      // Service worker non supporté : rien à proposer.
     }
   }, [showUpdateNotification]);
 
@@ -78,7 +98,7 @@ export default function PWAUpdateManager() {
 
   const applyUpdate = async () => {
     setUpdating(true);
-    // Simulate 5-second progress bar
+    // Barre de progression (5 s) le temps que le nouveau worker prenne la main.
     const started = Date.now();
     await new Promise<void>((resolve) => {
       const timer = window.setInterval(() => {
@@ -90,9 +110,11 @@ export default function PWAUpdateManager() {
         }
       }, 80);
     });
-    // Store the new version
-    localStorage.setItem(VERSION_KEY, APP_VERSION);
-    // Tell the SW to skip waiting and reload
+    try {
+      localStorage.setItem(VERSION_KEY, APP_VERSION);
+    } catch {
+      // Stockage indisponible : sans impact sur la mise à jour.
+    }
     registration?.waiting?.postMessage({ type: 'SKIP_WAITING' });
     window.location.reload();
   };

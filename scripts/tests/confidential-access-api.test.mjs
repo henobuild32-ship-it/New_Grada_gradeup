@@ -141,7 +141,7 @@ test('Phase 3 privacy code API, caps, reset, rotation, throttling, and revocatio
       `/api/courses?schoolId=${main.school.id}`, `/api/attendance?schoolId=${main.school.id}`,
       `/api/payments?schoolId=${main.school.id}`, '/api/fees', '/api/tuition', '/api/card-pricing', '/api/stats',
       '/api/bulletins', '/api/schedules', '/api/calendar', '/api/coefficients', '/api/notification-preferences',
-      `/api/conferences?schoolId=${main.school.id}`, '/api/passages', '/api/note-modifications',
+      `/api/conferences?schoolId=${main.school.id}`, '/api/passages',
       '/api/end-of-year', '/api/subject-rules', '/api/grading-rules', '/api/notifications',
     ];
     for (const path of reads) {
@@ -156,7 +156,7 @@ test('Phase 3 privacy code API, caps, reset, rotation, throttling, and revocatio
       ['/api/classes', 'POST'], ['/api/courses', 'POST'], ['/api/attendance', 'POST'],
       ['/api/payments', 'POST'], ['/api/fees', 'POST'], ['/api/schedules', 'POST'],
       ['/api/calendar', 'POST'], ['/api/coefficients', 'POST'], ['/api/passages', 'POST'],
-      ['/api/note-modifications', 'POST'], ['/api/grades', 'POST'], ['/api/users/cards', 'POST'],
+      ['/api/grades', 'POST'], ['/api/users/cards', 'POST'],
       ['/api/card-pricing', 'PUT'], ['/api/ai', 'POST'], ['/api/ai/upload', 'POST'], ['/api/notification-preferences', 'PUT'],
       ['/api/notifications/phase4', 'PUT'], ['/api/notifications/broadcast-update', 'POST'],
       ['/api/admin/confidential-codes', 'POST'], ['/api/resources/phase4/favorite', 'POST'],

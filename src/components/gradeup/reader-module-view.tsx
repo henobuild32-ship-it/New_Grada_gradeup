@@ -8,7 +8,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Eye, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
-type Mode = 'overview' | 'users' | 'classes' | 'payments' | 'tuition' | 'courses' | 'attendance' | 'cards' | 'announcements' | 'bulletins' | 'schedules' | 'calendar' | 'coefficients' | 'cotation' | 'conferences' | 'note-modifications' | 'passages' | 'end-of-year';
+type Mode = 'overview' | 'users' | 'classes' | 'payments' | 'tuition' | 'courses' | 'attendance' | 'cards' | 'announcements' | 'bulletins' | 'schedules' | 'calendar' | 'coefficients' | 'cotation' | 'conferences' | 'passages' | 'end-of-year';
 type Row = Record<string, unknown>;
 
 const moduleCopy: Record<Mode, { title: string; description: string; endpoint: (schoolId: string) => string; key: string }> = {
@@ -27,7 +27,6 @@ const moduleCopy: Record<Mode, { title: string; description: string; endpoint: (
   coefficients: { title: 'Coefficients', description: 'Coefficients actifs par classe et matière.', endpoint: () => '/api/coefficients', key: 'coefficients' },
   cotation: { title: 'Cotation et délibération', description: 'Règles de cotation et seuils de délibération de l’école.', endpoint: () => '/api/subject-rules', key: 'rules' },
   conferences: { title: 'Réunions', description: 'Visioconférences planifiées pour votre établissement.', endpoint: (id) => `/api/conferences?schoolId=${encodeURIComponent(id)}`, key: 'conferences' },
-  'note-modifications': { title: 'Demandes de notes', description: 'Demandes de modification enregistrées dans l’école.', endpoint: () => '/api/note-modifications', key: 'noteModifications' },
   passages: { title: 'Passages et promotions', description: 'Historique des décisions de passage par élève.', endpoint: () => '/api/passages', key: 'passages' },
   'end-of-year': { title: 'Fin du cursus', description: 'Synthèse scolaire de fin d’année, en consultation.', endpoint: () => '/api/end-of-year', key: 'classes' },
 };
@@ -107,10 +106,6 @@ function columnsFor(mode: Mode): Array<{ label: string; value: (row: Row) => unk
     ];
     case 'conferences': return [
       { label: 'Réunion', value: (row) => row.title }, { label: 'Date', value: (row) => row.date }, { label: 'Heure', value: (row) => row.time }, { label: 'Public', value: (row) => row.targetRole },
-    ];
-    case 'note-modifications': return [
-      { label: 'Élève', value: (row) => (row.student as Row | undefined)?.fullName }, { label: 'Cours', value: (row) => (row.course as Row | undefined)?.name },
-      { label: 'Ancienne note', value: (row) => row.oldValue }, { label: 'Nouvelle note', value: (row) => row.newValue }, { label: 'Statut', value: (row) => row.requestStatus }, { label: 'Date', value: (row) => row.createdAt },
     ];
     case 'passages': return [
       { label: 'Élève', value: (row) => (row.student as Row | undefined)?.fullName }, { label: 'Classe précédente', value: (row) => (row.sourceClass as Row | undefined)?.name },

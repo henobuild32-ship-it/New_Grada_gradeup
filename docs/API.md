@@ -229,9 +229,10 @@ Légende rôles : **Public** (liste blanche middleware) · **Toute session** (JW
 | `GET /api/subject-rules` | Session active (école) | Règles par matière (max, coefficient) | `{ rules }` |
 | `POST /api/subject-rules` | ADMIN | Création/mise à jour en lot de règles matière | `{ success, count, rules }` |
 | `DELETE /api/subject-rules` | ADMIN | Suppression d'une règle matière | `{ success }` |
-| `GET /api/note-modifications` | Toute session (élève→ses demandes, prof→ses cours) | Demandes de modification de note | `{ noteModifications }` |
-| `POST /api/note-modifications` | STUDENT (ses notes), TEACHER (ses cours) | Demande de modification (409 si déjà en attente) | `{ noteModification }` 201 |
-| `PATCH /api/note-modifications/[id]` | ADMIN | Approuve/ rejette une demande | `{ noteModification }` |
+| `GET /api/announcements` | Toute session (boîte de réception selon l'audience) | Communiqués visibles par le connecté | `{ announcements, unreadCount }` |
+| `POST /api/announcements` | ADMIN | Publication d'un communiqué ciblé (tout le monde, rôles, classes, élèves, utilisateurs) | `{ announcement, recipientCount }` 201 |
+| `PATCH /api/announcements/[id]` · `DELETE` | ADMIN | Mise à jour / suppression d'un communiqué | `{ announcement }` |
+| `POST /api/announcements/[id]/read` | Toute session destinataire | Marque un communiqué comme lu | `{ success }` |
 | `GET /api/academic-closures` | Toute session (école) | Clôtures académiques d'une année | `{ closures }` |
 | `POST /api/academic-closures` | ADMIN, TEACHER | Ferme un périmètre (jour/semaine/…/année) | `{ closure }` |
 | `GET /api/cahier/evaluations` | Professeur du cours / titulaire / ADMIN | Évaluations du cahier de textes | `{ students, evaluations }` |

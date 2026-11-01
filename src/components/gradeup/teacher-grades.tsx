@@ -14,7 +14,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Plus, Edit, Trash2, GraduationCap, Filter, Calculator, Sparkles, Check, Zap, RefreshCw, AlertTriangle, PenLine, CheckCircle2, Clock, XCircle, Lock } from 'lucide-react';
+import { Plus, Edit, Trash2, GraduationCap, Filter, Calculator, Sparkles, Check, Zap, RefreshCw, AlertTriangle, PenLine, Lock } from 'lucide-react';
 import { toast } from 'sonner';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import type { CourseInfo, GradeInfo, UserInfo } from '@/lib/types';
@@ -35,18 +35,6 @@ const PRIMARY_TRIMESTERS: { value: string; label: string }[] = [
   { value: '2', label: 'Trimestre 2' },
   { value: '3', label: 'Trimestre 3' },
 ];
-
-interface NoteModification {
-  id: string;
-  noteId: string;
-  newValue: number;
-  newMax: number;
-  reason: string;
-  requestStatus: 'PENDING' | 'APPROVED' | 'REJECTED' | 'APPLIED';
-  createdAt: string;
-  student?: { fullName: string };
-  course?: { name: string };
-}
 
 function gradePeriodLabel(key: string): string {
   const found = SECONDARY_PERIODS.find((p) => p.value === key);
@@ -88,11 +76,9 @@ export default function TeacherGrades() {
   const [formReason, setFormReason] = useState('');
   const [gradeHistoryList, setGradeHistoryList] = useState<any[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
-  const [modificationRequests, setModificationRequests] = useState<NoteModification[]>([]);
   const [closures, setClosures] = useState<{ scope: string; key: string }[]>([]);
   const [closingKey, setClosingKey] = useState<string | null>(null);
   const [schoolYearId, setSchoolYearId] = useState('');
-  const [applyingRequestId, setApplyingRequestId] = useState<string | null>(null);
 
   // Sync state: tracks the last auto-sync event for the banner
   const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
@@ -161,18 +147,6 @@ export default function TeacherGrades() {
       setStudents([]);
     }
   }, [user, courses]);
-
-  const fetchModificationRequests = useCallback(async () => {
-    if (!user?.schoolId) return;
-    try {
-      const response = await fetch(`/api/note-modifications?schoolId=${user.schoolId}`);
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'Erreur de chargement');
-      setModificationRequests(Array.isArray(data.noteModifications) ? data.noteModifications : []);
-    } catch (error: unknown) {
-      toast.error(error instanceof Error ? error.message : 'Impossible de charger vos demandes de modification.');
-    }
-  }, [user?.schoolId]);
 
   // Cycle RDC : secondaire → périodes P1..EX2 ; Maternelle/Primaire → trimestres.
   const selectedCourse = courses.find((c) => c.id === filterCourseId) || null;
@@ -249,10 +223,6 @@ export default function TeacherGrades() {
   useEffect(() => {
     fetchGrades();
   }, [fetchGrades]);
-
-  useEffect(() => {
-    fetchModificationRequests();
-  }, [fetchModificationRequests]);
 
   useEffect(() => {
     if (formCourseId) fetchStudents(formCourseId);
@@ -381,11 +351,6 @@ export default function TeacherGrades() {
       return;
     }
 
-    if (editingGrade && !formReason.trim()) {
-      toast.error('Veuillez renseigner un motif pour la modification de la note');
-      return;
-    }
-
     const score = parseFloat(formScore);
     const maxScore = parseFloat(formMaxScore);
     if (isNaN(score) || isNaN(maxScore) || maxScore <= 0) {
@@ -416,26 +381,27 @@ export default function TeacherGrades() {
       };
 
       if (editingGrade) {
-        const requestResponse = await fetch('/api/note-modifications', {
-          method: 'POST',
+        // Modification directe : aucune validation préalable requise.
+        // Seules la note, le maximum et le commentaire sont modifiables ; la
+        // période de la note reste celle d'origine.
+        const putRes = await fetch(`/api/grades/${editingGrade.id}`, {
+          method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            noteId: editingGrade.id,
-            oldValue: editingGrade.score,
-            newValue: score,
-            oldMax: editingGrade.maxScore,
-            newMax: maxScore,
-            reason: formReason.trim(),
+            score,
+            maxScore,
+            comment: formComment.trim(),
+            ...(formReason.trim() ? { reason: formReason.trim() } : {}),
           }),
         });
-        const requestData = await requestResponse.json();
-        if (!requestResponse.ok) {
-          throw new Error(requestData.error || 'Erreur lors de la demande de modification');
+        const putData = await putRes.json().catch(() => ({}));
+        if (!putRes.ok) {
+          throw new Error(putData.error || 'Erreur lors de la modification de la note');
         }
-        toast.success('Demande envoyée à l’administrateur. La note reste inchangée jusqu’à son approbation.');
+        toast.success('Note modifiée avec succès');
         setDialogOpen(false);
         resetForm();
-        fetchModificationRequests();
+        fetchGrades();
         return;
       }
 
@@ -468,41 +434,10 @@ export default function TeacherGrades() {
 
       // Show sync banner
       showSyncBanner(studentName, dialogIsSecondary ? formTrimester : autoPrimaryTrimester, parseFloat(formScore) / parseFloat(formMaxScore) * 20);
-    } catch {
-      toast.error('Erreur lors de l\'enregistrement');
+    } catch (error: unknown) {
+      toast.error(error instanceof Error ? error.message : 'Erreur lors de l\'enregistrement');
     } finally {
       setSubmitting(false);
-    }
-  };
-
-  const applyApprovedModification = async (request: NoteModification) => {
-    const grade = grades.find((item) => item.id === request.noteId);
-    if (!grade) {
-      toast.error('Rechargez les notes avant d’appliquer cette correction.');
-      return;
-    }
-    setApplyingRequestId(request.id);
-    try {
-      const response = await fetch(`/api/grades/${grade.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          score: request.newValue,
-          maxScore: request.newMax,
-          comment: grade.comment,
-          reason: request.reason,
-          approvedModificationId: request.id,
-        }),
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'Impossible d’appliquer la correction.');
-      toast.success('Correction approuvée appliquée et bulletin synchronisé.');
-      fetchGrades();
-      fetchModificationRequests();
-    } catch (error: unknown) {
-      toast.error(error instanceof Error ? error.message : 'Impossible d’appliquer la correction.');
-    } finally {
-      setApplyingRequestId(null);
     }
   };
 
@@ -573,6 +508,9 @@ export default function TeacherGrades() {
           ? studentGrades.reduce((s: number, g: any) => s + (g.score / g.maxScore) * 20, 0) / studentGrades.length
           : 0;
         showSyncBanner(studentName, filterTrimester, Math.round(avg * 100) / 100);
+      } else {
+        const err = await res.json().catch(() => ({} as { error?: string }));
+        toast.error(err.error || 'Enregistrement refusé pour cette période.');
       }
     } catch {
       toast.error('Erreur lors de l\'enregistrement automatique');
@@ -695,40 +633,6 @@ export default function TeacherGrades() {
           </Button>
         </div>
       </div>
-
-      {modificationRequests.length > 0 && (
-        <Card className="border-amber-200 bg-amber-50/40">
-          <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <PenLine className="h-4 w-4 text-amber-700" />
-              Mes demandes de correction
-            </CardTitle>
-            <CardDescription>Une correction ne peut être appliquée qu’après approbation de l’administrateur.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {modificationRequests.slice(0, 5).map((request) => (
-              <div key={request.id} className="flex flex-col gap-2 rounded-lg border bg-background p-3 sm:flex-row sm:items-center sm:justify-between">
-                <div className="min-w-0">
-                  <p className="text-sm font-semibold truncate">{request.student?.fullName || 'Élève'} · {request.course?.name || 'Cours'}</p>
-                  <p className="text-xs text-muted-foreground">Correction demandée : {request.newValue}/{request.newMax} · {request.reason}</p>
-                </div>
-                {request.requestStatus === 'PENDING' ? (
-                  <Badge variant="outline" className="w-fit border-amber-300 bg-amber-50 text-amber-800"><Clock className="mr-1 h-3 w-3" /> En attente</Badge>
-                ) : request.requestStatus === 'REJECTED' ? (
-                  <Badge variant="outline" className="w-fit border-red-300 bg-red-50 text-red-700"><XCircle className="mr-1 h-3 w-3" /> Refusée</Badge>
-                ) : request.requestStatus === 'APPLIED' ? (
-                  <Badge variant="outline" className="w-fit border-emerald-300 bg-emerald-50 text-emerald-700"><CheckCircle2 className="mr-1 h-3 w-3" /> Appliquée</Badge>
-                ) : (
-                  <Button size="sm" onClick={() => applyApprovedModification(request)} disabled={applyingRequestId === request.id}>
-                    <CheckCircle2 className={`mr-1 h-4 w-4 ${applyingRequestId === request.id ? 'animate-pulse' : ''}`} />
-                    {applyingRequestId === request.id ? 'Application...' : 'Appliquer la correction'}
-                  </Button>
-                )}
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-      )}
 
       {/* No courses assigned */}
       {!loading && courses.length === 0 && (
@@ -878,8 +782,7 @@ export default function TeacherGrades() {
                             value={score}
                             onChange={(e) => setGridScores({ ...gridScores, [student.id]: e.target.value })}
                             onBlur={() => handleAutoSave(student.id, score, comment)}
-                            disabled={!!existingGrade}
-                            title={existingGrade ? 'Utilisez la liste des notes pour demander une correction.' : undefined}
+                            title="Note déjà enregistrée : modifiable directement."
                           />
                         </TableCell>
                         <TableCell>
@@ -894,7 +797,7 @@ export default function TeacherGrades() {
                         <TableCell className="text-center">
                           {existingGrade ? (
                             <Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => openEditDialog(existingGrade)}>
-                              <PenLine className="mr-1 h-3 w-3" /> Demander
+                              <PenLine className="mr-1 h-3 w-3" /> Modifier
                             </Button>
                           ) : hasGrade ? (
                             <Badge className="bg-emerald-50 text-emerald-700 border-emerald-200 gap-1"><Check className="w-3 h-3" /> Validé</Badge>
@@ -923,7 +826,7 @@ export default function TeacherGrades() {
                       </div>
                       {existingGrade ? (
                         <Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => openEditDialog(existingGrade)}>
-                          <PenLine className="mr-1 h-3 w-3" /> Demander
+                          <PenLine className="mr-1 h-3 w-3" /> Modifier
                         </Button>
                       ) : hasGrade ? (
                         <Badge className="bg-emerald-50 text-emerald-700 border-emerald-200 gap-1"><Check className="w-3 h-3" /> Validé</Badge>
@@ -943,8 +846,7 @@ export default function TeacherGrades() {
                         value={score}
                         onChange={(e) => setGridScores({ ...gridScores, [student.id]: e.target.value })}
                         onBlur={() => handleAutoSave(student.id, score, comment)}
-                        disabled={!!existingGrade}
-                        title={existingGrade ? 'Utilisez le bouton Demander pour une correction.' : undefined}
+                        title={existingGrade ? 'Note déjà enregistrée : modifiable directement.' : undefined}
                       />
                       <Input
                         placeholder="Appréciation"
@@ -1184,7 +1086,7 @@ export default function TeacherGrades() {
                 </div>
               </div>
             )}
-            {(!editingGrade || dialogIsSecondary) && (
+            {!editingGrade && (
               <div className="space-y-2">
               <Label>{dialogIsSecondary ? 'Période *' : 'Trimestre *'}</Label>
               <select
@@ -1198,6 +1100,11 @@ export default function TeacherGrades() {
               </select>
               </div>
             )}
+            {editingGrade && (
+              <p className="text-xs text-muted-foreground rounded-md bg-muted/50 px-3 py-2">
+                Période conservée : <strong>{gradePeriodLabel(formTrimester)}</strong>. La modification s’applique immédiatement.
+              </p>
+            )}
             {!editingGrade && !dialogIsSecondary && (
               <p className="text-xs text-muted-foreground rounded-md bg-muted/50 px-3 py-2">
                 Trimestre déterminé automatiquement par la date : <strong>{gradePeriodLabel(autoPrimaryTrimester)}</strong>.
@@ -1210,13 +1117,13 @@ export default function TeacherGrades() {
 
             {editingGrade && (
               <div className="space-y-2 border-t pt-3">
-                <Label className="text-red-500">Motif de la modification *</Label>
+                <Label className="text-muted-foreground">Motif de la modification (optionnel)</Label>
                 <Textarea
-                  placeholder="Raison du changement de note (obligatoire)..."
+                  placeholder="Raison du changement de note..."
                   value={formReason}
                   onChange={(e) => setFormReason(e.target.value)}
                   rows={2}
-                  className="focus:ring-2 focus:ring-red-500/20 focus:border-red-500 border-red-200 transition-all text-xs"
+                  className="focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-xs"
                 />
               </div>
             )}

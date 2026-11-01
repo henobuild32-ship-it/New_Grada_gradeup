@@ -70,7 +70,7 @@ export async function PUT(
     }
     const { id } = await params;
     const body = await request.json();
-    const { score, maxScore, trimester, comment, evaluationDate, reason, approvedModificationId, quickSave } = body;
+    const { score, maxScore, trimester, comment, evaluationDate, reason, quickSave } = body;
     const modifiedBy = (auth as { fullName?: string; userId: string }).fullName || auth.userId;
 
     const existing = await db.grade.findUnique({ where: { id } });
@@ -115,22 +115,7 @@ export async function PUT(
         { status: 400 }
       );
     }
-    if (auth.role === 'TEACHER' && !quickSave) {
-      if (!approvedModificationId) {
-        return NextResponse.json({ error: 'Soumettez une demande de modification et attendez son approbation avant de changer une note.' }, { status: 403 });
-      }
-      const request = await db.noteModification.findUnique({ where: { id: approvedModificationId } });
-      if (
-        !request
-        || request.noteId !== existing.id
-        || request.modifierId !== auth.userId
-        || request.requestStatus !== 'APPROVED'
-        || request.newValue !== newScore
-        || request.newMax !== newMax
-      ) {
-        return NextResponse.json({ error: 'Cette correction n’est pas approuvée ou ne correspond pas à la demande validée.' }, { status: 403 });
-      }
-    }
+    // Modification directe : aucune validation préalable n'est requise.
 
     // ── Note de période (P1..EX2) : modifier la note dans le cahier (source unique) ──
     if (isPeriodKey(existing.trimester)) {
@@ -150,6 +135,8 @@ export async function PUT(
           courseId,
           teacherId,
           period,
+          studentId,
+          schoolYearId: existing.schoolYearId || undefined,
         });
         await upsertCahierMark({ evaluationId: evaluation.id, studentId, score: newScore });
         await recomputeStudentPeriodGrade({
@@ -189,12 +176,6 @@ export async function PUT(
           teacher: { select: { id: true, fullName: true, role: true } },
         },
       });
-      if (auth.role === 'TEACHER' && approvedModificationId) {
-        await db.noteModification.update({
-          where: { id: approvedModificationId },
-          data: { requestStatus: 'APPLIED' },
-        });
-      }
       return NextResponse.json({ grade, fromCahier: true });
     }
 
@@ -248,12 +229,6 @@ export async function PUT(
 
     // ── Auto-sync: recompute and update the student's report card ───────────
     syncStudentReport(existing.schoolId, existing.studentId, updatedTrimester).catch(() => {});
-    if (auth.role === 'TEACHER' && approvedModificationId) {
-      await db.noteModification.update({
-        where: { id: approvedModificationId },
-        data: { requestStatus: 'APPLIED' },
-      });
-    }
 
     return NextResponse.json({ grade });
   } catch (error: unknown) {

@@ -36,6 +36,7 @@ const AdminBulletins = dynamic(() => import('@/components/gradeup/admin-bulletin
 const AdminConfig = dynamic(() => import('@/components/gradeup/admin-config'), { ssr: false, loading: () => <PageSkeleton /> });
 const AdminReports = dynamic(() => import('@/components/gradeup/admin-reports'), { ssr: false, loading: () => <PageSkeleton /> });
 const AdminNotifications = dynamic(() => import('@/components/gradeup/admin-notifications'), { ssr: false, loading: () => <PageSkeleton /> });
+const Announcements = dynamic(() => import('@/components/gradeup/announcements'), { ssr: false, loading: () => <PageSkeleton /> });
 const AdminConferences = dynamic(() => import('@/components/gradeup/admin-conferences'), { ssr: false, loading: () => <PageSkeleton /> });
 const MeetingsHub = dynamic(() => import('@/components/gradeup/meetings/meetings-hub'), { ssr: false, loading: () => <PageSkeleton /> });
 const MeetingRoom = dynamic(() => import('@/components/gradeup/meetings/meeting-room'), { ssr: false, loading: () => <PageSkeleton /> });
@@ -56,7 +57,6 @@ const AutoReportSyncPanel = dynamic(() => import('@/components/gradeup/auto-repo
 const AdminSchoolCalendar = dynamic(() => import('@/components/gradeup/admin-school-calendar'), { ssr: false, loading: () => <PageSkeleton /> });
 const AdminCoefficients = dynamic(() => import('@/components/gradeup/admin-coefficients'), { ssr: false, loading: () => <PageSkeleton /> });
 const AdminPassages = dynamic(() => import('@/components/gradeup/admin-passages'), { ssr: false, loading: () => <PageSkeleton /> });
-const AdminNoteModifications = dynamic(() => import('@/components/gradeup/admin-note-modifications'), { ssr: false, loading: () => <PageSkeleton /> });
 const AdminGradeValidation = dynamic(() => import('@/components/gradeup/admin-grade-validation'), { ssr: false, loading: () => <PageSkeleton /> });
 const CahierCotation = dynamic(() => import('@/components/gradeup/cahier-cotation'), { ssr: false, loading: () => <PageSkeleton /> });
 const AdminCotationRules = dynamic(() => import('@/components/gradeup/admin-cotation-rules'), { ssr: false, loading: () => <PageSkeleton /> });
@@ -111,7 +111,7 @@ function PageRouter({ page }: { page: PageView }) {
       shared.delete('messages');
     }
     if (user.role === 'LECTEUR') shared.clear();
-    const roleShared = (user.role === 'ADMIN' || user.role === 'TEACHER') && new Set<PageView>(['cahier-cotation', 'auto-report-sync', 'admin-note-modifications']).has(page);
+    const roleShared = (user.role === 'ADMIN' || user.role === 'TEACHER') && new Set<PageView>(['cahier-cotation', 'auto-report-sync']).has(page);
     if (user.role === 'ADMIN' && page === 'admin-grade-validation') return <AdminGradeValidation />;
     const rolePages = new Set(NAV_ITEMS_BY_ROLE[user.role].map((item) => item.page));
     const allowed = page === 'auth' || page === 'register' || shared.has(page) || roleShared || (user.role === 'ADMIN' && page === 'admin-grade-validation') || rolePages.has(page);
@@ -133,6 +133,7 @@ function PageRouter({ page }: { page: PageView }) {
   if (page === 'admin-bulletins') return user?.role === 'LECTEUR' ? <ReaderModuleView mode="bulletins" /> : <AdminBulletins />;
   if (page === 'admin-config') return <AdminConfig />;
   if (page === 'admin-reports') return user?.role === 'LECTEUR' ? <ReaderModuleView mode="overview" /> : <AdminReports />;
+  if (page === 'announcements') return <Announcements />;
   if (page === 'admin-notifications') return user?.role === 'LECTEUR' ? <ReaderModuleView mode="announcements" /> : <AdminNotifications />;
   if (page === 'admin-conferences') return user?.role === 'LECTEUR' ? <ReaderModuleView mode="conferences" /> : <AdminConferences />;
   if (page === 'meetings') return <MeetingsHub />;
@@ -145,7 +146,6 @@ function PageRouter({ page }: { page: PageView }) {
   if (page === 'admin-school-calendar') return user?.role === 'LECTEUR' ? <ReaderModuleView mode="calendar" /> : <AdminSchoolCalendar />;
   if (page === 'admin-coefficients') return user?.role === 'LECTEUR' ? <ReaderModuleView mode="coefficients" /> : <AdminCoefficients />;
   if (page === 'admin-passages') return user?.role === 'LECTEUR' ? <ReaderModuleView mode="passages" /> : <AdminPassages />;
-  if (page === 'admin-note-modifications') return user?.role === 'LECTEUR' ? <ReaderModuleView mode="note-modifications" /> : <AdminNoteModifications />;
   if (page === 'admin-grade-validation') return user?.role === 'LECTEUR' ? <ReaderModuleView mode="bulletins" /> : <AdminGradeValidation />;
   if (page === 'auto-report-sync') return <AutoReportSyncPanel />;
   if (page === 'cahier-cotation') return <CahierCotation />;

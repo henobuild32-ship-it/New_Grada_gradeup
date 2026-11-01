@@ -192,6 +192,32 @@ export interface NotificationInfo {
   createdAt: string;
 }
 
+export interface AnnouncementInfo {
+  id: string;
+  schoolId: string;
+  authorId: string;
+  author?: { id: string; fullName: string; role: string; photoUrl?: string };
+  title: string;
+  content: string;
+  category: string;
+  priority: string;
+  audienceType: string;
+  targetRoles: string[];
+  targetClassIds: string[];
+  targetUserIds: string[];
+  contextClassId?: string;
+  recipientCount: number;
+  audienceLabel?: string;
+  targetClassNames?: string[];
+  targetUserNames?: string[];
+  read: boolean;
+  readCount?: number;
+  publishedAt: string;
+  expiresAt?: string | null;
+  createdAt: string;
+  updatedAt?: string;
+}
+
 export interface VideoConferenceInfo {
   id: string;
   schoolId: string;
@@ -305,6 +331,7 @@ export type PageView =
   | 'admin-config'
   | 'admin-reports'
   | 'admin-notifications'
+  | 'announcements'
   | 'admin-conferences'
   | 'meetings'
   | 'meeting-room'
@@ -355,7 +382,6 @@ export type PageView =
   | 'admin-school-calendar'
   | 'admin-coefficients'
   | 'admin-passages'
-  | 'admin-note-modifications'
   | 'admin-grade-validation'
   | 'auto-report-sync'
   | 'cahier-cotation'

@@ -64,6 +64,7 @@ import {
   Lightbulb,
   LayoutGrid,
   ChevronUp,
+  Megaphone,
 } from 'lucide-react';
 
 interface AppLayoutProps {
@@ -251,6 +252,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
   const [showLogoutDialog, setShowLogoutDialog] = useState(false);
   const [unreadMessages, setUnreadMessages] = useState(0);
   const [unreadNotificationsCount, setUnreadNotificationsCount] = useState(0);
+  const [unreadAnnouncements, setUnreadAnnouncements] = useState(0);
   const [isMobile, setIsMobile] = useState(false);
   const [isTablet, setIsTablet] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
@@ -406,6 +408,31 @@ export default function AppLayout({ children }: AppLayoutProps) {
 
   const isAiPage = ['admin-ai', 'teacher-ai', 'student-ai', 'parent-ai'].includes(currentPage);
 
+  // Nombre de communiqués non lus (bouton 📢 de l'en-tête, présent pour tous les rôles).
+  useEffect(() => {
+    if (!user) return;
+    const fetchUnreadAnnouncements = async () => {
+      try {
+        const res = await fetch('/api/announcements?scope=inbox&limit=1', { cache: 'no-store' });
+        if (!res.ok) return;
+        const data = await res.json();
+        setUnreadAnnouncements(Number(data.unreadCount) || 0);
+      } catch {
+        // Le compteur reste silencieusement à sa dernière valeur connue.
+      }
+    };
+    void fetchUnreadAnnouncements();
+    const interval = window.setInterval(() => void fetchUnreadAnnouncements(), 5 * 60 * 1000);
+    const refresh = () => void fetchUnreadAnnouncements();
+    window.addEventListener('gradeup-notification', refresh);
+    window.addEventListener('gradeup-notification-read', refresh);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener('gradeup-notification', refresh);
+      window.removeEventListener('gradeup-notification-read', refresh);
+    };
+  }, [user]);
+
   useEffect(() => {
     const element = mainScrollRef.current;
     if (!element || isAiPage) return;
@@ -491,6 +518,20 @@ export default function AppLayout({ children }: AppLayoutProps) {
 
               {/* Right Side: notifications + profile */}
               <div className="flex items-center gap-0.5 z-10">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  aria-label={unreadAnnouncements > 0 ? `Communiqués (${unreadAnnouncements} non lus)` : 'Communiqués'}
+                  className="relative h-11 w-11 hover:bg-blue-50 hover:text-blue-600 transition-all duration-200"
+                  onClick={() => handleNavigate('announcements')}
+                >
+                  <Megaphone className="w-5 h-5" />
+                  {unreadAnnouncements > 0 && (
+                    <span className="absolute top-1.5 right-1.5 min-w-[16px] h-4 flex items-center justify-center rounded-full bg-amber-500 text-[10px] font-bold text-white px-1">
+                      {unreadAnnouncements > 99 ? '99+' : unreadAnnouncements}
+                    </span>
+                  )}
+                </Button>
                 {user.role !== 'LECTEUR' && <Button
                   variant="ghost"
                   size="icon"
@@ -611,6 +652,27 @@ export default function AppLayout({ children }: AppLayoutProps) {
                   </TooltipTrigger>
                   <TooltipContent>Notifications</TooltipContent>
                 </Tooltip>}
+
+                {/* Communiqués shortcut (tous les rôles, lecture seule sauf admin) */}
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="relative min-h-11 min-w-11 shrink-0 hover:bg-amber-50 hover:text-amber-600 transition-all duration-200 active:scale-[0.97]"
+                      aria-label={unreadAnnouncements > 0 ? `Communiqués (${unreadAnnouncements} non lus)` : 'Communiqués'}
+                      onClick={() => handleNavigate('announcements')}
+                    >
+                      <Megaphone className="w-4 h-4" />
+                      {unreadAnnouncements > 0 && (
+                        <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 flex items-center justify-center rounded-full bg-amber-500 text-[10px] font-bold text-white px-1 animate-scale-in">
+                          {unreadAnnouncements > 99 ? '99+' : unreadAnnouncements}
+                        </span>
+                      )}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Communiqués{unreadAnnouncements > 0 ? ` (${unreadAnnouncements})` : ''}</TooltipContent>
+                </Tooltip>
 
                 {/* Messages shortcut with unread badge */}
                 {user.role !== 'LECTEUR' && <Tooltip>

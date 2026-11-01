@@ -21,6 +21,7 @@
     "test:confidential:api": "node --experimental-strip-types --test scripts/tests/confidential-access-api.test.mjs",
     "test:otp": "node --experimental-strip-types --test scripts/tests/otp-code.test.mjs",
     "test:public-routes": "node --experimental-strip-types --test scripts/tests/public-routes.test.mjs",
+    "test:announcements": "node --experimental-strip-types --test scripts/tests/announcements.test.mjs",
     "verify:smtp": "node scripts/verify-smtp.mjs",
     "verify:grade-flow": "node scripts/verify-grade-promotion-flow.js"
   },

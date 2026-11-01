@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { useAppStore } from '@/lib/store';
 import type { UserInfo, GradeInfo } from '@/lib/types';
 import { useEntityListState } from '@/lib/offline/hooks';
@@ -21,14 +21,8 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
 import {
-  TrendingUp, BookOpen, Award, BarChart3, PenLine, AlertTriangle, RefreshCw,
+  TrendingUp, BookOpen, Award, BarChart3, AlertTriangle, RefreshCw,
 } from 'lucide-react';
-import { toast } from 'sonner';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
-import { Textarea } from '@/components/ui/textarea';
-import { Label } from '@/components/ui/label';
-import { Input } from '@/components/ui/input';
-import { Loader2 } from 'lucide-react';
 
 function extractGrades(data: unknown): Record<string, unknown>[] {
   if (typeof data !== 'object' || data === null || !('grades' in data)) return [];
@@ -48,11 +42,6 @@ function gradeMatchesTrimester(grade: GradeRecord, trimester: string): boolean {
 export default function ParentGrades() {
   const { user } = useAppStore();
   const [trimester, setTrimester] = useState('1');
-  const [modTarget, setModTarget] = useState<GradeInfo | null>(null);
-  const [modReason, setModReason] = useState('');
-  const [modNewScore, setModNewScore] = useState('');
-  const [modSending, setModSending] = useState(false);
-  const [modStatusMap, setModStatusMap] = useState<Record<string, string>>({});
   const schoolId = user?.schoolId || '';
   const childrenState = useParentChildren(user?.role === 'PARENT' ? user.id : undefined, schoolId);
   const children = childrenState.data as unknown as UserInfo[];
@@ -74,29 +63,6 @@ export default function ParentGrades() {
   const grades = gradeState.data as unknown as GradeInfo[];
   const loading = gradeState.loading;
   const loadingChildren = childrenState.loading;
-
-  useEffect(() => {
-    if (!selectedChildId || !schoolId || typeof navigator !== 'undefined' && !navigator.onLine) return;
-    let active = true;
-    void fetch(`/api/note-modifications?schoolId=${encodeURIComponent(schoolId)}&studentId=${encodeURIComponent(selectedChildId)}`)
-      .then(async (res) => {
-        if (!res.ok) throw new Error('Statut des demandes indisponible');
-        return res.json();
-      })
-      .then((data) => {
-        if (!active) return;
-        const map: Record<string, string> = {};
-        const modifications = Array.isArray(data.noteModifications) ? data.noteModifications : [];
-        for (const modification of modifications) {
-          if (!map[modification.noteId] || modification.requestStatus === 'PENDING') {
-            map[modification.noteId] = modification.requestStatus;
-          }
-        }
-        setModStatusMap(map);
-      })
-      .catch(() => undefined);
-    return () => { active = false; };
-  }, [schoolId, selectedChildId]);
 
   const selectedChild = children.find((child) => child.id === selectedChildId);
 
@@ -122,43 +88,6 @@ export default function ParentGrades() {
     ? courseAverages.reduce((sum, e) => sum + e.average * e.coeff, 0) /
       courseAverages.reduce((sum, e) => sum + e.coeff, 0)
     : 0;
-
-  const sendModification = async () => {
-    if (!modTarget) return;
-    const newValue = parseFloat(modNewScore);
-    if (isNaN(newValue) || newValue < 0 || newValue > modTarget.maxScore) {
-      toast.error(`La nouvelle note doit être entre 0 et ${modTarget.maxScore}`);
-      return;
-    }
-    if (!modReason.trim()) {
-      toast.error('Veuillez expliquer le motif de la demande');
-      return;
-    }
-    setModSending(true);
-    try {
-      const res = await fetch('/api/note-modifications', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          noteId: modTarget.id,
-          oldValue: modTarget.score,
-          newValue,
-          oldMax: modTarget.maxScore,
-          newMax: modTarget.maxScore,
-          reason: modReason.trim(),
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Erreur');
-      toast.success('Demande envoyée. Le directeur sera notifié pour validation.');
-      setModStatusMap((prev) => ({ ...prev, [modTarget.id]: 'PENDING' }));
-      setModTarget(null); setModReason(''); setModNewScore('');
-    } catch (error: unknown) {
-      toast.error(error instanceof Error ? error.message : 'Erreur lors de l\'envoi');
-    } finally {
-      setModSending(false);
-    }
-  };
 
   const getGradeColor = (score: number, max: number) => {
     const pct = (score / max) * 100;
@@ -401,13 +330,11 @@ export default function ParentGrades() {
                             <TableHead className="text-center">Moyenne (/20)</TableHead>
                             <TableHead className="hidden sm:table-cell">Commentaire</TableHead>
                             <TableHead className="hidden md:table-cell">Date</TableHead>
-                            <TableHead className="text-center">Correction</TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
                           {[...grades].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).map(grade => {
                             const normalizedScore = grade.maxScore > 0 ? (grade.score / grade.maxScore) * 20 : 0;
-                            const modStatus = modStatusMap[grade.id];
                             return (
                               <TableRow key={grade.id} className="even:bg-muted/20 hover:bg-blue-50/50 transition-colors">
                                 <TableCell className="font-medium">{grade.course?.name || 'Cours'}</TableCell>
@@ -425,21 +352,6 @@ export default function ParentGrades() {
                                 </TableCell>
                                 <TableCell className="hidden md:table-cell text-muted-foreground text-xs">
                                   {new Date(grade.createdAt).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' })}
-                                </TableCell>
-                                <TableCell className="text-center">
-                                  {modStatus ? (
-                                    <Badge className={`text-[9px] ${modStatus === 'PENDING' ? 'bg-amber-100 text-amber-700 border-amber-200' : modStatus === 'APPROVED' ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : 'bg-red-100 text-red-700 border-red-200'}`}>
-                                      {modStatus === 'PENDING' ? 'En attente' : modStatus === 'APPROVED' ? 'Corrigé' : 'Refusé'}
-                                    </Badge>
-                                  ) : (
-                                    <button
-                                      type="button"
-                                      onClick={() => { setModTarget(grade); setModReason(''); setModNewScore(''); }}
-                                      className="text-[10px] text-blue-600 hover:text-blue-800 hover:underline inline-flex items-center gap-0.5"
-                                    >
-                                      <PenLine className="h-3 w-3" /> Signaler
-                                    </button>
-                                  )}
                                 </TableCell>
                               </TableRow>
                             );
@@ -460,7 +372,6 @@ export default function ParentGrades() {
                     <div className="md:hidden space-y-3 p-1">
                       {[...grades].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).map(grade => {
                         const normalizedScore = grade.maxScore > 0 ? (grade.score / grade.maxScore) * 20 : 0;
-                        const modStatus = modStatusMap[grade.id];
                         return (
                           <div key={grade.id} className="rounded-xl border bg-card p-3 shadow-sm">
                             <div className="flex items-start justify-between gap-2">
@@ -477,21 +388,6 @@ export default function ParentGrades() {
                             {grade.comment && (
                               <p className="mt-2 text-xs text-muted-foreground line-clamp-2">{grade.comment}</p>
                             )}
-                            <div className="mt-2">
-                              {modStatus ? (
-                                <Badge className={`text-[9px] ${modStatus === 'PENDING' ? 'bg-amber-100 text-amber-700 border-amber-200' : modStatus === 'APPROVED' ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : 'bg-red-100 text-red-700 border-red-200'}`}>
-                                  {modStatus === 'PENDING' ? 'En attente' : modStatus === 'APPROVED' ? 'Corrigé' : 'Refusé'}
-                                </Badge>
-                              ) : (
-                                <button
-                                  type="button"
-                                  onClick={() => { setModTarget(grade); setModReason(''); setModNewScore(''); }}
-                                  className="min-h-[44px] text-xs text-blue-600 hover:text-blue-800 hover:underline inline-flex items-center gap-1"
-                                >
-                                  <PenLine className="h-3.5 w-3.5" /> Signaler une erreur
-                                </button>
-                              )}
-                            </div>
                           </div>
                         );
                       })}
@@ -507,35 +403,6 @@ export default function ParentGrades() {
           </Tabs>
         </>
       )}
-
-      {/* Demande de correction de note */}
-      <Dialog open={!!modTarget} onOpenChange={(o) => { if (!o) { setModTarget(null); setModReason(''); setModNewScore(''); } }}>
-        <DialogContent className="sm:max-w-md rounded-2xl">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2"><PenLine className="w-5 h-5 text-blue-600" /> Demander une correction de note</DialogTitle>
-            <DialogDescription>
-              {modTarget ? `${modTarget.course?.name || 'Cette matière'} de ${selectedChild?.fullName || ''} — note actuelle : ${modTarget.score}/${modTarget.maxScore}` : ''}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-2">
-            <div className="space-y-1.5">
-              <Label>Nouvelle note (sur {modTarget?.maxScore ?? 20})</Label>
-              <Input type="number" min={0} max={modTarget?.maxScore ?? 20} step={0.01} value={modNewScore} onChange={(e) => setModNewScore(e.target.value)} placeholder="Ex : 15" />
-            </div>
-            <div className="space-y-1.5">
-              <Label>Motif de la demande *</Label>
-              <Textarea value={modReason} onChange={(e) => setModReason(e.target.value)} placeholder="Expliquez pourquoi la note semble erronée…" className="min-h-[90px]" />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setModTarget(null)}>Annuler</Button>
-            <Button onClick={sendModification} disabled={modSending} className="bg-blue-600 hover:bg-blue-700 text-white">
-              {modSending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
-              Envoyer la demande
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
